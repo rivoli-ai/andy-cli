@@ -38,6 +38,17 @@ namespace Andy.Cli.Widgets
         /// <summary>Append a response separator with token information.</summary>
         public void AddResponseSeparator(int inputTokens = 0, int outputTokens = 0, string pattern = "━━ ◆ ━━") => AddItem(new ResponseSeparatorItem(inputTokens, outputTokens, pattern));
 
+        /// <summary>Clear all items from the feed.</summary>
+        public void Clear()
+        {
+            _items.Clear();
+            _scrollOffset = 0;
+            _followTail = true;
+            _prevTotalLines = 0;
+            _animRemaining = 0;
+            _totalLinesCache = 0;
+        }
+
         /// <summary>Scroll the feed by delta lines (positive = up). Returns current offset.</summary>
         public int ScrollLines(int delta, int pageSize)
         {
@@ -256,7 +267,6 @@ namespace Andy.Cli.Widgets
             b.PushClip(new DL.ClipPush(x-1, y, width+2, maxLines));
             b.DrawRect(new DL.Rect(x-1, y, width+2, maxLines, bg));
             
-            int visualLine = 0;
             int currentVisualLine = 0;
             
             // Find which logical line corresponds to startLine
