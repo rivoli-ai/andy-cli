@@ -122,7 +122,9 @@ public class CommandPalette
         // Calculate palette dimensions
         int width = (int)Math.Min(80, viewport.Width - 10);
         int maxHeight = (int)Math.Min(20, viewport.Height - 6);
-        int height = (int)Math.Min(maxHeight, _filteredCommands.Count + 4); // +4 for borders and query
+        // Ensure minimum height for at least one command + header
+        int minHeight = 5; // title + search + separator + 1 command + hints
+        int height = (int)Math.Max(minHeight, Math.Min(maxHeight, _filteredCommands.Count + 4)); // +4 for UI elements
         
         int x = (int)((viewport.Width - width) / 2);
         int y = (int)Math.Max(2, (viewport.Height - height) / 3); // Position in upper third
@@ -140,8 +142,8 @@ public class CommandPalette
         int titleX = x + (width - title.Length) / 2;
         wb.DrawText(new DL.TextRun(titleX, y, title, new DL.Rgb24(200, 200, 255), new DL.Rgb24(20, 20, 30), DL.CellAttrFlags.Bold));
         
-        // Draw search box
-        int searchY = y + 2;
+        // Draw search box (directly after title, no gap)
+        int searchY = y + 1;
         wb.DrawText(new DL.TextRun(x + 2, searchY, "🔍 ", new DL.Rgb24(150, 150, 200), null, DL.CellAttrFlags.None));
         wb.DrawText(new DL.TextRun(x + 5, searchY, _query, new DL.Rgb24(255, 255, 255), null, DL.CellAttrFlags.None));
         
@@ -157,7 +159,9 @@ public class CommandPalette
         
         // Draw filtered commands
         int listY = searchY + 2;
-        int visibleItems = Math.Min(_filteredCommands.Count, height - 5);
+        // Calculate visible items: height - (title line + search line + separator + hints line)
+        int availableLines = Math.Max(1, height - 4);
+        int visibleItems = Math.Min(_filteredCommands.Count, availableLines);
         
         if (_filteredCommands.Count == 0)
         {

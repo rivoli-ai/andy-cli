@@ -17,10 +17,18 @@ namespace Andy.Cli;
 
 class Program
 {
+    // Minimum terminal dimensions to prevent crashes
+    private const int MIN_WIDTH = 40;
+    private const int MIN_HEIGHT = 10;
+    
     static async Task Main()
     {
         var caps = Andy.Tui.Backend.Terminal.CapabilityDetector.DetectFromEnvironment();
-        var viewport = (Width: Console.WindowWidth, Height: Console.WindowHeight);
+        
+        // Ensure minimum viewport size to prevent crashes
+        const int MIN_WIDTH = 40;
+        const int MIN_HEIGHT = 10;
+        var viewport = (Width: Math.Max(MIN_WIDTH, Console.WindowWidth), Height: Math.Max(MIN_HEIGHT, Console.WindowHeight));
         var scheduler = new Andy.Tui.Core.FrameScheduler(targetFps: 30);
         var hud = new Andy.Tui.Observability.HudOverlay { Enabled = false };
         scheduler.SetMetricsSink(hud);
@@ -79,6 +87,17 @@ class Program
             // Setup command palette commands
             commandPalette.SetCommands(new[]
             {
+                new CommandPalette.CommandItem 
+                { 
+                    Name = "Exit", 
+                    Description = "Quit the application",
+                    Category = "General",
+                    Aliases = new[] { "quit", "exit", "bye", "q" },
+                    Action = args => 
+                    {
+                        running = false;
+                    }
+                },
                 new CommandPalette.CommandItem 
                 { 
                     Name = "List Models", 
@@ -196,8 +215,21 @@ class Program
             });
             
             bool cursorStyledShown = false;
+            var lastWidth = viewport.Width;
+            var lastHeight = viewport.Height;
+            
             while (running)
             {
+                // Check for terminal resize
+                if (Console.WindowWidth != lastWidth || Console.WindowHeight != lastHeight)
+                {
+                    // Apply minimum size constraints
+                    viewport = (Width: Math.Max(MIN_WIDTH, Console.WindowWidth), Height: Math.Max(MIN_HEIGHT, Console.WindowHeight));
+                    lastWidth = viewport.Width;
+                    lastHeight = viewport.Height;
+                    // Force a full redraw on resize
+                    Console.Clear();
+                }
                 // Input (prefer KeyAvailable; fallback to Console.In.Peek in non-interactive contexts)
                 async Task HandleKey(ConsoleKeyInfo k)
                 {
@@ -463,14 +495,24 @@ class Program
                 
                 status.Tick(); status.Render(viewport, baseDl, wb);
                 // Main output area and prompt at bottom
-                int promptH = Math.Clamp(prompt.GetLineCount(), 1, Math.Max(1, viewport.Height/2));
-                int outputH = Math.Max(1, viewport.Height - 5 - 2);
-                // allocate space for variable-height prompt
-                outputH = Math.Max(1, viewport.Height - 5 - (promptH + 1));
-                // main area: stacked feed with bottom-follow and animation
-                feed.Tick();
-                feed.Render(new L.Rect(2, 3, Math.Max(0, viewport.Width - 4), outputH), baseDl, wb);
-                prompt.Render(new L.Rect(2, 3 + outputH + 1, Math.Max(0, viewport.Width - 4), promptH), baseDl, wb);
+                // Ensure we have enough space to render
+                if (viewport.Width > 10 && viewport.Height > 8)
+                {
+                    int promptH = Math.Clamp(prompt.GetLineCount(), 1, Math.Max(1, viewport.Height/2));
+                    int outputH = Math.Max(1, viewport.Height - 5 - 2);
+                    // allocate space for variable-height prompt
+                    outputH = Math.Max(1, viewport.Height - 5 - (promptH + 1));
+                    // main area: stacked feed with bottom-follow and animation
+                    feed.Tick();
+                    feed.Render(new L.Rect(2, 3, Math.Max(1, viewport.Width - 4), outputH), baseDl, wb);
+                    prompt.Render(new L.Rect(2, 3 + outputH + 1, Math.Max(1, viewport.Width - 4), promptH), baseDl, wb);
+                }
+                else
+                {
+                    // Window too small - show minimal message
+                    b.DrawText(new DL.TextRun(2, 2, "Window too small", new DL.Rgb24(255, 100, 100), null, DL.CellAttrFlags.Bold));
+                    b.DrawText(new DL.TextRun(2, 3, $"Min: {MIN_WIDTH}x{MIN_HEIGHT}", new DL.Rgb24(200, 200, 200), null, DL.CellAttrFlags.None));
+                }
                 
                 // Render command palette (if open)
                 commandPalette.Render(new L.Rect(0, 0, viewport.Width, viewport.Height), baseDl, wb);

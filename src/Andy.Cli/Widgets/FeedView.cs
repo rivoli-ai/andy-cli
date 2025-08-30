@@ -34,7 +34,12 @@ namespace Andy.Cli.Widgets
         /// <summary>Convenience: append code block item.</summary>
         public void AddCode(string code, string? language = null) => AddItem(new CodeBlockItem(code, language));
         /// <summary>Append a user message bubble with a rounded frame and label.</summary>
-        public void AddUserMessage(string text) => AddItem(new UserBubbleItem(text));
+        public void AddUserMessage(string text)
+        {
+            // Add spacing before user messages for better readability
+            AddItem(new SpacerItem(1));
+            AddItem(new UserBubbleItem(text));
+        }
         /// <summary>Append a response separator with token information.</summary>
         public void AddResponseSeparator(int inputTokens = 0, int outputTokens = 0, string pattern = "━━ ◆ ━━") => AddItem(new ResponseSeparatorItem(inputTokens, outputTokens, pattern));
 
@@ -73,6 +78,10 @@ namespace Andy.Cli.Widgets
         public void Render(in L.Rect rect, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
             int x=(int)rect.X, y=(int)rect.Y, w=(int)rect.Width, h=(int)rect.Height;
+            
+            // Guard against invalid dimensions to prevent crashes
+            if (w <= 0 || h <= 0) return;
+            
             b.PushClip(new DL.ClipPush(x,y,w,h));
             var bg = new DL.Rgb24(0,0,0);
             b.DrawRect(new DL.Rect(x,y,w,h,bg));
@@ -184,16 +193,54 @@ namespace Andy.Cli.Widgets
     public sealed class MarkdownRendererItem : IFeedItem
     {
         private readonly string _md;
-        public MarkdownRendererItem(string markdown) { _md = markdown ?? string.Empty; }
+        private readonly string _originalMd;
+        public MarkdownRendererItem(string markdown) 
+        { 
+            _originalMd = markdown ?? string.Empty;
+            // Preprocess markdown to prevent "You" from being highlighted
+            // The Andy.Tui markdown renderer seems to treat "You" as a special keyword
+            // We'll insert a zero-width non-joiner to break the word without affecting display
+            _md = _originalMd;
+            // Replace standalone "You" but not "You:" in user prompts
+            _md = System.Text.RegularExpressions.Regex.Replace(_md, @"\bYou\b(?!:)", "Y\u200Cou");
+        }
         public int MeasureLineCount(int width)
         {
-            // Approximate by line count; renderer will clip width-wise
-            return _md.Replace("\r\n","\n").Replace('\r','\n').Split('\n').Length;
+            // Calculate actual line count considering word wrapping
+            if (width <= 0) return 1;
+            
+            var lines = _md.Replace("\r\n","\n").Replace('\r','\n').Split('\n');
+            int totalLines = 0;
+            
+            foreach (var line in lines)
+            {
+                if (string.IsNullOrEmpty(line))
+                {
+                    totalLines++;
+                }
+                else
+                {
+                    // Account for word wrapping - estimate based on line length
+                    // Markdown renderer typically uses about 80% of width for content
+                    int effectiveWidth = Math.Max(1, (int)(width * 0.8));
+                    int wrappedLines = (line.Length + effectiveWidth - 1) / effectiveWidth;
+                    totalLines += Math.Max(1, wrappedLines);
+                }
+            }
+            
+            return Math.Max(1, totalLines);
         }
         public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
+            // Guard against invalid dimensions
+            if (width <= 0 || maxLines <= 0) return;
+            
             // Render only the requested slice by extracting those lines
             var lines = _md.Replace("\r\n","\n").Replace('\r','\n').Split('\n');
+            
+            // Guard against invalid startLine
+            if (startLine >= lines.Length || startLine < 0) return;
+            
             int end = Math.Min(lines.Length, startLine + maxLines);
             var slice = string.Join("\n", lines[startLine..end]);
             // Detect simple HTML links <a href="...">text</a> and render with Link widget
@@ -406,6 +453,18 @@ namespace Andy.Cli.Widgets
     }
 
     /// <summary>User message bubble with rounded-ish border and colored label.</summary>
+    /// <summary>Spacer item that adds empty lines.</summary>
+    public sealed class SpacerItem : IFeedItem
+    {
+        private readonly int _lines;
+        public SpacerItem(int lines = 1) { _lines = Math.Max(1, lines); }
+        public int MeasureLineCount(int width) => _lines;
+        public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
+        {
+            // Just render empty space - no content needed
+        }
+    }
+
     public sealed class UserBubbleItem : IFeedItem
     {
         private readonly string[] _lines;
