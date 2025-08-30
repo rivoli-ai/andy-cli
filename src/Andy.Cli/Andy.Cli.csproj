@@ -14,6 +14,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Andy.Llm" Version="2025.8.29-rc.8" />
     <PackageReference Include="Andy.Tui" Version="2025.8.26-rc.31" />
   </ItemGroup>
 

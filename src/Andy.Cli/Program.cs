@@ -3,7 +3,11 @@ using System.Threading;
 using System.Threading.Tasks;
 using Andy.Tui.Backend.Terminal;
 using Andy.Cli.Widgets;
-using Andy.Cli.Chat;
+using Andy.Llm;
+using Andy.Llm.Models;
+using Andy.Llm.Extensions;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using DL = Andy.Tui.DisplayList;
 using L = Andy.Tui.Layout;
 
@@ -37,21 +41,33 @@ class Program
             feed.SetFocused(false);
             feed.SetAnimationSpeed(8); // faster scroll-in
             feed.AddMarkdownRich("✨ **Ready to assist!** What can I help you learn or explore today?");
-            CerebrasHttpChatClient? cerebras = null;
-            var chat = new System.Collections.Generic.List<CerebrasHttpChatClient.ChatMessage>();
+            
+            // Initialize Andy.Llm services
+            var services = new ServiceCollection();
+            services.AddLogging(); // Basic logging without console provider
+            services.ConfigureLlmFromEnvironment();
+            services.AddLlmServices(options =>
+            {
+                options.DefaultProvider = "cerebras"; // Use Cerebras as default
+            });
+            var serviceProvider = services.BuildServiceProvider();
+            
+            LlmClient? llmClient = null;
+            var conversation = new ConversationContext
+            {
+                SystemInstruction = "You are a helpful AI assistant. Keep your responses concise and helpful.",
+                MaxContextMessages = 20
+            };
+            
             try
             {
-                var cfg = ChatConfiguration.Load();
-                if (!string.IsNullOrWhiteSpace(cfg.ApiKey))
-                {
-                    cerebras = new CerebrasHttpChatClient(cfg);
-                    feed.AddMarkdownRich($"[model] {cerebras.Model}");
-                }
-                else feed.AddMarkdownRich("[info] Set CEREBRAS_API_KEY to enable AI responses");
+                llmClient = serviceProvider.GetRequiredService<LlmClient>();
+                feed.AddMarkdownRich("[model] Andy.Llm with Cerebras provider");
             }
             catch (Exception ex)
             {
                 feed.AddMarkdown($"[error] {ex.Message}");
+                feed.AddMarkdownRich("[info] Set CEREBRAS_API_KEY to enable AI responses");
             }
             bool cursorStyledShown = false;
             while (running)
@@ -86,22 +102,44 @@ class Program
                     if (submitted is string cmd && !string.IsNullOrWhiteSpace(cmd))
                     {
                         feed.AddUserMessage(cmd);
-                        if (cerebras is not null)
+                        if (llmClient is not null)
                         {
                             try
                             {
                                 statusMessage.SetMessage("Thinking", animated: true);
-                                var msg = new CerebrasHttpChatClient.ChatMessage("user", cmd);
-                                chat.Add(msg);
-                                var reply = await cerebras.CreateCompletionAsync(chat.ToArray());
                                 
-                                // Simulate token counting (in real implementation, get from API response)
-                                int inputTokens = cmd.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length * 2;
-                                int outputTokens = (reply ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries).Length * 2;
+                                // Add user message to conversation context
+                                conversation.AddUserMessage(cmd);
+                                
+                                // Create request with conversation context
+                                var request = conversation.CreateRequest();
+                                
+                                // Get response from Andy.Llm
+                                var response = await llmClient.CompleteAsync(request);
+                                
+                                // Extract token usage if available
+                                int inputTokens = 0;
+                                int outputTokens = 0;
+                                if (response.TokensUsed.HasValue)
+                                {
+                                    // For now, estimate token distribution (Andy.Llm may provide more detailed info in future)
+                                    inputTokens = (int)(response.TokensUsed.Value * 0.3); // Rough estimate
+                                    outputTokens = (int)(response.TokensUsed.Value * 0.7);
+                                }
+                                else
+                                {
+                                    // Fallback estimation
+                                    inputTokens = cmd.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length * 2;
+                                    outputTokens = (response.Content ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries).Length * 2;
+                                }
+                                
                                 tokenCounter.AddTokens(inputTokens, outputTokens);
                                 
-                                AddReplyToFeed(feed, reply ?? string.Empty, inputTokens, outputTokens);
-                                chat.Add(new CerebrasHttpChatClient.ChatMessage("assistant", reply ?? string.Empty));
+                                AddReplyToFeed(feed, response.Content ?? string.Empty, inputTokens, outputTokens);
+                                
+                                // Add assistant response to conversation context
+                                conversation.AddAssistantMessage(response.Content ?? string.Empty);
+                                
                                 statusMessage.SetMessage("Ready for next question", animated: false);
                             }
                             catch (Exception ex) 
