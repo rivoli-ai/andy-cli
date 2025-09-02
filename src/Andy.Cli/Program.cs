@@ -5,9 +5,14 @@ using System.Threading.Tasks;
 using Andy.Tui.Backend.Terminal;
 using Andy.Cli.Widgets;
 using Andy.Cli.Commands;
+using Andy.Cli.Services;
 using Andy.Llm;
 using Andy.Llm.Models;
 using Andy.Llm.Extensions;
+using Andy.Tools.Core;
+using Andy.Tools.Execution;
+using Andy.Tools.Library;
+using Andy.Tools.Framework;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using DL = Andy.Tui.DisplayList;
@@ -21,8 +26,14 @@ class Program
     private const int MIN_WIDTH = 40;
     private const int MIN_HEIGHT = 10;
     
-    static async Task Main()
+    static async Task Main(string[] args)
     {
+        // Check if we have command-line arguments for non-TUI commands
+        if (args.Length > 0 && !args[0].StartsWith("-"))
+        {
+            await HandleCommandLineArgs(args);
+            return;
+        }
         var caps = Andy.Tui.Backend.Terminal.CapabilityDetector.DetectFromEnvironment();
         
         // Ensure minimum viewport size to prevent crashes
@@ -57,18 +68,39 @@ class Program
             feed.SetAnimationSpeed(8); // faster scroll-in
             feed.AddMarkdownRich("**Ready to assist!** What can I help you learn or explore today?");
             
-            // Initialize Andy.Llm services
+            // Initialize Andy.Llm and Andy.Tools services
             var services = new ServiceCollection();
             services.AddLogging(); // Basic logging without console provider
+            
+            // Configure LLM services
             services.ConfigureLlmFromEnvironment();
             services.AddLlmServices(options =>
             {
                 options.DefaultProvider = "cerebras"; // Use Cerebras as default
             });
+            
+            // Configure Tool services
+            services.AddSingleton<IToolRegistry, ToolRegistry>();
+            services.AddSingleton<IToolExecutor, ToolExecutor>();
+            services.AddSingleton<ISecurityManager, SecurityManager>();
+            services.AddSingleton<IPermissionProfileService, PermissionProfileService>();
+            
+            // Register built-in tools
+            services.AddBuiltInTools();
+            
             var serviceProvider = services.BuildServiceProvider();
+            
+            // Initialize tool registry and register tools
+            var toolRegistry = serviceProvider.GetRequiredService<IToolRegistry>();
+            var toolRegistrations = serviceProvider.GetServices<ToolRegistrationInfo>();
+            foreach (var registration in toolRegistrations)
+            {
+                toolRegistry.RegisterTool(registration.ToolType, registration.Configuration);
+            }
             
             // Initialize commands
             var modelCommand = new ModelCommand(serviceProvider);
+            var toolsCommand = new ToolsCommand(serviceProvider);
             var commandPalette = new CommandPalette();
             
             LlmClient? llmClient = null;
@@ -164,6 +196,56 @@ class Program
                     {
                         var result = await modelCommand.ExecuteAsync(new[] { "test" }.Concat(args).ToArray());
                         feed.AddMarkdownRich(result.Message);
+                    }
+                },
+                new CommandPalette.CommandItem 
+                { 
+                    Name = "List Tools", 
+                    Description = "Show available AI tools",
+                    Category = "Tools",
+                    Aliases = new[] { "tools", "tool list" },
+                    Action = async args => 
+                    {
+                        var toolListItem = toolsCommand.CreateToolListItem();
+                        feed.AddItem(toolListItem);
+                    }
+                },
+                new CommandPalette.CommandItem 
+                { 
+                    Name = "Tool Info", 
+                    Description = "Show details about a specific tool",
+                    Category = "Tools",
+                    Aliases = new[] { "tool info", "tool details" },
+                    Action = async args => 
+                    {
+                        if (args.Length < 1)
+                        {
+                            feed.AddMarkdownRich("Usage: Tool Info <tool_name>");
+                        }
+                        else
+                        {
+                            var result = await toolsCommand.ExecuteAsync(new[] { "info" }.Concat(args).ToArray());
+                            feed.AddMarkdownRich(result.Message);
+                        }
+                    }
+                },
+                new CommandPalette.CommandItem 
+                { 
+                    Name = "Execute Tool", 
+                    Description = "Run a tool with parameters",
+                    Category = "Tools",
+                    Aliases = new[] { "tool exec", "tool run" },
+                    Action = async args => 
+                    {
+                        if (args.Length < 1)
+                        {
+                            feed.AddMarkdownRich("Usage: Execute Tool <tool_name> [parameters...]");
+                        }
+                        else
+                        {
+                            var result = await toolsCommand.ExecuteAsync(new[] { "execute" }.Concat(args).ToArray());
+                            feed.AddMarkdownRich(result.Message);
+                        }
                     }
                 },
                 new CommandPalette.CommandItem 
@@ -363,6 +445,23 @@ class Program
                                     }
                                     return;
                                 }
+                                else if (commandName == "tools" || commandName == "tool" || commandName == "t")
+                                {
+                                    feed.AddUserMessage(cmd);
+                                    
+                                    // Check if it's a list command or no args (default to list)
+                                    if (args.Length == 0 || args[0] == "list" || args[0] == "ls")
+                                    {
+                                        var toolListItem = toolsCommand.CreateToolListItem();
+                                        feed.AddItem(toolListItem);
+                                    }
+                                    else
+                                    {
+                                        var result = await toolsCommand.ExecuteAsync(args);
+                                        feed.AddMarkdownRich(result.Message);
+                                    }
+                                    return;
+                                }
                                 else if (commandName == "help" || commandName == "?")
                                 {
                                     feed.AddUserMessage(cmd);
@@ -374,14 +473,24 @@ class Program
                                         "- **↑/↓**: Scroll chat history\n" +
                                         "- **Page Up/Down**: Fast scroll\n\n" +
                                         "## Commands:\n" +
+                                        "### Model Commands:\n" +
                                         "- **/model list**: Show available models\n" +
                                         "- **/model switch <provider>**: Change provider\n" +
                                         "- **/model info**: Show current model details\n" +
                                         "- **/model test [prompt]**: Test current model\n\n" +
+                                        "### Tool Commands:\n" +
+                                        "- **/tools list [category]**: List available tools\n" +
+                                        "- **/tools info <tool_name>**: Show tool details\n" +
+                                        "- **/tools execute <tool_name> [params]**: Run a tool\n\n" +
                                         "## Providers:\n" +
                                         "- **cerebras**: Fast Llama models\n" +
                                         "- **openai**: GPT-4 models\n" +
-                                        "- **anthropic**: Claude models");
+                                        "- **anthropic**: Claude models\n\n" +
+                                        "## Tool Categories:\n" +
+                                        "- **FileSystem**: File operations\n" +
+                                        "- **TextProcessing**: Text manipulation\n" +
+                                        "- **System**: System information\n" +
+                                        "- **Web**: HTTP and JSON tools");
                                     return;
                                 }
                                 else if (commandName == "clear")
@@ -611,6 +720,87 @@ class Program
         
         // Add static response separator with token information
         feed.AddResponseSeparator(inputTokens, outputTokens);
+    }
+
+    private static async Task HandleCommandLineArgs(string[] args)
+    {
+        // Initialize services for command-line mode
+        var services = new ServiceCollection();
+        services.AddLogging();
+        
+        // Configure LLM services
+        services.ConfigureLlmFromEnvironment();
+        services.AddLlmServices(options =>
+        {
+            options.DefaultProvider = "cerebras";
+        });
+        
+        // Configure Tool services
+        services.AddSingleton<IToolRegistry, ToolRegistry>();
+        services.AddSingleton<IToolExecutor, ToolExecutor>();
+        services.AddSingleton<ISecurityManager, SecurityManager>();
+        services.AddSingleton<IPermissionProfileService, PermissionProfileService>();
+        
+        // Register built-in tools
+        services.AddBuiltInTools();
+        
+        var serviceProvider = services.BuildServiceProvider();
+        
+        // Initialize tool registry and register tools
+        var toolRegistry = serviceProvider.GetRequiredService<IToolRegistry>();
+        var toolRegistrations = serviceProvider.GetServices<ToolRegistrationInfo>();
+        foreach (var registration in toolRegistrations)
+        {
+            toolRegistry.RegisterTool(registration.ToolType, registration.Configuration);
+        }
+        
+        // Route to appropriate command
+        var commandName = args[0].ToLowerInvariant();
+        var commandArgs = args.Skip(1).ToArray();
+        
+        ICommand? command = null;
+        
+        switch (commandName)
+        {
+            case "model":
+            case "m":
+                command = new ModelCommand(serviceProvider);
+                break;
+            case "tools":
+            case "tool":
+            case "t":
+                command = new ToolsCommand(serviceProvider);
+                break;
+            case "help":
+            case "?":
+                Console.WriteLine("Andy CLI - AI Assistant Command Line Interface");
+                Console.WriteLine();
+                Console.WriteLine("Usage: andy-cli [command] [arguments]");
+                Console.WriteLine();
+                Console.WriteLine("Commands:");
+                Console.WriteLine("  model, m       - Manage AI models");
+                Console.WriteLine("  tools, t       - Manage and list available tools");
+                Console.WriteLine("  help, ?        - Show this help message");
+                Console.WriteLine();
+                Console.WriteLine("Run without arguments to start the interactive TUI mode.");
+                return;
+            default:
+                Console.WriteLine($"Unknown command: {commandName}");
+                Console.WriteLine("Use 'andy-cli help' for usage information.");
+                Environment.Exit(1);
+                return;
+        }
+        
+        if (command != null)
+        {
+            var result = await command.ExecuteAsync(commandArgs);
+            Console.WriteLine(result.Message);
+            
+            if (!result.Success)
+            {
+                Environment.Exit(1);
+            }
+        }
     }
 }
 

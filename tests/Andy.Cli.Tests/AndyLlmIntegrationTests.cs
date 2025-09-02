@@ -53,17 +53,25 @@ public class AndyLlmIntegrationTests
         // Check system message
         var systemMessage = request.Messages.FirstOrDefault(m => m.Role == MessageRole.System);
         Assert.NotNull(systemMessage);
-        Assert.Equal("You are a helpful AI assistant.", systemMessage.Content);
+        var systemTextPart = systemMessage.Parts.OfType<TextPart>().FirstOrDefault();
+        Assert.NotNull(systemTextPart);
+        Assert.Equal("You are a helpful AI assistant.", systemTextPart.Text);
         
         // Check conversation messages
         var userMessages = request.Messages.Where(m => m.Role == MessageRole.User).ToList();
         Assert.Equal(2, userMessages.Count);
-        Assert.Equal("Hello", userMessages[0].Content);
-        Assert.Equal("How are you?", userMessages[1].Content);
+        var userTextPart1 = userMessages[0].Parts.OfType<TextPart>().FirstOrDefault();
+        Assert.NotNull(userTextPart1);
+        Assert.Equal("Hello", userTextPart1.Text);
+        var userTextPart2 = userMessages[1].Parts.OfType<TextPart>().FirstOrDefault();
+        Assert.NotNull(userTextPart2);
+        Assert.Equal("How are you?", userTextPart2.Text);
         
         var assistantMessage = request.Messages.FirstOrDefault(m => m.Role == MessageRole.Assistant);
         Assert.NotNull(assistantMessage);
-        Assert.Equal("Hi there!", assistantMessage.Content);
+        var assistantTextPart = assistantMessage.Parts.OfType<TextPart>().FirstOrDefault();
+        Assert.NotNull(assistantTextPart);
+        Assert.Equal("Hi there!", assistantTextPart.Text);
     }
 
     [Fact]
@@ -91,11 +99,15 @@ public class AndyLlmIntegrationTests
         
         var systemMessage = request.Messages.FirstOrDefault(m => m.Role == MessageRole.System);
         Assert.NotNull(systemMessage);
-        Assert.Equal("You are a helpful assistant.", systemMessage.Content);
+        var systemTextPart2 = systemMessage.Parts.OfType<TextPart>().FirstOrDefault();
+        Assert.NotNull(systemTextPart2);
+        Assert.Equal("You are a helpful assistant.", systemTextPart2.Text);
         
         var userMessage = request.Messages.FirstOrDefault(m => m.Role == MessageRole.User);
         Assert.NotNull(userMessage);
-        Assert.Equal("Hello, world!", userMessage.Content);
+        var userTextPart3 = userMessage.Parts.OfType<TextPart>().FirstOrDefault();
+        Assert.NotNull(userTextPart3);
+        Assert.Equal("Hello, world!", userTextPart3.Text);
     }
 
     [Fact]
@@ -126,6 +138,7 @@ public class AndyLlmIntegrationTests
         
         // The most recent messages should be preserved
         var userMessages = request.Messages.Where(m => m.Role == MessageRole.User).ToList();
-        Assert.Contains("Message 4", userMessages.Select(m => m.Content));
+        var userTexts = userMessages.Select(m => m.Parts.OfType<TextPart>().FirstOrDefault()?.Text).Where(t => t != null).ToList();
+        Assert.Contains("Message 4", userTexts);
     }
 }
