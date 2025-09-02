@@ -8,6 +8,7 @@ using Andy.Llm;
 using Andy.Llm.Models;
 using Andy.Llm.Extensions;
 using Microsoft.Extensions.DependencyInjection;
+using Andy.Cli.Widgets;
 
 namespace Andy.Cli.Commands;
 
@@ -146,7 +147,7 @@ public class ModelCommand : ICommand
         
         if (!HasApiKey(provider))
         {
-            return Task.FromResult(CommandResult.Failure($"Error: No API key found for {provider}. Set {GetApiKeyName(provider)} environment variable."));
+            return Task.FromResult(CommandResult.Failure(ConsoleColors.ErrorPrefix($"No API key found for {provider}. Set {GetApiKeyName(provider)} environment variable.")));
         }
         
         try
@@ -166,11 +167,11 @@ public class ModelCommand : ICommand
             _currentClient = newProvider.GetService<LlmClient>();
             _currentProvider = provider;
             
-            return Task.FromResult(CommandResult.CreateSuccess($"Successfully switched to {provider} - {modelName ?? GetDefaultModel(provider)}"));
+            return Task.FromResult(CommandResult.CreateSuccess(ConsoleColors.SuccessPrefix($"Switched to {provider} - {modelName ?? GetDefaultModel(provider)}")));
         }
         catch (Exception ex)
         {
-            return Task.FromResult(CommandResult.Failure($"Error: Failed to switch model: {ex.Message}"));
+            return Task.FromResult(CommandResult.Failure(ConsoleColors.ErrorPrefix($"Failed to switch model: {ex.Message}")));
         }
     }
     
@@ -202,7 +203,7 @@ public class ModelCommand : ICommand
     {
         if (_currentClient == null)
         {
-            return CommandResult.Failure("Error: No model connected. Use 'model switch' to select a provider.");
+            return CommandResult.Failure(ConsoleColors.ErrorPrefix("No model connected. Use 'model switch' to select a provider."));
         }
         
         var prompt = args.Length > 0 
@@ -241,7 +242,7 @@ public class ModelCommand : ICommand
         }
         catch (Exception ex)
         {
-            return CommandResult.Failure($"Error: Model test failed: {ex.Message}");
+            return CommandResult.Failure(ConsoleColors.ErrorPrefix($"Model test failed: {ex.Message}"));
         }
     }
     
@@ -295,5 +296,126 @@ public class ModelCommand : ICommand
     
     public LlmClient? GetCurrentClient() => _currentClient;
     public string GetCurrentProvider() => _currentProvider;
+    
+    public async Task<ModelListItem> CreateModelListItemAsync(CancellationToken cancellationToken = default)
+    {
+        var item = new ModelListItem("Available Models:");
+        
+        // Get all available providers
+        var providerNames = new[] { "cerebras", "openai", "anthropic", "gemini", "ollama" };
+        string currentModel = GetDefaultModel(_currentProvider);
+        
+        foreach (var providerName in providerNames.OrderBy(p => p))
+        {
+            var hasApiKey = HasApiKey(providerName);
+            
+            // Skip providers without API keys (except ollama which doesn't need one)
+            if (!hasApiKey && providerName != "ollama") 
+            {
+                continue;
+            }
+            
+            item.AddProvider(char.ToUpper(providerName[0]) + providerName.Substring(1));
+            
+            // Try to use dynamic model listing if we're on the current provider
+            bool usedDynamicListing = false;
+            if (providerName == _currentProvider && _currentServiceProvider != null)
+            {
+                try
+                {
+                    var provider = _currentServiceProvider.GetService<Andy.Llm.Abstractions.ILlmProvider>();
+                    if (provider != null)
+                    {
+                        var models = await provider.ListModelsAsync(cancellationToken);
+                        
+                        if (models != null && models.Any())
+                        {
+                            foreach (var model in models)
+                            {
+                                var isCurrent = model.Id == currentModel;
+                                var description = !string.IsNullOrEmpty(model.Description) ? model.Description : 
+                                                 (!string.IsNullOrEmpty(model.ParameterSize) ? $"{model.Family} {model.ParameterSize}" : model.Name);
+                                
+                                item.AddModel(model.Id, description, true, isCurrent);
+                            }
+                            usedDynamicListing = true;
+                        }
+                    }
+                }
+                catch
+                {
+                    // Fall through to use fallback models
+                }
+            }
+            
+            // Use fallback models if dynamic listing wasn't used or failed
+            if (!usedDynamicListing)
+            {
+                AddFallbackModels(item, providerName, currentModel);
+            }
+        }
+        
+        // Add current model info
+        if (_currentClient != null)
+        {
+            item.AddApiKeyStatus($"Current: {_currentProvider} - {currentModel}");
+        }
+        
+        // Add API key status
+        var apiKeyStatus = new List<string>();
+        if (HasApiKey("cerebras")) apiKeyStatus.Add("CEREBRAS_API_KEY [SET]");
+        if (HasApiKey("openai")) apiKeyStatus.Add("OPENAI_API_KEY [SET]");
+        if (HasApiKey("anthropic")) apiKeyStatus.Add("ANTHROPIC_API_KEY [SET]");
+        if (HasApiKey("gemini")) apiKeyStatus.Add("GOOGLE_API_KEY [SET]");
+        
+        if (apiKeyStatus.Any())
+        {
+            item.AddApiKeyStatus($"API Keys Set: {string.Join(", ", apiKeyStatus)}");
+        }
+        else
+        {
+            item.AddApiKeyStatus("Warning: No API keys found. Set environment variables:");
+            item.AddApiKeyStatus("   CEREBRAS_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, or GOOGLE_API_KEY");
+        }
+        
+        return item;
+    }
+    
+    private void AddFallbackModels(ModelListItem item, string providerName, string currentModel)
+    {
+        var fallbackModels = providerName switch
+        {
+            "cerebras" => new[] 
+            { 
+                ("llama-3.3-70b", "Llama 3.3 70B - Latest, fast inference"),
+                ("llama-3.1-8b", "Llama 3.1 8B - Lightweight and efficient"),
+                ("llama-3.1-70b", "Llama 3.1 70B - Previous generation")
+            },
+            "openai" => new[]
+            {
+                ("gpt-4o", "GPT-4 Omni - Most capable model"),
+                ("gpt-4o-mini", "GPT-4 Omni Mini - Faster, more affordable"),
+                ("gpt-3.5-turbo", "GPT-3.5 Turbo - Fast and efficient")
+            },
+            "anthropic" => new[]
+            {
+                ("claude-3-opus", "Claude 3 Opus - Most capable"),
+                ("claude-3-sonnet", "Claude 3 Sonnet - Balanced performance"),
+                ("claude-3-haiku", "Claude 3 Haiku - Fast and efficient")
+            },
+            "gemini" => new[]
+            {
+                ("gemini-1.5-pro", "Gemini 1.5 Pro - Advanced reasoning"),
+                ("gemini-1.5-flash", "Gemini 1.5 Flash - Fast multimodal")
+            },
+            _ => Array.Empty<(string, string)>()
+        };
+        
+        foreach (var (modelId, description) in fallbackModels)
+        {
+            var isCurrent = _currentProvider == providerName && modelId == currentModel;
+            item.AddModel(modelId, description, true, isCurrent);
+        }
+    }
     public IServiceProvider? GetCurrentServiceProvider() => _currentServiceProvider;
 }

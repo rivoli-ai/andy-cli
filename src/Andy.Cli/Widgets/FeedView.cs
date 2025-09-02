@@ -483,13 +483,13 @@ namespace Andy.Cli.Widgets
                 {
                     // top border with rounded corners
                     int inner = Math.Max(0, width - 2);
-                    b.DrawText(new DL.TextRun(x, row, "╭" + new string('─', inner) + "╮", borderColor, null, DL.CellAttrFlags.None));
+                    b.DrawText(new DL.TextRun(x, row, "╭" + new string('─', inner) + "╮", borderColor, new DL.Rgb24(0,0,0), DL.CellAttrFlags.None));
                 }
                 else if (i == total - 1)
                 {
                     // bottom border with rounded corners
                     int inner = Math.Max(0, width - 2);
-                    b.DrawText(new DL.TextRun(x, row, "╰" + new string('─', inner) + "╯", borderColor, null, DL.CellAttrFlags.None));
+                    b.DrawText(new DL.TextRun(x, row, "╰" + new string('─', inner) + "╯", borderColor, new DL.Rgb24(0,0,0), DL.CellAttrFlags.None));
                 }
                 else
                 {
@@ -499,19 +499,19 @@ namespace Andy.Cli.Widgets
                     {
                         // show label on first content row
                         string label = "You:";
-                        b.DrawText(new DL.TextRun(x+2, row, label + " ", labelColor, null, DL.CellAttrFlags.Bold));
+                        b.DrawText(new DL.TextRun(x+2, row, label + " ", labelColor, new DL.Rgb24(0,0,0), DL.CellAttrFlags.Bold));
                         int available = Math.Max(0, width - 4 - (label.Length + 1));
                         string t = available > 0 ? (content.Length > available ? content.Substring(0, available) : content) : string.Empty;
-                        b.DrawText(new DL.TextRun(x + 2 + label.Length + 1, row, t, new DL.Rgb24(220,220,220), null, DL.CellAttrFlags.None));
+                        b.DrawText(new DL.TextRun(x + 2 + label.Length + 1, row, t, new DL.Rgb24(220,220,220), new DL.Rgb24(0,0,0), DL.CellAttrFlags.None));
                     }
                     else
                     {
                         int available = Math.Max(0, width - 4);
                         string t = content.Length > available ? content.Substring(0, available) : content;
-                        b.DrawText(new DL.TextRun(x+2, row, t, new DL.Rgb24(220,220,220), null, DL.CellAttrFlags.None));
+                        b.DrawText(new DL.TextRun(x+2, row, t, new DL.Rgb24(220,220,220), new DL.Rgb24(0,0,0), DL.CellAttrFlags.None));
                     }
-                    if (width >= 1) b.DrawText(new DL.TextRun(x, row, "│", borderColor, null, DL.CellAttrFlags.None));
-                    if (width >= 2) b.DrawText(new DL.TextRun(x + width - 1, row, "│", borderColor, null, DL.CellAttrFlags.None));
+                    if (width >= 1) b.DrawText(new DL.TextRun(x, row, "│", borderColor, new DL.Rgb24(0,0,0), DL.CellAttrFlags.None));
+                    if (width >= 2) b.DrawText(new DL.TextRun(x + width - 1, row, "│", borderColor, new DL.Rgb24(0,0,0), DL.CellAttrFlags.None));
                 }
             }
         }

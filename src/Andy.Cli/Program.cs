@@ -34,6 +34,11 @@ class Program
         scheduler.SetMetricsSink(hud);
         var pty = new LocalStdoutPty();
         Console.Write("\u001b[?1049h\u001b[?25l\u001b[?7l");
+        
+        // Set console background to black after entering alternate screen
+        Console.BackgroundColor = ConsoleColor.Black;
+        Console.Clear();
+        
         try
         {
             bool running = true;
@@ -80,8 +85,8 @@ class Program
             }
             catch (Exception ex)
             {
-                feed.AddMarkdown($"[error] {ex.Message}");
-                feed.AddMarkdownRich("[info] Set CEREBRAS_API_KEY to enable AI responses");
+                feed.AddMarkdown(ConsoleColors.ErrorPrefix(ex.Message));
+                feed.AddMarkdownRich(ConsoleColors.NotePrefix("Set CEREBRAS_API_KEY to enable AI responses"));
             }
             
             // Setup command palette commands
@@ -106,8 +111,8 @@ class Program
                     Aliases = new[] { "models", "list" },
                     Action = async args => 
                     {
-                        var result = await modelCommand.ExecuteAsync(new[] { "list" });
-                        feed.AddMarkdownRich(result.Message);
+                        var modelListItem = await modelCommand.CreateModelListItemAsync();
+                        feed.AddItem(modelListItem);
                     }
                 },
                 new CommandPalette.CommandItem 
@@ -336,15 +341,25 @@ class Program
                                 if (commandName == "model" || commandName == "m")
                                 {
                                     feed.AddUserMessage(cmd);
-                                    var result = await modelCommand.ExecuteAsync(args);
-                                    feed.AddMarkdownRich(result.Message);
-                                    if (result.Success && args.Length > 0 && (args[0] == "switch" || args[0] == "sw"))
+                                    
+                                    // Check if it's a list command or no args (default to list)
+                                    if (args.Length == 0 || args[0] == "list" || args[0] == "ls")
                                     {
-                                        // Update the LLM client and reset conversation context
-                                        llmClient = modelCommand.GetCurrentClient();
-                                        conversation.Clear();
-                                        conversation.SystemInstruction = "You are a helpful AI assistant. Keep your responses concise and helpful.";
-                                        feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
+                                        var modelListItem = await modelCommand.CreateModelListItemAsync();
+                                        feed.AddItem(modelListItem);
+                                    }
+                                    else
+                                    {
+                                        var result = await modelCommand.ExecuteAsync(args);
+                                        feed.AddMarkdownRich(result.Message);
+                                        if (result.Success && args.Length > 0 && (args[0] == "switch" || args[0] == "sw"))
+                                        {
+                                            // Update the LLM client and reset conversation context
+                                            llmClient = modelCommand.GetCurrentClient();
+                                            conversation.Clear();
+                                            conversation.SystemInstruction = "You are a helpful AI assistant. Keep your responses concise and helpful.";
+                                            feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
+                                        }
                                     }
                                     return;
                                 }
@@ -379,7 +394,7 @@ class Program
                                 else
                                 {
                                     feed.AddUserMessage(cmd);
-                                    feed.AddMarkdownRich($"Unknown command: /{commandName}. Type /help for available commands.");
+                                    feed.AddMarkdownRich(ConsoleColors.WarningPrefix($"Unknown command: /{commandName}. Type /help for available commands."));
                                     return;
                                 }
                             }
@@ -429,7 +444,7 @@ class Program
                             }
                             catch (Exception ex) 
                             { 
-                                feed.AddMarkdownRich("[error] " + ex.Message); 
+                                feed.AddMarkdownRich(ConsoleColors.ErrorPrefix(ex.Message)); 
                                 statusMessage.SetMessage("Error occurred", animated: false);
                             }
                         }
