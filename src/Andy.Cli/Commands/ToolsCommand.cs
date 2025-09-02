@@ -180,77 +180,109 @@ public class ToolsCommand : ICommand
         var result = new StringBuilder();
         var metadata = tool.Metadata;
         
-        result.AppendLine($"Tool Information: {metadata.Name}");
-        result.AppendLine(new string('─', 40));
-        result.AppendLine($"ID: {metadata.Id}");
-        result.AppendLine($"Name: {metadata.Name}");
-        result.AppendLine($"Version: {metadata.Version}");
-        result.AppendLine($"Category: {metadata.Category}");
-        result.AppendLine($"Status: {(tool.IsEnabled ? "Enabled" : "Disabled")}");
+        // Title with color
+        result.AppendLine($"## {metadata.Name}");
         result.AppendLine();
         
-        result.AppendLine($"Description:");
-        result.AppendLine($"  {metadata.Description}");
-        result.AppendLine();
+        // Basic info table
+        result.AppendLine("### Tool Information");
+        result.AppendLine("| Property | Value |");
+        result.AppendLine("|----------|-------|");
+        result.AppendLine($"| **ID** | `{metadata.Id}` |");
+        result.AppendLine($"| **Name** | {metadata.Name} |");
+        result.AppendLine($"| **Version** | {metadata.Version} |");
+        result.AppendLine($"| **Category** | *{metadata.Category}* |");
+        result.AppendLine($"| **Status** | {(tool.IsEnabled ? "**Enabled**" : "Disabled")} |");
         
         if (metadata.RequiredPermissions != ToolPermissionFlags.None)
         {
-            result.AppendLine($"Required Permissions: {metadata.RequiredPermissions}");
-            result.AppendLine();
+            result.AppendLine($"| **Permissions** | `{metadata.RequiredPermissions}` |");
         }
+        
+        result.AppendLine();
+        result.AppendLine($"**Description:** {metadata.Description}");
+        result.AppendLine();
         
         if (metadata.Parameters.Any())
         {
-            result.AppendLine("Parameters:");
-            foreach (var param in metadata.Parameters)
+            result.AppendLine("### Parameters");
+            result.AppendLine();
+            
+            // Group parameters by required/optional
+            var requiredParams = metadata.Parameters.Where(p => p.Required).ToList();
+            var optionalParams = metadata.Parameters.Where(p => !p.Required).ToList();
+            
+            if (requiredParams.Any())
             {
-                var required = param.Required ? "[Required]" : "[Optional]";
-                result.AppendLine($"  {param.Name} {required}");
-                result.AppendLine($"    Type: {param.Type}");
-                result.AppendLine($"    Description: {param.Description}");
-                
-                if (param.DefaultValue != null)
+                result.AppendLine("#### Required Parameters");
+                result.AppendLine("| Name | Type | Description |");
+                result.AppendLine("|------|------|-------------|");
+                foreach (var param in requiredParams)
                 {
-                    result.AppendLine($"    Default: {param.DefaultValue}");
+                    result.AppendLine($"| **`{param.Name}`** | *{param.Type}* | {param.Description} |");
                 }
-                
-                if (param.AllowedValues != null && param.AllowedValues.Any())
+                result.AppendLine();
+            }
+            
+            if (optionalParams.Any())
+            {
+                result.AppendLine("#### Optional Parameters");
+                result.AppendLine("| Name | Type | Default | Description |");
+                result.AppendLine("|------|------|---------|-------------|");
+                foreach (var param in optionalParams)
                 {
-                    result.AppendLine($"    Allowed values: {string.Join(", ", param.AllowedValues)}");
+                    var defaultVal = param.DefaultValue != null ? $"`{param.DefaultValue}`" : "-";
+                    result.AppendLine($"| `{param.Name}` | *{param.Type}* | {defaultVal} | {param.Description} |");
+                    
+                    if (param.AllowedValues != null && param.AllowedValues.Any())
+                    {
+                        result.AppendLine($"|  |  | **Allowed:** | `{string.Join("`, `", param.AllowedValues)}` |");
+                    }
+                    
+                    if (!string.IsNullOrEmpty(param.Pattern))
+                    {
+                        result.AppendLine($"|  |  | **Pattern:** | `{param.Pattern}` |");
+                    }
                 }
-                
-                if (!string.IsNullOrEmpty(param.Pattern))
-                {
-                    result.AppendLine($"    Validation: {param.Pattern}");
-                }
+                result.AppendLine();
             }
         }
         
         if (metadata.Examples.Any())
         {
+            result.AppendLine("### Examples");
             result.AppendLine();
-            result.AppendLine("Examples:");
+            int exampleNum = 1;
             foreach (var example in metadata.Examples)
             {
-                result.AppendLine($"  {example.Name}:");
-                result.AppendLine($"    {example.Description}");
+                result.AppendLine($"**Example {exampleNum}: {example.Name}**");
+                result.AppendLine($"> {example.Description}");
                 
                 if (example.Parameters.Any())
                 {
-                    result.AppendLine($"    Parameters: {string.Join(", ", example.Parameters.Select(p => $"{p.Key}={p.Value?.ToString() ?? "null"}"))}");
+                    result.AppendLine();
+                    result.AppendLine("```");
+                    foreach (var param in example.Parameters)
+                    {
+                        result.AppendLine($"{param.Key} = {param.Value?.ToString() ?? "null"}");
+                    }
+                    result.AppendLine("```");
                 }
                 
                 if (example.ExpectedOutput != null)
                 {
-                    result.AppendLine($"    Expected output: {example.ExpectedOutput}");
+                    result.AppendLine();
+                    result.AppendLine($"Expected output: `{example.ExpectedOutput}`");
                 }
+                result.AppendLine();
+                exampleNum++;
             }
         }
         
         if (metadata.Tags.Any())
         {
-            result.AppendLine();
-            result.AppendLine($"Tags: {string.Join(", ", metadata.Tags)}");
+            result.AppendLine("---");
+            result.AppendLine($"**Tags:** {string.Join(", ", metadata.Tags.Select(t => $"`{t}`"))}");
         }
 
         return CommandResult.CreateSuccess(result.ToString());

@@ -39,6 +39,12 @@ This file contains authorized commands and configuration for Claude Code Assista
 
 ## Development Workflow Instructions
 
+### Code Style Guidelines
+
+- **NO EMOJIS**: Do not use emojis in code, comments, or application output
+- Keep all text plain and professional
+- Use ASCII characters only for terminal UI elements
+
 ### Task Completion Tracking
 
 When completing a set of tasks or phase milestones:

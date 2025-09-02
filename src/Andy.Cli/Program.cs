@@ -363,24 +363,85 @@ class Program
                             return;
                         }
                         
-                        // Confirmation box
-                        // Compose one frame with dialog using a fresh base
-                        var confirmB = new DL.DisplayListBuilder();
-                        confirmB.PushClip(new DL.ClipPush(0,0,viewport.Width, viewport.Height));
-                        confirmB.DrawRect(new DL.Rect(0,0,viewport.Width, viewport.Height, new DL.Rgb24(0,0,0)));                        
-                        int bw = Math.Min(40, viewport.Width - 4);
-                        int bh = 5;
-                        int bx = (viewport.Width - bw)/2; int by = (viewport.Height - bh)/2;
-                        confirmB.PushClip(new DL.ClipPush(bx, by, bw, bh));
-                        confirmB.DrawRect(new DL.Rect(bx, by, bw, bh, new DL.Rgb24(20,20,20)));
-                        confirmB.DrawBorder(new DL.Border(bx, by, bw, bh, "single", new DL.Rgb24(200,200,80)));
-                        confirmB.DrawText(new DL.TextRun(bx+2, by+2, "Exit? (Y/N)", new DL.Rgb24(220,220,220), new DL.Rgb24(20,20,20), DL.CellAttrFlags.Bold));
-                        confirmB.Pop();
-                        await scheduler.RenderOnceAsync(confirmB.Build(), viewport, caps, pty, CancellationToken.None);
-                        // Wait for Y/N
-                        ConsoleKeyInfo k2 = Console.ReadKey(true);
-                        if (k2.Key == ConsoleKey.Y) { running = false; return; }
-                        else { return; }
+                        // Confirmation dialog with buttons
+                        bool confirmExit = false;
+                        bool dialogOpen = true;
+                        bool yesSelected = false; // Default to No
+                        
+                        while (dialogOpen)
+                        {
+                            var confirmB = new DL.DisplayListBuilder();
+                            confirmB.PushClip(new DL.ClipPush(0,0,viewport.Width, viewport.Height));
+                            
+                            // Semi-transparent backdrop
+                            confirmB.DrawRect(new DL.Rect(0,0,viewport.Width, viewport.Height, new DL.Rgb24(0,0,0)));
+                            
+                            // Dialog box
+                            int bw = Math.Min(44, viewport.Width - 4);
+                            int bh = 7;
+                            int bx = (viewport.Width - bw)/2; 
+                            int by = (viewport.Height - bh)/2;
+                            
+                            // Draw dialog background and border
+                            confirmB.PushClip(new DL.ClipPush(bx, by, bw, bh));
+                            confirmB.DrawRect(new DL.Rect(bx, by, bw, bh, new DL.Rgb24(30,30,40)));
+                            confirmB.DrawBorder(new DL.Border(bx, by, bw, bh, "double", new DL.Rgb24(200,200,80)));
+                            
+                            // Title
+                            string title = "Exit Application?";
+                            int titleX = bx + (bw - title.Length) / 2;
+                            confirmB.DrawText(new DL.TextRun(titleX, by+2, title, new DL.Rgb24(255,255,255), new DL.Rgb24(30,30,40), DL.CellAttrFlags.Bold));
+                            
+                            // Buttons
+                            int buttonY = by + 4;
+                            int buttonSpacing = 12;
+                            int noButtonX = bx + (bw/2) - buttonSpacing;
+                            int yesButtonX = bx + (bw/2) + 3;
+                            
+                            // No button (default)
+                            var noBg = !yesSelected ? new DL.Rgb24(60,120,60) : new DL.Rgb24(40,40,50);
+                            var noFg = !yesSelected ? new DL.Rgb24(255,255,255) : new DL.Rgb24(180,180,180);
+                            confirmB.DrawRect(new DL.Rect(noButtonX, buttonY, 8, 1, noBg));
+                            confirmB.DrawText(new DL.TextRun(noButtonX+1, buttonY, !yesSelected ? "[ No ]" : "  No  ", noFg, noBg, !yesSelected ? DL.CellAttrFlags.Bold : DL.CellAttrFlags.None));
+                            
+                            // Yes button
+                            var yesBg = yesSelected ? new DL.Rgb24(120,60,60) : new DL.Rgb24(40,40,50);
+                            var yesFg = yesSelected ? new DL.Rgb24(255,255,255) : new DL.Rgb24(180,180,180);
+                            confirmB.DrawRect(new DL.Rect(yesButtonX, buttonY, 8, 1, yesBg));
+                            confirmB.DrawText(new DL.TextRun(yesButtonX+1, buttonY, yesSelected ? "[ Yes ]" : "  Yes  ", yesFg, yesBg, yesSelected ? DL.CellAttrFlags.Bold : DL.CellAttrFlags.None));
+                            
+                            // Hints
+                            string hints = "← → Navigate  Enter Select  Esc Cancel";
+                            int hintsX = bx + (bw - hints.Length) / 2;
+                            confirmB.DrawText(new DL.TextRun(hintsX, by+bh-1, hints, new DL.Rgb24(120,120,150), new DL.Rgb24(30,30,40), DL.CellAttrFlags.None));
+                            
+                            confirmB.Pop();
+                            await scheduler.RenderOnceAsync(confirmB.Build(), viewport, caps, pty, CancellationToken.None);
+                            
+                            // Handle input
+                            ConsoleKeyInfo k2 = Console.ReadKey(true);
+                            if (k2.Key == ConsoleKey.LeftArrow || k2.Key == ConsoleKey.RightArrow || k2.Key == ConsoleKey.Tab)
+                            {
+                                yesSelected = !yesSelected;
+                            }
+                            else if (k2.Key == ConsoleKey.Enter || k2.Key == ConsoleKey.Spacebar)
+                            {
+                                confirmExit = yesSelected;
+                                dialogOpen = false;
+                            }
+                            else if (k2.Key == ConsoleKey.Escape || k2.Key == ConsoleKey.N)
+                            {
+                                dialogOpen = false;
+                            }
+                            else if (k2.Key == ConsoleKey.Y)
+                            {
+                                confirmExit = true;
+                                dialogOpen = false;
+                            }
+                        }
+                        
+                        if (confirmExit) { running = false; }
+                        return;
                     }
                     if (k.Key == ConsoleKey.F2) { hud.Enabled = !hud.Enabled; return; }
                     
