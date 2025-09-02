@@ -13,6 +13,9 @@ public class CommandPalette
     private string _query = "";
     private int _selectedIndex = 0;
     private bool _isOpen = false;
+    private bool _waitingForParams = false;
+    private CommandItem? _selectedCommand = null;
+    private string _paramInput = "";
     
     public class CommandItem
     {
@@ -21,6 +24,8 @@ public class CommandPalette
         public string Category { get; set; } = "";
         public Action<string[]>? Action { get; set; }
         public string[] Aliases { get; set; } = Array.Empty<string>();
+        public string[] RequiredParams { get; set; } = Array.Empty<string>();
+        public string ParameterHint { get; set; } = "";
     }
     
     public void SetCommands(IEnumerable<CommandItem> commands)
@@ -34,6 +39,9 @@ public class CommandPalette
         _isOpen = true;
         _query = "";
         _selectedIndex = 0;
+        _waitingForParams = false;
+        _selectedCommand = null;
+        _paramInput = "";
         UpdateFilteredCommands();
     }
     
@@ -52,7 +60,14 @@ public class CommandPalette
         UpdateFilteredCommands();
     }
     
-    public string GetQuery() => _query;
+    public string GetQuery() => _waitingForParams ? _paramInput : _query;
+    
+    public void SetParamInput(string input)
+    {
+        _paramInput = input;
+    }
+    
+    public bool IsWaitingForParams() => _waitingForParams;
     
     public void MoveSelection(int delta)
     {
@@ -70,14 +85,38 @@ public class CommandPalette
     
     public void ExecuteSelected(string args = "")
     {
-        var selected = GetSelected();
-        if (selected?.Action != null)
+        if (_waitingForParams && _selectedCommand != null)
         {
-            var argArray = string.IsNullOrWhiteSpace(args) 
+            // Execute with the parameters entered
+            var argArray = string.IsNullOrWhiteSpace(_paramInput) 
                 ? Array.Empty<string>() 
-                : args.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            selected.Action(argArray);
+                : _paramInput.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            _selectedCommand.Action?.Invoke(argArray);
             Close();
+        }
+        else
+        {
+            var selected = GetSelected();
+            if (selected?.Action != null)
+            {
+                // Check if command needs parameters
+                if (selected.RequiredParams.Length > 0)
+                {
+                    // Switch to parameter input mode
+                    _waitingForParams = true;
+                    _selectedCommand = selected;
+                    _paramInput = "";
+                }
+                else
+                {
+                    // Execute immediately if no params needed
+                    var argArray = string.IsNullOrWhiteSpace(args) 
+                        ? Array.Empty<string>() 
+                        : args.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    selected.Action(argArray);
+                    Close();
+                }
+            }
         }
     }
     
@@ -142,14 +181,32 @@ public class CommandPalette
         int titleX = x + (width - title.Length) / 2;
         wb.DrawText(new DL.TextRun(titleX, y, title, new DL.Rgb24(200, 200, 255), new DL.Rgb24(20, 20, 30), DL.CellAttrFlags.Bold));
         
-        // Draw search box (directly after title, no gap)
+        // Draw search/parameter input box
         int searchY = y + 1;
-        wb.DrawText(new DL.TextRun(x + 2, searchY, "> ", new DL.Rgb24(150, 150, 200), null, DL.CellAttrFlags.None));
-        wb.DrawText(new DL.TextRun(x + 4, searchY, _query, new DL.Rgb24(255, 255, 255), null, DL.CellAttrFlags.None));
-        
-        // Draw cursor in search box
-        if (!string.IsNullOrEmpty(_query) || true) // Always show cursor
+        if (_waitingForParams && _selectedCommand != null)
         {
+            // Show parameter input mode
+            string prompt = $"Enter {_selectedCommand.Name} parameters: ";
+            wb.DrawText(new DL.TextRun(x + 2, searchY, prompt, new DL.Rgb24(150, 200, 150), null, DL.CellAttrFlags.None));
+            wb.DrawText(new DL.TextRun(x + 2 + prompt.Length, searchY, _paramInput, new DL.Rgb24(255, 255, 255), null, DL.CellAttrFlags.None));
+            
+            // Draw cursor
+            int cursorX = x + 2 + prompt.Length + _paramInput.Length;
+            wb.DrawText(new DL.TextRun(cursorX, searchY, "│", new DL.Rgb24(255, 255, 100), null, DL.CellAttrFlags.None));
+            
+            // Show parameter hint
+            if (!string.IsNullOrEmpty(_selectedCommand.ParameterHint))
+            {
+                wb.DrawText(new DL.TextRun(x + 2, searchY + 1, _selectedCommand.ParameterHint, new DL.Rgb24(100, 150, 100), null, DL.CellAttrFlags.Italic));
+            }
+        }
+        else
+        {
+            // Normal search mode
+            wb.DrawText(new DL.TextRun(x + 2, searchY, "> ", new DL.Rgb24(150, 150, 200), null, DL.CellAttrFlags.None));
+            wb.DrawText(new DL.TextRun(x + 4, searchY, _query, new DL.Rgb24(255, 255, 255), null, DL.CellAttrFlags.None));
+            
+            // Draw cursor in search box
             int cursorX = x + 4 + _query.Length;
             wb.DrawText(new DL.TextRun(cursorX, searchY, "│", new DL.Rgb24(255, 255, 100), null, DL.CellAttrFlags.None));
         }
@@ -157,7 +214,12 @@ public class CommandPalette
         // Draw separator
         wb.DrawText(new DL.TextRun(x + 1, searchY + 1, new string('─', width - 2), new DL.Rgb24(60, 60, 80), null, DL.CellAttrFlags.None));
         
-        // Draw filtered commands
+        // Draw filtered commands (skip if waiting for params)
+        if (_waitingForParams)
+        {
+            return; // Don't show command list when entering parameters
+        }
+        
         int listY = searchY + 2;
         // Calculate visible items: height - (title line + search line + separator + hints line)
         int availableLines = Math.Max(1, height - 4);
@@ -183,9 +245,14 @@ public class CommandPalette
                     wb.DrawRect(new DL.Rect(x + 1, listY + i, width - 2, 1, bgColor!.Value));
                 }
                 
-                // Draw command name
+                // Draw command name with parameter hint
                 string prefix = isSelected ? "▸ " : "  ";
-                wb.DrawText(new DL.TextRun(x + 2, listY + i, prefix + cmd.Name, fgColor, bgColor, isSelected ? DL.CellAttrFlags.Bold : DL.CellAttrFlags.None));
+                string cmdText = cmd.Name;
+                if (cmd.RequiredParams.Length > 0)
+                {
+                    cmdText += " " + string.Join(" ", cmd.RequiredParams.Select(p => $"<{p}>"));
+                }
+                wb.DrawText(new DL.TextRun(x + 2, listY + i, prefix + cmdText, fgColor, bgColor, isSelected ? DL.CellAttrFlags.Bold : DL.CellAttrFlags.None));
                 
                 // Draw category/description on the right
                 if (!string.IsNullOrEmpty(cmd.Category))

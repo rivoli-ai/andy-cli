@@ -153,6 +153,8 @@ class Program
                     Description = "Change AI provider/model",
                     Category = "Model",
                     Aliases = new[] { "switch", "change" },
+                    RequiredParams = new[] { "provider" },
+                    ParameterHint = "Example: cerebras or openai gpt-4o",
                     Action = async args => 
                     {
                         if (args.Length < 1)
@@ -216,6 +218,8 @@ class Program
                     Description = "Show details about a specific tool",
                     Category = "Tools",
                     Aliases = new[] { "tool info", "tool details" },
+                    RequiredParams = new[] { "tool_id" },
+                    ParameterHint = "Example: read_file or copy_file",
                     Action = async args => 
                     {
                         if (args.Length < 1)
@@ -235,6 +239,8 @@ class Program
                     Description = "Run a tool with parameters",
                     Category = "Tools",
                     Aliases = new[] { "tool exec", "tool run" },
+                    RequiredParams = new[] { "tool_id", "params..." },
+                    ParameterHint = "Example: read_file file_path=/etc/hosts",
                     Action = async args => 
                     {
                         if (args.Length < 1)
@@ -367,42 +373,62 @@ class Program
                     // Handle command palette input when open
                     if (commandPalette.IsOpen)
                     {
-                        if (k.Key == ConsoleKey.UpArrow)
+                        // Check if we're in parameter input mode
+                        if (commandPalette.IsWaitingForParams())
                         {
-                            commandPalette.MoveSelection(-1);
-                            return;
-                        }
-                        else if (k.Key == ConsoleKey.DownArrow)
-                        {
-                            commandPalette.MoveSelection(1);
-                            return;
-                        }
-                        else if (k.Key == ConsoleKey.Enter)
-                        {
-                            var selected = commandPalette.GetSelected();
-                            if (selected != null)
+                            if (k.Key == ConsoleKey.Enter)
                             {
-                                // Extract arguments from query if present
+                                // Execute with the entered parameters
+                                commandPalette.ExecuteSelected();
+                                return;
+                            }
+                            else if (k.Key == ConsoleKey.Backspace)
+                            {
+                                var input = commandPalette.GetQuery();
+                                if (input.Length > 0)
+                                {
+                                    commandPalette.SetParamInput(input.Substring(0, input.Length - 1));
+                                }
+                                return;
+                            }
+                            else if (!char.IsControl(k.KeyChar))
+                            {
+                                commandPalette.SetParamInput(commandPalette.GetQuery() + k.KeyChar);
+                                return;
+                            }
+                        }
+                        else
+                        {
+                            // Normal command selection mode
+                            if (k.Key == ConsoleKey.UpArrow)
+                            {
+                                commandPalette.MoveSelection(-1);
+                                return;
+                            }
+                            else if (k.Key == ConsoleKey.DownArrow)
+                            {
+                                commandPalette.MoveSelection(1);
+                                return;
+                            }
+                            else if (k.Key == ConsoleKey.Enter)
+                            {
+                                commandPalette.ExecuteSelected();
+                                return;
+                            }
+                            else if (k.Key == ConsoleKey.Backspace)
+                            {
                                 var query = commandPalette.GetQuery();
-                                var parts = query.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
-                                var args = parts.Length > 1 ? parts[1] : "";
-                                commandPalette.ExecuteSelected(args);
+                                if (query.Length > 0)
+                                {
+                                    commandPalette.SetQuery(query.Substring(0, query.Length - 1));
+                                }
+                                return;
                             }
-                            return;
-                        }
-                        else if (k.Key == ConsoleKey.Backspace)
-                        {
-                            var query = commandPalette.GetQuery();
-                            if (query.Length > 0)
+                            else if (!char.IsControl(k.KeyChar))
                             {
-                                commandPalette.SetQuery(query.Substring(0, query.Length - 1));
+                                commandPalette.SetQuery(commandPalette.GetQuery() + k.KeyChar);
+                                return;
                             }
-                            return;
-                        }
-                        else if (!char.IsControl(k.KeyChar))
-                        {
-                            commandPalette.SetQuery(commandPalette.GetQuery() + k.KeyChar);
-                            return;
                         }
                         return;
                     }
