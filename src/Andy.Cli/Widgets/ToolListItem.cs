@@ -17,6 +17,7 @@ namespace Andy.Cli.Widgets
         {
             public string? CategoryName { get; set; }
             public string? ToolName { get; set; }
+            public string? ToolId { get; set; }
             public string? Description { get; set; }
             public bool IsEnabled { get; set; }
             public ToolPermissionFlags Permissions { get; set; }
@@ -32,14 +33,15 @@ namespace Andy.Cli.Widgets
             _entries.Add(new ToolEntry { CategoryName = categoryName });
         }
         
-        public void AddTool(string toolName, string description, bool isEnabled, ToolPermissionFlags permissions)
+        public void AddTool(string toolName, string description, bool isEnabled, ToolPermissionFlags permissions, string? toolId = null)
         {
             _entries.Add(new ToolEntry 
             { 
                 ToolName = toolName, 
                 Description = description, 
                 IsEnabled = isEnabled,
-                Permissions = permissions
+                Permissions = permissions,
+                ToolId = toolId
             });
         }
         
@@ -122,6 +124,14 @@ namespace Andy.Cli.Widgets
                         
                         // Render tool name
                         b.DrawText(new DL.TextRun(pos, y + renderedLines, entry.ToolName, whiteFg, blackBg, DL.CellAttrFlags.Bold));
+                        pos += entry.ToolName?.Length ?? 0;
+                        
+                        // Render tool ID if present
+                        if (!string.IsNullOrEmpty(entry.ToolId))
+                        {
+                            var idText = $" (ID: {entry.ToolId})";
+                            b.DrawText(new DL.TextRun(pos, y + renderedLines, idText, grayFg, blackBg, DL.CellAttrFlags.None));
+                        }
                         
                         renderedLines++;
                     }

@@ -89,7 +89,8 @@ public class ToolsCommand : ICommand
             foreach (var tool in group.OrderBy(t => t.Metadata.Name))
             {
                 var status = tool.IsEnabled ? "[OK]" : "[X]";
-                result.AppendLine($"  {status} {tool.Metadata.Name} - {tool.Metadata.Description}");
+                result.AppendLine($"  {status} {tool.Metadata.Name} (ID: {tool.Metadata.Id})");
+                result.AppendLine($"      {tool.Metadata.Description}");
                 
                 if (tool.Metadata.Parameters.Any())
                 {
@@ -112,7 +113,8 @@ public class ToolsCommand : ICommand
         }
 
         result.AppendLine("Tools are automatically available to the AI and will be called when needed.");
-        result.AppendLine("Use 'tools info <tool_name>' for detailed information about a specific tool.");
+        result.AppendLine("Use 'tools info <tool_id>' for detailed information about a specific tool.");
+        result.AppendLine("Example: tools info read_file");
 
         return CommandResult.CreateSuccess(result.ToString());
     }
@@ -121,10 +123,11 @@ public class ToolsCommand : ICommand
     {
         if (args.Length == 0)
         {
-            return CommandResult.Failure("Usage: tools info <tool_name>");
+            return CommandResult.Failure("Usage: tools info <tool_id>\nExample: tools info read_file\n\nUse 'tools list' to see all available tool IDs.");
         }
 
-        var toolName = args[0];
+        // Join all args in case the tool name has spaces (e.g., "Copy File")
+        var toolName = string.Join(" ", args).Trim('"', ' ');
         var registry = GetToolRegistry();
         
         if (registry == null)
@@ -135,13 +138,32 @@ public class ToolsCommand : ICommand
         var tool = registry.GetTool(toolName);
         if (tool == null)
         {
-            // Try to find by name instead of ID
+            // Try to find by name instead of ID (more flexible matching)
             tool = registry.Tools.FirstOrDefault(t => 
-                t.Metadata.Name.Equals(toolName, StringComparison.OrdinalIgnoreCase));
+                t.Metadata.Name.Equals(toolName, StringComparison.OrdinalIgnoreCase) ||
+                t.Metadata.Name.Replace(" ", "").Equals(toolName.Replace(" ", ""), StringComparison.OrdinalIgnoreCase) ||
+                t.Metadata.Id.Replace("_", "").Equals(toolName.Replace(" ", "").Replace("_", ""), StringComparison.OrdinalIgnoreCase));
             
             if (tool == null)
             {
-                return CommandResult.Failure($"Tool '{toolName}' not found.");
+                // Suggest similar tools
+                var similarTools = registry.Tools
+                    .Where(t => t.Metadata.Name.Contains(toolName, StringComparison.OrdinalIgnoreCase) ||
+                               t.Metadata.Id.Contains(toolName, StringComparison.OrdinalIgnoreCase))
+                    .Take(3)
+                    .ToList();
+                
+                var message = $"Tool '{toolName}' not found.";
+                if (similarTools.Any())
+                {
+                    message += "\n\nDid you mean one of these?";
+                    foreach (var similar in similarTools)
+                    {
+                        message += $"\n  - {similar.Metadata.Name} (ID: {similar.Metadata.Id})";
+                    }
+                }
+                message += "\n\nUse 'tools list' to see all available tools with their IDs.";
+                return CommandResult.Failure(message);
             }
         }
 
@@ -380,7 +402,8 @@ public class ToolsCommand : ICommand
                         tool.Metadata.Name,
                         tool.Metadata.Description,
                         tool.IsEnabled,
-                        tool.Metadata.RequiredPermissions
+                        tool.Metadata.RequiredPermissions,
+                        tool.Metadata.Id
                     );
                 }
             }
