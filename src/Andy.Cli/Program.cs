@@ -218,13 +218,13 @@ class Program
                     Description = "Show details about a specific tool",
                     Category = "Tools",
                     Aliases = new[] { "tool info", "tool details" },
-                    RequiredParams = new[] { "tool_id" },
-                    ParameterHint = "Example: read_file or copy_file",
+                    RequiredParams = new[] { "tool_id_or_name" },
+                    ParameterHint = "Enter tool ID (e.g., read_file, copy_file) or name (e.g., \"Copy File\")",
                     Action = async args => 
                     {
                         if (args.Length < 1)
                         {
-                            feed.AddMarkdownRich("Usage: Tool Info <tool_name>");
+                            feed.AddMarkdownRich("Usage: Tool Info <tool_id_or_name>\n\nExamples:\n- copy_file\n- \"Copy File\"\n- json_processor\n\nUse /tools list to see all available tool IDs.");
                         }
                         else
                         {
