@@ -166,7 +166,21 @@ public class CommandPalette
         int maxHeight = (int)Math.Min(20, viewport.Height - 6);
         // Ensure minimum height for at least one command + header
         int minHeight = 5; // title + search + separator + 1 command + hints
-        int height = (int)Math.Max(minHeight, Math.Min(maxHeight, _filteredCommands.Count + 4)); // +4 for UI elements
+        
+        // Calculate height based on mode
+        int height;
+        if (_waitingForParams)
+        {
+            // In parameter mode, we need more space for options
+            // Get available options to calculate needed height
+            var availableOptions = _availableOptionsProvider?.Invoke()?.Length ?? 0;
+            int neededHeight = Math.Min(availableOptions + 7, maxHeight); // +7 for UI elements
+            height = (int)Math.Max(15, neededHeight); // At least 15 lines for parameter mode
+        }
+        else
+        {
+            height = (int)Math.Max(minHeight, Math.Min(maxHeight, _filteredCommands.Count + 4)); // +4 for UI elements
+        }
         
         int x = (int)((viewport.Width - width) / 2);
         int y = (int)Math.Max(2, (viewport.Height - height) / 3); // Position in upper third
@@ -231,9 +245,10 @@ public class CommandPalette
                     wb.DrawText(new DL.TextRun(x + 2, optionsY, "Available options:", new DL.Rgb24(150, 200, 150), null, DL.CellAttrFlags.Bold));
                     
                     // Filter options based on current input
+                    int maxOptionsToShow = Math.Min(height - 7, 12); // Leave space for UI elements
                     var filteredOptions = string.IsNullOrEmpty(_paramInput) 
-                        ? options.Take(10).ToArray()
-                        : options.Where(o => o.Contains(_paramInput, StringComparison.OrdinalIgnoreCase)).Take(10).ToArray();
+                        ? options.Take(maxOptionsToShow).ToArray()
+                        : options.Where(o => o.Contains(_paramInput, StringComparison.OrdinalIgnoreCase)).Take(maxOptionsToShow).ToArray();
                     
                     int optionLine = optionsY + 1;
                     foreach (var option in filteredOptions)
