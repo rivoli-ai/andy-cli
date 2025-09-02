@@ -106,7 +106,7 @@ public static class CommandPaletteSetup
                 Description = "Show available AI tools",
                 Category = "Tools",
                 Aliases = new[] { "tools", "tool list" },
-                Action = async args => 
+                Action = args => 
                 {
                     var toolListItem = toolsCommand.CreateToolListItem();
                     feed.AddItem(toolListItem);

@@ -17,6 +17,8 @@ public class CommandPalette
     private CommandItem? _selectedCommand = null;
     private string _paramInput = "";
     private Func<string[]>? _availableOptionsProvider = null;
+    private int _optionsScrollOffset = 0;
+    private int _selectedOptionIndex = -1;
     
     public class CommandItem
     {
@@ -44,6 +46,8 @@ public class CommandPalette
         _waitingForParams = false;
         _selectedCommand = null;
         _paramInput = "";
+        _optionsScrollOffset = 0;
+        _selectedOptionIndex = -1;
         UpdateFilteredCommands();
     }
     
@@ -73,9 +77,30 @@ public class CommandPalette
     
     public void MoveSelection(int delta)
     {
-        if (_filteredCommands.Count == 0) return;
-        
-        _selectedIndex = Math.Clamp(_selectedIndex + delta, 0, _filteredCommands.Count - 1);
+        if (_waitingForParams && _availableOptionsProvider != null)
+        {
+            // Move through available options when in parameter mode
+            var options = _availableOptionsProvider();
+            if (options != null && options.Length > 0)
+            {
+                _selectedOptionIndex = Math.Clamp(_selectedOptionIndex + delta, -1, options.Length - 1);
+                
+                // Adjust scroll offset if needed
+                int maxVisibleOptions = 10; // Show up to 10 options at once
+                if (_selectedOptionIndex >= _optionsScrollOffset + maxVisibleOptions)
+                {
+                    _optionsScrollOffset = _selectedOptionIndex - maxVisibleOptions + 1;
+                }
+                else if (_selectedOptionIndex >= 0 && _selectedOptionIndex < _optionsScrollOffset)
+                {
+                    _optionsScrollOffset = _selectedOptionIndex;
+                }
+            }
+        }
+        else if (_filteredCommands.Count > 0)
+        {
+            _selectedIndex = Math.Clamp(_selectedIndex + delta, 0, _filteredCommands.Count - 1);
+        }
     }
     
     public CommandItem? GetSelected()
@@ -89,10 +114,24 @@ public class CommandPalette
     {
         if (_waitingForParams && _selectedCommand != null)
         {
+            // If an option is selected, use it as the parameter
+            string paramToUse = _paramInput;
+            if (_selectedOptionIndex >= 0 && _availableOptionsProvider != null)
+            {
+                var options = _availableOptionsProvider();
+                if (options != null && _selectedOptionIndex < options.Length)
+                {
+                    // Extract just the tool ID from "tool_id - Tool Name" format
+                    var selectedOption = options[_selectedOptionIndex];
+                    var dashIndex = selectedOption.IndexOf(" - ");
+                    paramToUse = dashIndex > 0 ? selectedOption.Substring(0, dashIndex) : selectedOption;
+                }
+            }
+            
             // Execute with the parameters entered
-            var argArray = string.IsNullOrWhiteSpace(_paramInput) 
+            var argArray = string.IsNullOrWhiteSpace(paramToUse) 
                 ? Array.Empty<string>() 
-                : _paramInput.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                : paramToUse.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             _selectedCommand.Action?.Invoke(argArray);
             Close();
         }
@@ -109,6 +148,8 @@ public class CommandPalette
                     _selectedCommand = selected;
                     _paramInput = "";
                     _availableOptionsProvider = selected.GetAvailableOptions;
+                    _optionsScrollOffset = 0;
+                    _selectedOptionIndex = -1;
                 }
                 else
                 {
@@ -245,23 +286,50 @@ public class CommandPalette
                     wb.DrawText(new DL.TextRun(x + 2, optionsY, "Available options:", new DL.Rgb24(150, 200, 150), null, DL.CellAttrFlags.Bold));
                     
                     // Filter options based on current input
-                    int maxOptionsToShow = Math.Min(height - 7, 12); // Leave space for UI elements
                     var filteredOptions = string.IsNullOrEmpty(_paramInput) 
-                        ? options.Take(maxOptionsToShow).ToArray()
-                        : options.Where(o => o.Contains(_paramInput, StringComparison.OrdinalIgnoreCase)).Take(maxOptionsToShow).ToArray();
+                        ? options
+                        : options.Where(o => o.Contains(_paramInput, StringComparison.OrdinalIgnoreCase)).ToArray();
+                    
+                    // Calculate visible range with scrolling
+                    int maxVisibleOptions = Math.Min(height - 8, 10); // Show up to 10 options at once
+                    int startIndex = _optionsScrollOffset;
+                    int endIndex = Math.Min(startIndex + maxVisibleOptions, filteredOptions.Length);
+                    
+                    // Show scroll indicators
+                    if (startIndex > 0)
+                    {
+                        wb.DrawText(new DL.TextRun(x + 4, optionsY + 1, $"▲ {startIndex} more above", new DL.Rgb24(120, 120, 150), null, DL.CellAttrFlags.Italic));
+                        optionsY++;
+                    }
                     
                     int optionLine = optionsY + 1;
-                    foreach (var option in filteredOptions)
+                    for (int i = startIndex; i < endIndex; i++)
                     {
-                        if (optionLine >= y + height - 2) break; // Leave space for hints
-                        wb.DrawText(new DL.TextRun(x + 4, optionLine, "• " + option, new DL.Rgb24(180, 180, 200), null, DL.CellAttrFlags.None));
+                        if (optionLine >= y + height - 3) break; // Leave space for hints and scroll indicator
+                        
+                        bool isSelected = i == _selectedOptionIndex;
+                        var bgColor = isSelected ? new DL.Rgb24(40, 40, 80) : (DL.Rgb24?)null;
+                        var fgColor = isSelected ? new DL.Rgb24(255, 255, 255) : new DL.Rgb24(180, 180, 200);
+                        
+                        if (isSelected)
+                        {
+                            wb.DrawRect(new DL.Rect(x + 4, optionLine, width - 8, 1, bgColor!.Value));
+                        }
+                        
+                        string prefix = isSelected ? "▸ " : "• ";
+                        wb.DrawText(new DL.TextRun(x + 4, optionLine, prefix + filteredOptions[i], fgColor, bgColor, isSelected ? DL.CellAttrFlags.Bold : DL.CellAttrFlags.None));
                         optionLine++;
                     }
                     
-                    if (options.Length > filteredOptions.Length)
+                    if (endIndex < filteredOptions.Length)
                     {
-                        wb.DrawText(new DL.TextRun(x + 4, optionLine, $"... and {options.Length - filteredOptions.Length} more", new DL.Rgb24(100, 100, 120), null, DL.CellAttrFlags.Italic));
+                        wb.DrawText(new DL.TextRun(x + 4, optionLine, $"▼ {filteredOptions.Length - endIndex} more below", new DL.Rgb24(120, 120, 150), null, DL.CellAttrFlags.Italic));
                     }
+                    
+                    // Show total count
+                    string countText = $"[{filteredOptions.Length} options]";
+                    int countX = x + width - countText.Length - 2;
+                    wb.DrawText(new DL.TextRun(countX, optionsY, countText, new DL.Rgb24(100, 150, 100), null, DL.CellAttrFlags.None));
                 }
             }
             return;
@@ -313,7 +381,9 @@ public class CommandPalette
         
         // Draw hints at bottom
         int hintsY = y + height - 1;
-        string hints = " ↑↓ Navigate  Enter Select  Esc Close ";
+        string hints = _waitingForParams 
+            ? " ↑↓ Select Option  Enter Confirm  Esc Cancel " 
+            : " ↑↓ Navigate  Enter Select  Esc Close ";
         int hintsX = x + (width - hints.Length) / 2;
         wb.DrawText(new DL.TextRun(hintsX, hintsY, hints, new DL.Rgb24(120, 120, 150), new DL.Rgb24(20, 20, 30), DL.CellAttrFlags.None));
         

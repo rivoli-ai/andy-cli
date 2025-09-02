@@ -206,7 +206,7 @@ class Program
                     Description = "Show available AI tools",
                     Category = "Tools",
                     Aliases = new[] { "tools", "tool list" },
-                    Action = async args => 
+                    Action = args => 
                     {
                         var toolListItem = toolsCommand.CreateToolListItem();
                         feed.AddItem(toolListItem);
@@ -404,7 +404,17 @@ class Program
                         // Check if we're in parameter input mode
                         if (commandPalette.IsWaitingForParams())
                         {
-                            if (k.Key == ConsoleKey.Enter)
+                            if (k.Key == ConsoleKey.UpArrow)
+                            {
+                                commandPalette.MoveSelection(-1);
+                                return;
+                            }
+                            else if (k.Key == ConsoleKey.DownArrow)
+                            {
+                                commandPalette.MoveSelection(1);
+                                return;
+                            }
+                            else if (k.Key == ConsoleKey.Enter)
                             {
                                 // Execute with the entered parameters
                                 commandPalette.ExecuteSelected();

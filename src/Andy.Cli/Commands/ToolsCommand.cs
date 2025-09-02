@@ -46,7 +46,12 @@ public class ToolsCommand : ICommand
         };
     }
 
-    private async Task<CommandResult> ListToolsAsync(string[] args, CancellationToken cancellationToken)
+    private Task<CommandResult> ListToolsAsync(string[] args, CancellationToken cancellationToken)
+    {
+        return Task.FromResult(ListTools(args));
+    }
+    
+    private CommandResult ListTools(string[] args)
     {
         var registry = GetToolRegistry();
         if (registry == null)
@@ -119,7 +124,12 @@ public class ToolsCommand : ICommand
         return CommandResult.CreateSuccess(result.ToString());
     }
 
-    private async Task<CommandResult> ShowToolInfoAsync(string[] args, CancellationToken cancellationToken)
+    private Task<CommandResult> ShowToolInfoAsync(string[] args, CancellationToken cancellationToken)
+    {
+        return Task.FromResult(ShowToolInfo(args));
+    }
+    
+    private CommandResult ShowToolInfo(string[] args)
     {
         if (args.Length == 0)
         {
