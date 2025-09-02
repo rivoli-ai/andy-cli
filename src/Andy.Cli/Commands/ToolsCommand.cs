@@ -180,23 +180,21 @@ public class ToolsCommand : ICommand
         var result = new StringBuilder();
         var metadata = tool.Metadata;
         
-        // Title with color
-        result.AppendLine($"## {metadata.Name}");
+        // Title
+        result.AppendLine($"# Tool: {metadata.Name}");
         result.AppendLine();
         
-        // Basic info table
-        result.AppendLine("### Tool Information");
-        result.AppendLine("| Property | Value |");
-        result.AppendLine("|----------|-------|");
-        result.AppendLine($"| **ID** | `{metadata.Id}` |");
-        result.AppendLine($"| **Name** | {metadata.Name} |");
-        result.AppendLine($"| **Version** | {metadata.Version} |");
-        result.AppendLine($"| **Category** | *{metadata.Category}* |");
-        result.AppendLine($"| **Status** | {(tool.IsEnabled ? "**Enabled**" : "Disabled")} |");
+        // Basic info section
+        result.AppendLine("## Information");
+        result.AppendLine($"  **ID:**          `{metadata.Id}`");
+        result.AppendLine($"  **Name:**        {metadata.Name}");
+        result.AppendLine($"  **Version:**     {metadata.Version}");
+        result.AppendLine($"  **Category:**    {metadata.Category}");
+        result.AppendLine($"  **Status:**      {(tool.IsEnabled ? "ENABLED" : "DISABLED")}");
         
         if (metadata.RequiredPermissions != ToolPermissionFlags.None)
         {
-            result.AppendLine($"| **Permissions** | `{metadata.RequiredPermissions}` |");
+            result.AppendLine($"  **Permissions:** {metadata.RequiredPermissions}");
         }
         
         result.AppendLine();
@@ -205,7 +203,7 @@ public class ToolsCommand : ICommand
         
         if (metadata.Parameters.Any())
         {
-            result.AppendLine("### Parameters");
+            result.AppendLine("## Parameters");
             result.AppendLine();
             
             // Group parameters by required/optional
@@ -214,65 +212,66 @@ public class ToolsCommand : ICommand
             
             if (requiredParams.Any())
             {
-                result.AppendLine("#### Required Parameters");
-                result.AppendLine("| Name | Type | Description |");
-                result.AppendLine("|------|------|-------------|");
+                result.AppendLine("### Required Parameters");
                 foreach (var param in requiredParams)
                 {
-                    result.AppendLine($"| **`{param.Name}`** | *{param.Type}* | {param.Description} |");
+                    result.AppendLine($"  **`{param.Name}`** (*{param.Type}*)");
+                    result.AppendLine($"    {param.Description}");
+                    result.AppendLine();
                 }
-                result.AppendLine();
             }
             
             if (optionalParams.Any())
             {
-                result.AppendLine("#### Optional Parameters");
-                result.AppendLine("| Name | Type | Default | Description |");
-                result.AppendLine("|------|------|---------|-------------|");
+                result.AppendLine("### Optional Parameters");
                 foreach (var param in optionalParams)
                 {
-                    var defaultVal = param.DefaultValue != null ? $"`{param.DefaultValue}`" : "-";
-                    result.AppendLine($"| `{param.Name}` | *{param.Type}* | {defaultVal} | {param.Description} |");
+                    result.AppendLine($"  **`{param.Name}`** (*{param.Type}*)");
+                    result.AppendLine($"    {param.Description}");
+                    
+                    if (param.DefaultValue != null)
+                    {
+                        result.AppendLine($"    Default: `{param.DefaultValue}`");
+                    }
                     
                     if (param.AllowedValues != null && param.AllowedValues.Any())
                     {
-                        result.AppendLine($"|  |  | **Allowed:** | `{string.Join("`, `", param.AllowedValues)}` |");
+                        result.AppendLine($"    Allowed values: `{string.Join("`, `", param.AllowedValues)}`");
                     }
                     
                     if (!string.IsNullOrEmpty(param.Pattern))
                     {
-                        result.AppendLine($"|  |  | **Pattern:** | `{param.Pattern}` |");
+                        result.AppendLine($"    Pattern: `{param.Pattern}`");
                     }
+                    
+                    result.AppendLine();
                 }
-                result.AppendLine();
             }
         }
         
         if (metadata.Examples.Any())
         {
-            result.AppendLine("### Examples");
+            result.AppendLine("## Examples");
             result.AppendLine();
             int exampleNum = 1;
             foreach (var example in metadata.Examples)
             {
                 result.AppendLine($"**Example {exampleNum}: {example.Name}**");
-                result.AppendLine($"> {example.Description}");
+                result.AppendLine($"  {example.Description}");
                 
                 if (example.Parameters.Any())
                 {
                     result.AppendLine();
-                    result.AppendLine("```");
+                    result.AppendLine("  Parameters:");
                     foreach (var param in example.Parameters)
                     {
-                        result.AppendLine($"{param.Key} = {param.Value?.ToString() ?? "null"}");
+                        result.AppendLine($"    {param.Key} = {param.Value?.ToString() ?? "null"}");
                     }
-                    result.AppendLine("```");
                 }
                 
                 if (example.ExpectedOutput != null)
                 {
-                    result.AppendLine();
-                    result.AppendLine($"Expected output: `{example.ExpectedOutput}`");
+                    result.AppendLine($"  Expected output: {example.ExpectedOutput}");
                 }
                 result.AppendLine();
                 exampleNum++;
