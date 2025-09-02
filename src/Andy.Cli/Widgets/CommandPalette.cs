@@ -144,13 +144,13 @@ public class CommandPalette
         
         // Draw search box (directly after title, no gap)
         int searchY = y + 1;
-        wb.DrawText(new DL.TextRun(x + 2, searchY, "🔍 ", new DL.Rgb24(150, 150, 200), null, DL.CellAttrFlags.None));
-        wb.DrawText(new DL.TextRun(x + 5, searchY, _query, new DL.Rgb24(255, 255, 255), null, DL.CellAttrFlags.None));
+        wb.DrawText(new DL.TextRun(x + 2, searchY, "> ", new DL.Rgb24(150, 150, 200), null, DL.CellAttrFlags.None));
+        wb.DrawText(new DL.TextRun(x + 4, searchY, _query, new DL.Rgb24(255, 255, 255), null, DL.CellAttrFlags.None));
         
         // Draw cursor in search box
         if (!string.IsNullOrEmpty(_query) || true) // Always show cursor
         {
-            int cursorX = x + 5 + _query.Length;
+            int cursorX = x + 4 + _query.Length;
             wb.DrawText(new DL.TextRun(cursorX, searchY, "│", new DL.Rgb24(255, 255, 100), null, DL.CellAttrFlags.None));
         }
         

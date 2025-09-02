@@ -50,7 +50,7 @@ class Program
             var feed = new FeedView();
             feed.SetFocused(false);
             feed.SetAnimationSpeed(8); // faster scroll-in
-            feed.AddMarkdownRich("✨ **Ready to assist!** What can I help you learn or explore today?");
+            feed.AddMarkdownRich("**Ready to assist!** What can I help you learn or explore today?");
             
             // Initialize Andy.Llm services
             var services = new ServiceCollection();
@@ -132,7 +132,7 @@ class Program
                                 llmClient = modelCommand.GetCurrentClient();
                                 conversation.Clear();
                                 conversation.SystemInstruction = "You are a helpful AI assistant. Keep your responses concise and helpful.";
-                                feed.AddMarkdownRich($"💡 *Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
+                                feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
                             }
                         }
                     }
@@ -171,7 +171,7 @@ class Program
                     {
                         conversation.Clear();
                         feed.Clear();
-                        feed.AddMarkdownRich("✨ **Chat cleared!** Ready for a fresh conversation.");
+                        feed.AddMarkdownRich("**Chat cleared!** Ready for a fresh conversation.");
                     }
                 },
                 new CommandPalette.CommandItem 
@@ -344,7 +344,7 @@ class Program
                                         llmClient = modelCommand.GetCurrentClient();
                                         conversation.Clear();
                                         conversation.SystemInstruction = "You are a helpful AI assistant. Keep your responses concise and helpful.";
-                                        feed.AddMarkdownRich($"💡 *Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
+                                        feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
                                     }
                                     return;
                                 }
@@ -373,13 +373,13 @@ class Program
                                 {
                                     conversation.Clear();
                                     feed.Clear();
-                                    feed.AddMarkdownRich("✨ **Chat cleared!** Ready for a fresh conversation.");
+                                    feed.AddMarkdownRich("**Chat cleared!** Ready for a fresh conversation.");
                                     return;
                                 }
                                 else
                                 {
                                     feed.AddUserMessage(cmd);
-                                    feed.AddMarkdownRich($"❌ Unknown command: /{commandName}. Type /help for available commands.");
+                                    feed.AddMarkdownRich($"Unknown command: /{commandName}. Type /help for available commands.");
                                     return;
                                 }
                             }

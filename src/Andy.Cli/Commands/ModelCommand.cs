@@ -51,7 +51,7 @@ public class ModelCommand : ICommand
     private async Task<CommandResult> ListModelsAsync(CancellationToken cancellationToken)
     {
         var result = new StringBuilder();
-        result.AppendLine("🤖 Available Models:");
+        result.AppendLine("Available Models:");
         result.AppendLine();
         
         // Define available models based on what each provider typically offers
@@ -89,13 +89,13 @@ public class ModelCommand : ICommand
         
         foreach (var provider in providers.OrderBy(p => p.Key))
         {
-            result.AppendLine($"📦 {char.ToUpper(provider.Key[0]) + provider.Key.Substring(1)}:");
+            result.AppendLine($"{char.ToUpper(provider.Key[0]) + provider.Key.Substring(1)}:");
             
             foreach (var model in provider.Value)
             {
                 var isCurrent = _currentProvider == provider.Key && model.name == currentModel;
                 var indicator = isCurrent ? "→ " : "  ";
-                var status = model.available ? "✅" : "❌";
+                var status = model.available ? "[OK]" : "[X]";
                 var availability = model.available ? "" : " (API key required)";
                 
                 result.AppendLine($"{indicator}{status} {model.name}{availability}");
@@ -110,24 +110,24 @@ public class ModelCommand : ICommand
         // Show current active model
         if (_currentClient != null)
         {
-            result.AppendLine($"📍 Current: {_currentProvider} - {currentModel}");
+            result.AppendLine($"Current: {_currentProvider} - {currentModel}");
             result.AppendLine();
         }
         
         // Show which API keys are set
         var apiKeyStatus = new List<string>();
-        if (HasApiKey("cerebras")) apiKeyStatus.Add("CEREBRAS_API_KEY ✅");
-        if (HasApiKey("openai")) apiKeyStatus.Add("OPENAI_API_KEY ✅");
-        if (HasApiKey("anthropic")) apiKeyStatus.Add("ANTHROPIC_API_KEY ✅");
-        if (HasApiKey("gemini")) apiKeyStatus.Add("GOOGLE_API_KEY ✅");
+        if (HasApiKey("cerebras")) apiKeyStatus.Add("CEREBRAS_API_KEY [SET]");
+        if (HasApiKey("openai")) apiKeyStatus.Add("OPENAI_API_KEY [SET]");
+        if (HasApiKey("anthropic")) apiKeyStatus.Add("ANTHROPIC_API_KEY [SET]");
+        if (HasApiKey("gemini")) apiKeyStatus.Add("GOOGLE_API_KEY [SET]");
         
         if (apiKeyStatus.Any())
         {
-            result.AppendLine($"🔑 API Keys Set: {string.Join(", ", apiKeyStatus)}");
+            result.AppendLine($"API Keys Set: {string.Join(", ", apiKeyStatus)}");
         }
         else
         {
-            result.AppendLine("⚠️ No API keys found. Set environment variables:");
+            result.AppendLine("Warning: No API keys found. Set environment variables:");
             result.AppendLine("   CEREBRAS_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, or GOOGLE_API_KEY");
         }
         
@@ -146,7 +146,7 @@ public class ModelCommand : ICommand
         
         if (!HasApiKey(provider))
         {
-            return Task.FromResult(CommandResult.Failure($"❌ No API key found for {provider}. Set {GetApiKeyName(provider)} environment variable."));
+            return Task.FromResult(CommandResult.Failure($"Error: No API key found for {provider}. Set {GetApiKeyName(provider)} environment variable."));
         }
         
         try
@@ -166,32 +166,32 @@ public class ModelCommand : ICommand
             _currentClient = newProvider.GetService<LlmClient>();
             _currentProvider = provider;
             
-            return Task.FromResult(CommandResult.CreateSuccess($"✅ Switched to {provider} - {modelName ?? GetDefaultModel(provider)}"));
+            return Task.FromResult(CommandResult.CreateSuccess($"Successfully switched to {provider} - {modelName ?? GetDefaultModel(provider)}"));
         }
         catch (Exception ex)
         {
-            return Task.FromResult(CommandResult.Failure($"❌ Failed to switch model: {ex.Message}"));
+            return Task.FromResult(CommandResult.Failure($"Error: Failed to switch model: {ex.Message}"));
         }
     }
     
     private Task<CommandResult> ShowModelInfoAsync(CancellationToken cancellationToken)
     {
         var info = new StringBuilder();
-        info.AppendLine("🔍 Current Model Information");
+        info.AppendLine("Current Model Information");
         info.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         info.AppendLine();
         
-        info.AppendLine($"📦 Provider: {_currentProvider}");
-        info.AppendLine($"🏷️ Model: {GetDefaultModel(_currentProvider)}");
-        info.AppendLine($"✅ Status: {(_currentClient != null ? "Connected" : "Not connected")}");
-        info.AppendLine($"🔑 API Key: {(HasApiKey(_currentProvider) ? "Set" : "Not set")}");
+        info.AppendLine($"Provider: {_currentProvider}");
+        info.AppendLine($"Model: {GetDefaultModel(_currentProvider)}");
+        info.AppendLine($"Status: {(_currentClient != null ? "Connected" : "Not connected")}");
+        info.AppendLine($"API Key: {(HasApiKey(_currentProvider) ? "Set" : "Not set")}");
         
         // Model-specific information
         var modelInfo = GetModelInfo(_currentProvider);
         if (!string.IsNullOrEmpty(modelInfo))
         {
             info.AppendLine();
-            info.AppendLine("⚙️ Specifications:");
+            info.AppendLine("Specifications:");
             info.AppendLine(modelInfo);
         }
         
@@ -202,7 +202,7 @@ public class ModelCommand : ICommand
     {
         if (_currentClient == null)
         {
-            return CommandResult.Failure("❌ No model connected. Use 'model switch' to select a provider.");
+            return CommandResult.Failure("Error: No model connected. Use 'model switch' to select a provider.");
         }
         
         var prompt = args.Length > 0 
@@ -226,22 +226,22 @@ public class ModelCommand : ICommand
             var elapsed = DateTime.UtcNow - startTime;
             
             var result = new StringBuilder();
-            result.AppendLine("🧪 Model Test Results:");
+            result.AppendLine("Model Test Results:");
             result.AppendLine();
-            result.AppendLine($"📝 Prompt: {prompt}");
-            result.AppendLine($"⚡ Response: {response.Content}");
-            result.AppendLine($"⏱️ Response Time: {elapsed.TotalMilliseconds:F0}ms");
+            result.AppendLine($"Prompt: {prompt}");
+            result.AppendLine($"Response: {response.Content}");
+            result.AppendLine($"Response Time: {elapsed.TotalMilliseconds:F0}ms");
             
             if (response.TokensUsed.HasValue)
             {
-                result.AppendLine($"🔢 Tokens Used: {response.TokensUsed.Value}");
+                result.AppendLine($"Tokens Used: {response.TokensUsed.Value}");
             }
             
             return CommandResult.CreateSuccess(result.ToString());
         }
         catch (Exception ex)
         {
-            return CommandResult.Failure($"❌ Model test failed: {ex.Message}");
+            return CommandResult.Failure($"Error: Model test failed: {ex.Message}");
         }
     }
     
@@ -285,10 +285,10 @@ public class ModelCommand : ICommand
     {
         return provider switch
         {
-            "cerebras" => "  📏 Context: 8,192 tokens\n  ⚡ Speed: Ultra-fast inference\n  💰 Cost: $0.15/M input, $0.15/M output",
-            "openai" => "  📏 Context: 128,000 tokens\n  🎯 Features: Multimodal, function calling\n  💰 Cost: $5/M input, $15/M output",
-            "anthropic" => "  📏 Context: 200,000 tokens\n  🎯 Features: Constitutional AI\n  💰 Cost: $3/M input, $15/M output",
-            "gemini" => "  📏 Context: 1M+ tokens\n  🎯 Features: Multimodal, code execution\n  💰 Cost: Free tier available",
+            "cerebras" => "  Context: 8,192 tokens\n  Speed: Ultra-fast inference\n  Cost: $0.15/M input, $0.15/M output",
+            "openai" => "  Context: 128,000 tokens\n  Features: Multimodal, function calling\n  Cost: $5/M input, $15/M output",
+            "anthropic" => "  Context: 200,000 tokens\n  Features: Constitutional AI\n  Cost: $3/M input, $15/M output",
+            "gemini" => "  Context: 1M+ tokens\n  Features: Multimodal, code execution\n  Cost: Free tier available",
             _ => ""
         };
     }
