@@ -16,6 +16,7 @@ public class CommandPalette
     private bool _waitingForParams = false;
     private CommandItem? _selectedCommand = null;
     private string _paramInput = "";
+    private Func<string[]>? _availableOptionsProvider = null;
     
     public class CommandItem
     {
@@ -26,6 +27,7 @@ public class CommandPalette
         public string[] Aliases { get; set; } = Array.Empty<string>();
         public string[] RequiredParams { get; set; } = Array.Empty<string>();
         public string ParameterHint { get; set; } = "";
+        public Func<string[]>? GetAvailableOptions { get; set; }
     }
     
     public void SetCommands(IEnumerable<CommandItem> commands)
@@ -106,6 +108,7 @@ public class CommandPalette
                     _waitingForParams = true;
                     _selectedCommand = selected;
                     _paramInput = "";
+                    _availableOptionsProvider = selected.GetAvailableOptions;
                 }
                 else
                 {
@@ -214,10 +217,39 @@ public class CommandPalette
         // Draw separator
         wb.DrawText(new DL.TextRun(x + 1, searchY + 1, new string('─', width - 2), new DL.Rgb24(60, 60, 80), null, DL.CellAttrFlags.None));
         
-        // Draw filtered commands (skip if waiting for params)
+        // Draw filtered commands or available options
         if (_waitingForParams)
         {
-            return; // Don't show command list when entering parameters
+            // Show available options if provider is available
+            if (_availableOptionsProvider != null)
+            {
+                var options = _availableOptionsProvider();
+                if (options != null && options.Length > 0)
+                {
+                    // Draw available options section
+                    int optionsY = searchY + 3;
+                    wb.DrawText(new DL.TextRun(x + 2, optionsY, "Available options:", new DL.Rgb24(150, 200, 150), null, DL.CellAttrFlags.Bold));
+                    
+                    // Filter options based on current input
+                    var filteredOptions = string.IsNullOrEmpty(_paramInput) 
+                        ? options.Take(10).ToArray()
+                        : options.Where(o => o.Contains(_paramInput, StringComparison.OrdinalIgnoreCase)).Take(10).ToArray();
+                    
+                    int optionLine = optionsY + 1;
+                    foreach (var option in filteredOptions)
+                    {
+                        if (optionLine >= y + height - 2) break; // Leave space for hints
+                        wb.DrawText(new DL.TextRun(x + 4, optionLine, "• " + option, new DL.Rgb24(180, 180, 200), null, DL.CellAttrFlags.None));
+                        optionLine++;
+                    }
+                    
+                    if (options.Length > filteredOptions.Length)
+                    {
+                        wb.DrawText(new DL.TextRun(x + 4, optionLine, $"... and {options.Length - filteredOptions.Length} more", new DL.Rgb24(100, 100, 120), null, DL.CellAttrFlags.Italic));
+                    }
+                }
+            }
+            return;
         }
         
         int listY = searchY + 2;

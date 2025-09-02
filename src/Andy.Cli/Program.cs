@@ -220,6 +220,20 @@ class Program
                     Aliases = new[] { "tool info", "tool details" },
                     RequiredParams = new[] { "tool_id_or_name" },
                     ParameterHint = "Enter tool ID (e.g., read_file, copy_file) or name (e.g., \"Copy File\")",
+                    GetAvailableOptions = () =>
+                    {
+                        // Get all available tool IDs from the registry
+                        var registry = toolsCommand.GetToolRegistry();
+                        if (registry != null)
+                        {
+                            return registry.Tools
+                                .OrderBy(t => t.Metadata.Category)
+                                .ThenBy(t => t.Metadata.Name)
+                                .Select(t => $"{t.Metadata.Id} - {t.Metadata.Name}")
+                                .ToArray();
+                        }
+                        return Array.Empty<string>();
+                    },
                     Action = async args => 
                     {
                         if (args.Length < 1)
@@ -241,6 +255,20 @@ class Program
                     Aliases = new[] { "tool exec", "tool run" },
                     RequiredParams = new[] { "tool_id", "params..." },
                     ParameterHint = "Example: read_file file_path=/etc/hosts",
+                    GetAvailableOptions = () =>
+                    {
+                        // Get all available tool IDs from the registry
+                        var registry = toolsCommand.GetToolRegistry();
+                        if (registry != null)
+                        {
+                            return registry.Tools
+                                .OrderBy(t => t.Metadata.Category)
+                                .ThenBy(t => t.Metadata.Name)
+                                .Select(t => $"{t.Metadata.Id} - {t.Metadata.Name}")
+                                .ToArray();
+                        }
+                        return Array.Empty<string>();
+                    },
                     Action = async args => 
                     {
                         if (args.Length < 1)

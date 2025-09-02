@@ -372,7 +372,7 @@ public class ToolsCommand : ICommand
         return CommandResult.CreateSuccess(help.ToString());
     }
 
-    private IToolRegistry? GetToolRegistry()
+    public IToolRegistry? GetToolRegistry()
     {
         if (_toolRegistry == null)
         {
