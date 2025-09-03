@@ -28,6 +28,49 @@ class Program
     private const int MIN_WIDTH = 40;
     private const int MIN_HEIGHT = 10;
     
+    // Git info cache
+    private static string? _gitBranch;
+    private static string? _gitCommit;
+    
+    private static (string branch, string commit) GetGitInfo()
+    {
+        if (_gitBranch == null || _gitCommit == null)
+        {
+            try
+            {
+                // Get current branch
+                var branchProcess = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "git",
+                    Arguments = "branch --show-current",
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                });
+                _gitBranch = branchProcess?.StandardOutput.ReadToEnd().Trim() ?? "unknown";
+                branchProcess?.WaitForExit();
+                
+                // Get short commit hash
+                var commitProcess = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "git",
+                    Arguments = "rev-parse --short HEAD",
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                });
+                _gitCommit = commitProcess?.StandardOutput.ReadToEnd().Trim() ?? "unknown";
+                commitProcess?.WaitForExit();
+            }
+            catch
+            {
+                _gitBranch = "unknown";
+                _gitCommit = "unknown";
+            }
+        }
+        return (_gitBranch, _gitCommit);
+    }
+    
     static async Task Main(string[] args)
     {
         // Check if we have command-line arguments for non-TUI commands
@@ -825,7 +868,9 @@ class Program
                 var b = new DL.DisplayListBuilder();
                 b.PushClip(new DL.ClipPush(0,0,viewport.Width, viewport.Height));
                 b.DrawRect(new DL.Rect(0,0,viewport.Width, viewport.Height, new DL.Rgb24(0,0,0)));
-                b.DrawText(new DL.TextRun(2,1, "Andy CLI — Ctrl+P:Commands  ESC:Quit  F2:HUD", new DL.Rgb24(200,200,50), null, DL.CellAttrFlags.Bold));
+                var gitInfo = GetGitInfo();
+                var headerText = $"Andy CLI [{gitInfo.branch}@{gitInfo.commit}]";
+                b.DrawText(new DL.TextRun(2,1, headerText, new DL.Rgb24(200,200,50), null, DL.CellAttrFlags.Bold));
                 var baseDl = b.Build();
                 var wb = new DL.DisplayListBuilder();
                 hints.Render(viewport, baseDl, wb);
