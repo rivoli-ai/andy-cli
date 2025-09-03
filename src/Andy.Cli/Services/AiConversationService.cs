@@ -109,8 +109,8 @@ public class AiConversationService
                         toolCall.Parameters,
                         cancellationToken);
                     
-                    // Add to context
-                    var outputStr = result.Output?.ToString() ?? result.Error ?? "No output";
+                    // Add to context - use FullOutput which contains the properly serialized data
+                    var outputStr = result.FullOutput ?? result.ErrorMessage ?? "No output";
                     _contextManager.AddToolExecution(
                         toolCall.ToolId,
                         toolCall.Parameters,

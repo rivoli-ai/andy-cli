@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Andy.Tools.Core;
@@ -98,7 +99,24 @@ public class ToolExecutionService
                 _feed.AddMarkdownRich($"**Tool completed successfully**");
                 
                 // Display the output if available
-                var output = result.Output?.ToString() ?? "";
+                string output = "";
+                
+                // Handle different output types
+                if (result.Data != null)
+                {
+                    // If Data is populated, serialize it as JSON
+                    output = JsonSerializer.Serialize(result.Data, new JsonSerializerOptions 
+                    { 
+                        WriteIndented = true,
+                        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                    });
+                }
+                else if (result.Output != null)
+                {
+                    // Fallback to Output property
+                    output = result.Output.ToString() ?? "";
+                }
+                
                 if (!string.IsNullOrEmpty(output))
                 {
                     fullOutput.Append(output);
@@ -109,7 +127,7 @@ public class ToolExecutionService
                     {
                         if (displayedLines < _maxDisplayLines)
                         {
-                            _feed.AddCode(line, "output");
+                            _feed.AddCode(line, "json");
                             displayedLines++;
                         }
                         else if (!truncated)
@@ -132,7 +150,7 @@ public class ToolExecutionService
                 _feed.AddMarkdownRich($"**Tool execution failed:** {result.Error}");
             }
 
-            // Create extended result with full output
+            // Create extended result with properly serialized output
             var extendedResult = new ToolExecutionResult
             {
                 IsSuccessful = result.IsSuccessful,
@@ -141,7 +159,7 @@ public class ToolExecutionService
                 Metadata = result.Metadata,
                 DurationMs = result.DurationMs,
                 Message = result.Message,
-                FullOutput = fullOutput.ToString(),
+                FullOutput = fullOutput.Length > 0 ? fullOutput.ToString() : (result.Message ?? ""),
                 TruncatedForDisplay = truncated
             };
             
