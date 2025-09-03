@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Andy.Tui.Backend.Terminal;
@@ -104,16 +105,62 @@ class Program
             var commandPalette = new CommandPalette();
             
             LlmClient? llmClient = null;
+            AiConversationService? aiService = null;
+            
+            // Build system prompt with tool awareness
+            var systemPromptBuilder = new StringBuilder();
+            systemPromptBuilder.AppendLine("You are an AI assistant with access to tools that can help you complete tasks.");
+            systemPromptBuilder.AppendLine();
+            systemPromptBuilder.AppendLine("## Available Tools");
+            systemPromptBuilder.AppendLine("You have access to the following tools:");
+            systemPromptBuilder.AppendLine();
+            
+            // Add tool descriptions
+            var availableTools = toolRegistry.GetTools(enabledOnly: true);
+            foreach (var tool in availableTools)
+            {
+                systemPromptBuilder.AppendLine($"- **{tool.Metadata.Id}**: {tool.Metadata.Description}");
+            }
+            
+            systemPromptBuilder.AppendLine();
+            systemPromptBuilder.AppendLine("## Tool Usage Instructions");
+            systemPromptBuilder.AppendLine("When you need to use a tool to complete a task, use the following format:");
+            systemPromptBuilder.AppendLine("```");
+            systemPromptBuilder.AppendLine("<tool_use>");
+            systemPromptBuilder.AppendLine("{");
+            systemPromptBuilder.AppendLine("  \"tool\": \"tool_id\",");
+            systemPromptBuilder.AppendLine("  \"parameters\": {");
+            systemPromptBuilder.AppendLine("    \"param_name\": \"value\"");
+            systemPromptBuilder.AppendLine("  }");
+            systemPromptBuilder.AppendLine("}");
+            systemPromptBuilder.AppendLine("</tool_use>");
+            systemPromptBuilder.AppendLine("```");
+            systemPromptBuilder.AppendLine();
+            systemPromptBuilder.AppendLine("Examples:");
+            systemPromptBuilder.AppendLine("- If asked to list files or directories, use list_directory");
+            systemPromptBuilder.AppendLine("- If asked to read a file, use read_file");
+            systemPromptBuilder.AppendLine("- If asked to write or save a file, use write_file");
+            systemPromptBuilder.AppendLine("- If asked about system information, use process_info");
+            systemPromptBuilder.AppendLine();
+            systemPromptBuilder.AppendLine("IMPORTANT: Always use tools when they can help fulfill the user's request rather than explaining what you would do.");
+            
             var conversation = new ConversationContext
             {
-                SystemInstruction = "You are a helpful AI assistant. Keep your responses concise and helpful.",
+                SystemInstruction = systemPromptBuilder.ToString(),
                 MaxContextMessages = 20
             };
             
             try
             {
                 llmClient = serviceProvider.GetRequiredService<LlmClient>();
-                feed.AddMarkdownRich("[model] Andy.Llm with Cerebras provider");
+                var toolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
+                aiService = new AiConversationService(
+                    llmClient,
+                    toolRegistry,
+                    toolExecutor,
+                    feed,
+                    systemPromptBuilder.ToString());
+                feed.AddMarkdownRich("[model] Andy.Llm with Cerebras provider (tool-enabled)");
             }
             catch (Exception ex)
             {
@@ -170,7 +217,20 @@ class Program
                                 // Update the LLM client and reset conversation context
                                 llmClient = modelCommand.GetCurrentClient();
                                 conversation.Clear();
-                                conversation.SystemInstruction = "You are a helpful AI assistant. Keep your responses concise and helpful.";
+                                conversation.SystemInstruction = systemPromptBuilder.ToString();
+                                
+                                // Update AI service with new client
+                                if (llmClient != null)
+                                {
+                                    var toolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
+                                    aiService = new AiConversationService(
+                                        llmClient,
+                                        toolRegistry,
+                                        toolExecutor,
+                                        feed,
+                                        systemPromptBuilder.ToString());
+                                }
+                                
                                 feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
                             }
                         }
@@ -291,6 +351,10 @@ class Program
                     Action = args => 
                     {
                         conversation.Clear();
+                        if (aiService != null)
+                        {
+                            aiService.ClearContext();
+                        }
                         feed.Clear();
                         feed.AddMarkdownRich("**Chat cleared!** Ready for a fresh conversation.");
                     }
@@ -564,7 +628,20 @@ class Program
                                             // Update the LLM client and reset conversation context
                                             llmClient = modelCommand.GetCurrentClient();
                                             conversation.Clear();
-                                            conversation.SystemInstruction = "You are a helpful AI assistant. Keep your responses concise and helpful.";
+                                            conversation.SystemInstruction = systemPromptBuilder.ToString();
+                                            
+                                            // Update AI service with new client
+                                            if (llmClient != null)
+                                            {
+                                                var toolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
+                                                aiService = new AiConversationService(
+                                                    llmClient,
+                                                    toolRegistry,
+                                                    toolExecutor,
+                                                    feed,
+                                                    systemPromptBuilder.ToString());
+                                            }
+                                            
                                             feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
                                         }
                                     }
@@ -621,6 +698,10 @@ class Program
                                 else if (commandName == "clear")
                                 {
                                     conversation.Clear();
+                                    if (aiService != null)
+                                    {
+                                        aiService.ClearContext();
+                                    }
                                     feed.Clear();
                                     feed.AddMarkdownRich("**Chat cleared!** Ready for a fresh conversation.");
                                     return;
@@ -636,8 +717,30 @@ class Program
                         
                         // Regular chat message
                         feed.AddUserMessage(cmd);
-                        if (llmClient is not null)
+                        if (aiService != null)
                         {
+                            try
+                            {
+                                statusMessage.SetMessage("Thinking", animated: true);
+                                
+                                // Process message with tool support and streaming
+                                var response = await aiService.ProcessMessageAsync(cmd, enableStreaming: true);
+                                
+                                // Get context stats for token counting
+                                var stats = aiService.GetContextStats();
+                                tokenCounter.AddTokens(stats.EstimatedTokens / 2, stats.EstimatedTokens / 2);
+                                
+                                statusMessage.SetMessage("Ready for next question", animated: false);
+                            }
+                            catch (Exception ex) 
+                            { 
+                                feed.AddMarkdownRich(ConsoleColors.ErrorPrefix(ex.Message)); 
+                                statusMessage.SetMessage("Error occurred", animated: false);
+                            }
+                        }
+                        else if (llmClient is not null)
+                        {
+                            // Fallback to non-tool-aware conversation
                             try
                             {
                                 statusMessage.SetMessage("Thinking", animated: true);

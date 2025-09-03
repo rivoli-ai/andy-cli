@@ -39,10 +39,21 @@ public class AiConversationService
     }
 
     /// <summary>
+    /// Process a user message with tool support and streaming responses
+    /// </summary>
+    public async Task<string> ProcessMessageAsync(
+        string userMessage,
+        CancellationToken cancellationToken = default)
+    {
+        return await ProcessMessageAsync(userMessage, enableStreaming: false, cancellationToken);
+    }
+    
+    /// <summary>
     /// Process a user message with tool support
     /// </summary>
     public async Task<string> ProcessMessageAsync(
         string userMessage,
+        bool enableStreaming,
         CancellationToken cancellationToken = default)
     {
         // Add user message to context
@@ -63,8 +74,10 @@ public class AiConversationService
         {
             iteration++;
             
-            // Get LLM response
-            var response = await GetLlmResponseAsync(request, cancellationToken);
+            // Get LLM response with streaming if enabled
+            var response = enableStreaming 
+                ? await GetLlmStreamingResponseAsync(request, cancellationToken)
+                : await GetLlmResponseAsync(request, cancellationToken);
             
             if (response == null)
             {
@@ -198,10 +211,44 @@ public class AiConversationService
     {
         try
         {
-            // For now, use non-streaming API
-            // TODO: Implement streaming support
             var response = await _llmClient.CompleteAsync(request, cancellationToken);
             return response;
+        }
+        catch (Exception ex)
+        {
+            _feed.AddMarkdownRich($"**LLM Error:** {ex.Message}");
+            return null;
+        }
+    }
+    
+    /// <summary>
+    /// Get LLM response with streaming enabled
+    /// </summary>
+    private async Task<LlmResponse?> GetLlmStreamingResponseAsync(
+        LlmRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var fullContent = new StringBuilder();
+            var streamingMessage = _feed.AddStreamingMessage();
+            
+            await foreach (var chunk in _llmClient.StreamCompleteAsync(request, cancellationToken))
+            {
+                if (!string.IsNullOrEmpty(chunk.TextDelta))
+                {
+                    fullContent.Append(chunk.TextDelta);
+                    streamingMessage.AppendContent(chunk.TextDelta);
+                }
+            }
+            
+            streamingMessage.Complete();
+            
+            // Return the complete response
+            return new LlmResponse
+            {
+                Content = fullContent.ToString()
+            };
         }
         catch (Exception ex)
         {

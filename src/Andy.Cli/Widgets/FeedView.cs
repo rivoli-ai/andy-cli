@@ -42,6 +42,14 @@ namespace Andy.Cli.Widgets
         }
         /// <summary>Append a response separator with token information.</summary>
         public void AddResponseSeparator(int inputTokens = 0, int outputTokens = 0, string pattern = "━━ ◆ ━━") => AddItem(new ResponseSeparatorItem(inputTokens, outputTokens, pattern));
+        
+        /// <summary>Add a streaming message that can be updated progressively.</summary>
+        public StreamingMessageItem AddStreamingMessage()
+        {
+            var item = new StreamingMessageItem();
+            AddItem(item);
+            return item;
+        }
 
         /// <summary>Clear all items from the feed.</summary>
         public void Clear()
@@ -512,6 +520,87 @@ namespace Andy.Cli.Widgets
                     }
                     if (width >= 1) b.DrawText(new DL.TextRun(x, row, "│", borderColor, new DL.Rgb24(0,0,0), DL.CellAttrFlags.None));
                     if (width >= 2) b.DrawText(new DL.TextRun(x + width - 1, row, "│", borderColor, new DL.Rgb24(0,0,0), DL.CellAttrFlags.None));
+                }
+            }
+        }
+    }
+    
+    /// <summary>A streaming message that can be updated progressively.</summary>
+    public sealed class StreamingMessageItem : IFeedItem
+    {
+        private readonly System.Text.StringBuilder _content = new();
+        private bool _completed = false;
+        private string[] _lines = Array.Empty<string>();
+        
+        /// <summary>Append content to the streaming message.</summary>
+        public void AppendContent(string content)
+        {
+            if (!_completed)
+            {
+                _content.Append(content);
+                UpdateLines();
+            }
+        }
+        
+        /// <summary>Mark the streaming message as complete.</summary>
+        public void Complete()
+        {
+            _completed = true;
+        }
+        
+        private void UpdateLines()
+        {
+            _lines = _content.ToString().Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+        }
+        
+        /// <inheritdoc />
+        public int MeasureLineCount(int width)
+        {
+            if (_content.Length == 0) return 1;
+            
+            // Count wrapped lines
+            int totalLines = 0;
+            foreach (var line in _lines)
+            {
+                if (string.IsNullOrEmpty(line))
+                    totalLines++;
+                else
+                    totalLines += Math.Max(1, (int)Math.Ceiling((double)line.Length / Math.Max(1, width)));
+            }
+            return Math.Max(1, totalLines);
+        }
+        
+        /// <inheritdoc />
+        public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
+        {
+            if (_content.Length == 0)
+            {
+                // Show a loading indicator if still streaming and no content yet
+                if (!_completed)
+                {
+                    b.DrawText(new DL.TextRun(x, y, "...", new DL.Rgb24(150, 150, 150), null, DL.CellAttrFlags.None));
+                }
+                return;
+            }
+            
+            // Render as simple markdown-styled text
+            var renderer = new Andy.Tui.Widgets.MarkdownRenderer();
+            renderer.SetText(_content.ToString());
+            renderer.Render(new L.Rect(x, y, width, maxLines), baseDl, b);
+            
+            // Show a blinking cursor at the end if still streaming
+            if (!_completed && _lines.Length > 0)
+            {
+                var lastLine = _lines[_lines.Length - 1];
+                int cursorX = x + (lastLine.Length % width);
+                int cursorY = y + Math.Min(maxLines - 1, MeasureLineCount(width) - 1 - startLine);
+                
+                if (cursorY >= y && cursorY < y + maxLines)
+                {
+                    // Simple blinking cursor effect
+                    var cursor = (DateTime.Now.Millisecond / 500) % 2 == 0 ? "▊" : " ";
+                    b.DrawText(new DL.TextRun(cursorX, cursorY, cursor, 
+                        new DL.Rgb24(100, 200, 100), null, DL.CellAttrFlags.Bold));
                 }
             }
         }
