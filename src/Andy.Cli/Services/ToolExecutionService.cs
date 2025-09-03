@@ -54,27 +54,24 @@ public class ToolExecutionService
             };
         }
 
-        // Display tool execution start
-        _feed.AddMarkdownRich($"### Executing Tool: {toolReg.Metadata.Name}");
-        _feed.AddMarkdownRich($"**Tool ID:** `{toolId}`");
+        // More concise tool execution display
+        var execDisplay = new StringBuilder();
+        execDisplay.Append($"**Tool:** `{toolId}`");
         
-        // Display parameters
+        // Display key parameters inline for brevity
         if (parameters.Any())
         {
-            var paramDisplay = new StringBuilder();
-            paramDisplay.AppendLine("**Parameters:**");
-            foreach (var param in parameters)
+            var keyParams = parameters.Take(2).Select(p => 
             {
-                var value = param.Value?.ToString() ?? "null";
-                // Truncate long values
-                if (value.Length > 100)
-                {
-                    value = value.Substring(0, 97) + "...";
-                }
-                paramDisplay.AppendLine($"  - `{param.Key}`: {value}");
-            }
-            _feed.AddMarkdownRich(paramDisplay.ToString());
+                var val = p.Value?.ToString() ?? "null";
+                if (val.Length > 40) val = val.Substring(0, 37) + "...";
+                return $"{p.Key}={val}";
+            });
+            execDisplay.Append($" ({string.Join(", ", keyParams)})");
+            if (parameters.Count > 2) execDisplay.Append($" +{parameters.Count - 2} more");
         }
+        
+        _feed.AddMarkdownRich(execDisplay.ToString());
 
         // Create execution context
         var context = new ToolExecutionContext
@@ -93,10 +90,10 @@ public class ToolExecutionService
             // Execute the tool
             var result = await _toolExecutor.ExecuteAsync(toolId, parameters, context);
             
-            // Display completion status
+            // Display completion status more concisely
             if (result.IsSuccessful)
             {
-                _feed.AddMarkdownRich($"**Tool completed successfully**");
+                // Success is shown through the output, no need for extra message
                 
                 // Display the output if available
                 string output = "";

@@ -89,9 +89,10 @@ public class AiConversationService
             
             if (toolCalls.Any())
             {
-                // Check if there's any text before the tool call (explanation)
+                // Don't display the raw tool call JSON - it will be shown in execution
+                // Only show any explanatory text that came before the JSON
                 var beforeToolText = ExtractTextBeforeToolCall(response.Content);
-                if (!string.IsNullOrEmpty(beforeToolText))
+                if (!string.IsNullOrEmpty(beforeToolText) && !beforeToolText.Contains("```"))
                 {
                     _feed.AddMarkdownRich(beforeToolText);
                     finalResponse.AppendLine(beforeToolText);
@@ -102,8 +103,7 @@ public class AiConversationService
                 
                 foreach (var toolCall in toolCalls)
                 {
-                    _feed.AddMarkdownRich($"*Executing: `{toolCall.ToolId}`*");
-                    
+                    // Tool execution is displayed by ToolExecutionService
                     var result = await _toolService.ExecuteToolAsync(
                         toolCall.ToolId,
                         toolCall.Parameters,

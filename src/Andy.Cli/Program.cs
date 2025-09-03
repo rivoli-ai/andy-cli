@@ -158,7 +158,9 @@ class Program
             systemPromptBuilder.AppendLine("IMPORTANT: ");
             systemPromptBuilder.AppendLine("- Always use tools when they can help fulfill the user's request");
             systemPromptBuilder.AppendLine("- Return ONLY the JSON object when invoking a tool, no additional text");
-            systemPromptBuilder.AppendLine("- After receiving tool results, provide a natural language response");
+            systemPromptBuilder.AppendLine("- NEVER claim success until you receive actual tool results");
+            systemPromptBuilder.AppendLine("- Wait for [Tool Results] before describing what happened");
+            systemPromptBuilder.AppendLine("- After receiving tool results, provide a natural language response based on the ACTUAL results");
             
             var conversation = new ConversationContext
             {
