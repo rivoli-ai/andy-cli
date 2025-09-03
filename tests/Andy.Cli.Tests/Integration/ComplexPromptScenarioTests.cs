@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using Xunit;
+using Andy.Cli.Services;
 
 namespace Andy.Cli.Tests.Integration;
 

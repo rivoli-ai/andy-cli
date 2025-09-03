@@ -11,6 +11,10 @@ using Andy.Cli.Widgets;
 using Andy.Tools.Core;
 using Andy.Tools.Execution;
 using Andy.Tools.Library;
+using Andy.Tools.Library.FileSystem;
+using Andy.Tools.Library.System;
+using Andy.Tools.Validation;
+using Andy.Tools.Framework;
 using Andy.Llm;
 using Andy.Llm.Models;
 using Microsoft.Extensions.DependencyInjection;
@@ -56,7 +60,7 @@ public class PromptBasedToolTests : IDisposable
         services.AddTransient<CopyFileTool>();
         services.AddTransient<MoveFileTool>();
         services.AddTransient<DeleteFileTool>();
-        services.AddTransient<CreateDirectoryTool>();
+        services.AddTransient<Andy.Cli.Tools.CreateDirectoryTool>();
         services.AddTransient<SystemInfoTool>();
         
         _serviceProvider = services.BuildServiceProvider();
@@ -87,14 +91,15 @@ public class PromptBasedToolTests : IDisposable
 
     private void RegisterTools()
     {
-        _toolRegistry.RegisterTool(typeof(ListDirectoryTool), new ToolConfiguration());
-        _toolRegistry.RegisterTool(typeof(ReadFileTool), new ToolConfiguration());
-        _toolRegistry.RegisterTool(typeof(WriteFileTool), new ToolConfiguration());
-        _toolRegistry.RegisterTool(typeof(CopyFileTool), new ToolConfiguration());
-        _toolRegistry.RegisterTool(typeof(MoveFileTool), new ToolConfiguration());
-        _toolRegistry.RegisterTool(typeof(DeleteFileTool), new ToolConfiguration());
-        _toolRegistry.RegisterTool(typeof(CreateDirectoryTool), new ToolConfiguration());
-        _toolRegistry.RegisterTool(typeof(SystemInfoTool), new ToolConfiguration());
+        var emptyConfig = new Dictionary<string, object?>();
+        _toolRegistry.RegisterTool(typeof(ListDirectoryTool), emptyConfig);
+        _toolRegistry.RegisterTool(typeof(ReadFileTool), emptyConfig);
+        _toolRegistry.RegisterTool(typeof(WriteFileTool), emptyConfig);
+        _toolRegistry.RegisterTool(typeof(CopyFileTool), emptyConfig);
+        _toolRegistry.RegisterTool(typeof(MoveFileTool), emptyConfig);
+        _toolRegistry.RegisterTool(typeof(DeleteFileTool), emptyConfig);
+        _toolRegistry.RegisterTool(typeof(Andy.Cli.Tools.CreateDirectoryTool), emptyConfig);
+        _toolRegistry.RegisterTool(typeof(SystemInfoTool), emptyConfig);
     }
 
     public void Dispose()
@@ -329,7 +334,7 @@ public class PromptBasedToolTests : IDisposable
 
     private void SetupStreamingLlmResponse(string response)
     {
-        var chunks = response.Select(c => new LlmStreamChunk { TextDelta = c.ToString() });
+        var chunks = response.Select(c => new LlmStreamingUpdate { TextDelta = c.ToString() });
         
         _mockLlmClient.Setup(x => x.StreamCompleteAsync(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()))
             .Returns(chunks.ToAsyncEnumerable());
