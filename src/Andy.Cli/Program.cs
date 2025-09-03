@@ -10,6 +10,7 @@ using Andy.Cli.Services;
 using Andy.Llm;
 using Andy.Llm.Models;
 using Andy.Llm.Extensions;
+using Andy.Tools;
 using Andy.Tools.Core;
 using Andy.Tools.Execution;
 using Andy.Tools.Library;
@@ -80,12 +81,25 @@ class Program
                 options.DefaultProvider = "cerebras"; // Use Cerebras as default
             });
             
-            // Configure Tool services
-            services.AddSingleton<IToolRegistry, ToolRegistry>();
-            services.AddSingleton<IToolExecutor, ToolExecutor>();
-            services.AddSingleton<ISecurityManager, SecurityManager>();
-            services.AddSingleton<IPermissionProfileService, PermissionProfileService>();
+            // Configure Tool services - manually register to avoid HostedService requirement
+            // Core services from AddAndyTools
             services.AddSingleton<Andy.Tools.Validation.IToolValidator, Andy.Tools.Validation.ToolValidator>();
+            services.AddSingleton<IToolRegistry, Andy.Tools.Registry.ToolRegistry>();
+            services.AddSingleton<Andy.Tools.Discovery.IToolDiscovery, Andy.Tools.Discovery.ToolDiscoveryService>();
+            services.AddSingleton<Andy.Tools.Execution.ISecurityManager, Andy.Tools.Execution.SecurityManager>();
+            services.AddSingleton<Andy.Tools.Execution.IResourceMonitor, Andy.Tools.Execution.ResourceMonitor>();
+            services.AddSingleton<Andy.Tools.Core.OutputLimiting.IToolOutputLimiter, Andy.Tools.Core.OutputLimiting.ToolOutputLimiter>();
+            services.AddSingleton<IToolExecutor, ToolExecutor>();
+            services.AddSingleton<Andy.Tools.Core.IPermissionProfileService, Andy.Tools.Core.PermissionProfileService>();
+            services.AddSingleton<Andy.Tools.Framework.IToolLifecycleManager, Andy.Tools.Framework.ToolLifecycleManager>();
+            
+            // Framework options
+            services.AddSingleton(new Andy.Tools.Framework.ToolFrameworkOptions
+            {
+                RegisterBuiltInTools = false, // We'll register them separately
+                EnableObservability = false,
+                AutoDiscoverTools = false
+            });
             
             // Register built-in tools
             services.AddBuiltInTools();
@@ -979,12 +993,25 @@ class Program
             options.DefaultProvider = "cerebras";
         });
         
-        // Configure Tool services
-        services.AddSingleton<IToolRegistry, ToolRegistry>();
-        services.AddSingleton<IToolExecutor, ToolExecutor>();
-        services.AddSingleton<ISecurityManager, SecurityManager>();
-        services.AddSingleton<IPermissionProfileService, PermissionProfileService>();
+        // Configure Tool services - manually register to avoid HostedService requirement
+        // Core services from AddAndyTools
         services.AddSingleton<Andy.Tools.Validation.IToolValidator, Andy.Tools.Validation.ToolValidator>();
+        services.AddSingleton<IToolRegistry, Andy.Tools.Registry.ToolRegistry>();
+        services.AddSingleton<Andy.Tools.Discovery.IToolDiscovery, Andy.Tools.Discovery.ToolDiscoveryService>();
+        services.AddSingleton<Andy.Tools.Execution.ISecurityManager, Andy.Tools.Execution.SecurityManager>();
+        services.AddSingleton<Andy.Tools.Execution.IResourceMonitor, Andy.Tools.Execution.ResourceMonitor>();
+        services.AddSingleton<Andy.Tools.Core.OutputLimiting.IToolOutputLimiter, Andy.Tools.Core.OutputLimiting.ToolOutputLimiter>();
+        services.AddSingleton<IToolExecutor, ToolExecutor>();
+        services.AddSingleton<Andy.Tools.Core.IPermissionProfileService, Andy.Tools.Core.PermissionProfileService>();
+        services.AddSingleton<Andy.Tools.Framework.IToolLifecycleManager, Andy.Tools.Framework.ToolLifecycleManager>();
+        
+        // Framework options
+        services.AddSingleton(new Andy.Tools.Framework.ToolFrameworkOptions
+        {
+            RegisterBuiltInTools = false, // We'll register them separately
+            EnableObservability = false,
+            AutoDiscoverTools = false
+        });
         
         // Register built-in tools
         services.AddBuiltInTools();
