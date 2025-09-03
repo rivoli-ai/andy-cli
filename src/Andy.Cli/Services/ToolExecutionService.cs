@@ -47,7 +47,9 @@ public class ToolExecutionService
             return new ToolExecutionResult
             {
                 IsSuccessful = false,
-                Error = $"Tool '{toolId}' not found"
+                ErrorMessage = $"Tool '{toolId}' not found",
+                FullOutput = "",
+                TruncatedForDisplay = false
             };
         }
 
@@ -76,8 +78,7 @@ public class ToolExecutionService
         // Create execution context
         var context = new ToolExecutionContext
         {
-            CancellationToken = cancellationToken,
-            StreamOutput = true
+            CancellationToken = cancellationToken
         };
 
         // Track output for display
@@ -85,34 +86,6 @@ public class ToolExecutionService
         var fullOutput = new StringBuilder();
         var displayedLines = 0;
         var truncated = false;
-
-        // Set up output handler
-        context.OnOutputReceived = (output) =>
-        {
-            if (!string.IsNullOrEmpty(output))
-            {
-                fullOutput.AppendLine(output);
-                
-                // Split into lines and track them
-                var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-                outputLines.AddRange(lines);
-                
-                // Display limited output
-                foreach (var line in lines)
-                {
-                    if (displayedLines < _maxDisplayLines)
-                    {
-                        _feed.AddCode(line, "output");
-                        displayedLines++;
-                    }
-                    else if (!truncated)
-                    {
-                        truncated = true;
-                        _feed.AddMarkdownRich($"*... output truncated (showing first {_maxDisplayLines} lines) ...*");
-                    }
-                }
-            }
-        };
 
         try
         {
@@ -123,6 +96,29 @@ public class ToolExecutionService
             if (result.IsSuccessful)
             {
                 _feed.AddMarkdownRich($"**Tool completed successfully**");
+                
+                // Display the output if available
+                var output = result.Output?.ToString() ?? "";
+                if (!string.IsNullOrEmpty(output))
+                {
+                    fullOutput.Append(output);
+                    var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                    outputLines.AddRange(lines);
+                    
+                    foreach (var line in lines)
+                    {
+                        if (displayedLines < _maxDisplayLines)
+                        {
+                            _feed.AddCode(line, "output");
+                            displayedLines++;
+                        }
+                        else if (!truncated)
+                        {
+                            truncated = true;
+                            _feed.AddMarkdownRich($"*... output truncated (showing first {_maxDisplayLines} lines) ...*");
+                        }
+                    }
+                }
                 
                 // If output was truncated, show summary
                 if (truncated)
@@ -136,11 +132,20 @@ public class ToolExecutionService
                 _feed.AddMarkdownRich($"**Tool execution failed:** {result.Error}");
             }
 
-            // Store full output in result for context
-            result.FullOutput = fullOutput.ToString();
-            result.TruncatedForDisplay = truncated;
+            // Create extended result with full output
+            var extendedResult = new ToolExecutionResult
+            {
+                IsSuccessful = result.IsSuccessful,
+                Data = result.Data,
+                ErrorMessage = result.ErrorMessage,
+                Metadata = result.Metadata,
+                DurationMs = result.DurationMs,
+                Message = result.Message,
+                FullOutput = fullOutput.ToString(),
+                TruncatedForDisplay = truncated
+            };
             
-            return result;
+            return extendedResult;
         }
         catch (Exception ex)
         {
@@ -149,8 +154,9 @@ public class ToolExecutionService
             return new ToolExecutionResult
             {
                 IsSuccessful = false,
-                Error = ex.Message,
-                FullOutput = fullOutput.ToString()
+                ErrorMessage = ex.Message,
+                FullOutput = fullOutput.ToString(),
+                TruncatedForDisplay = false
             };
         }
     }
@@ -172,7 +178,7 @@ public class ToolExecutionService
 /// <summary>
 /// Extended tool execution result with full output tracking
 /// </summary>
-public class ToolExecutionResult : Andy.Tools.Core.ToolExecutionResult
+public class ToolExecutionResult : Andy.Tools.Core.ToolResult
 {
     public string? FullOutput { get; set; }
     public bool TruncatedForDisplay { get; set; }

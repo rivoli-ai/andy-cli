@@ -49,7 +49,7 @@ public class AiConversationService
         _contextManager.AddUserMessage(userMessage);
 
         // Get available tools
-        var availableTools = _toolRegistry.GetEnabledTools().ToList();
+        var availableTools = _toolRegistry.GetTools(enabledOnly: true).ToList();
 
         // Create the LLM request with tool definitions
         var request = CreateRequestWithTools(availableTools);
@@ -89,12 +89,13 @@ public class AiConversationService
                         cancellationToken);
                     
                     // Add to context
+                    var outputStr = result.Output?.ToString() ?? result.Error ?? "No output";
                     _contextManager.AddToolExecution(
                         toolCall.ToolId,
                         toolCall.Parameters,
-                        result.FullOutput ?? result.Output ?? "No output");
+                        outputStr);
                     
-                    toolResults.Add(result.Output ?? result.Error ?? "No output");
+                    toolResults.Add(outputStr);
                 }
 
                 // Continue conversation with tool results
