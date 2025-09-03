@@ -122,49 +122,14 @@ class Program
             LlmClient? llmClient = null;
             AiConversationService? aiService = null;
             
-            // Build system prompt with tool awareness
-            var systemPromptBuilder = new StringBuilder();
-            systemPromptBuilder.AppendLine("You are an AI assistant with access to tools that can help you complete tasks.");
-            systemPromptBuilder.AppendLine();
-            systemPromptBuilder.AppendLine("## Available Tools");
-            systemPromptBuilder.AppendLine("You have access to the following tools:");
-            systemPromptBuilder.AppendLine();
-            
-            // Add tool descriptions
+            // Build comprehensive system prompt
+            var systemPromptService = new SystemPromptService();
             var availableTools = toolRegistry.GetTools(enabledOnly: true);
-            foreach (var tool in availableTools)
-            {
-                systemPromptBuilder.AppendLine($"- **{tool.Metadata.Id}**: {tool.Metadata.Description}");
-            }
-            
-            systemPromptBuilder.AppendLine();
-            systemPromptBuilder.AppendLine("## Tool Usage Instructions");
-            systemPromptBuilder.AppendLine("When you need to use a tool to complete a task, respond with a JSON object:");
-            systemPromptBuilder.AppendLine("```json");
-            systemPromptBuilder.AppendLine("{");
-            systemPromptBuilder.AppendLine("  \"tool\": \"tool_id\",");
-            systemPromptBuilder.AppendLine("  \"parameters\": {");
-            systemPromptBuilder.AppendLine("    \"param_name\": \"value\"");
-            systemPromptBuilder.AppendLine("  }");
-            systemPromptBuilder.AppendLine("}");
-            systemPromptBuilder.AppendLine("```");
-            systemPromptBuilder.AppendLine();
-            systemPromptBuilder.AppendLine("Examples:");
-            systemPromptBuilder.AppendLine("- To list files: {\"tool\": \"list_directory\", \"parameters\": {\"path\": \".\"}}");
-            systemPromptBuilder.AppendLine("- To read a file: {\"tool\": \"read_file\", \"parameters\": {\"file_path\": \"example.txt\"}}");
-            systemPromptBuilder.AppendLine("- To write a file: {\"tool\": \"write_file\", \"parameters\": {\"file_path\": \"output.txt\", \"content\": \"text\"}}");
-            systemPromptBuilder.AppendLine("- For system info: {\"tool\": \"process_info\", \"parameters\": {}}");
-            systemPromptBuilder.AppendLine();
-            systemPromptBuilder.AppendLine("IMPORTANT: ");
-            systemPromptBuilder.AppendLine("- Always use tools when they can help fulfill the user's request");
-            systemPromptBuilder.AppendLine("- Return ONLY the JSON object when invoking a tool, no additional text");
-            systemPromptBuilder.AppendLine("- NEVER claim success until you receive actual tool results");
-            systemPromptBuilder.AppendLine("- Wait for [Tool Results] before describing what happened");
-            systemPromptBuilder.AppendLine("- After receiving tool results, provide a natural language response based on the ACTUAL results");
+            var systemPrompt = systemPromptService.BuildSystemPrompt(availableTools);
             
             var conversation = new ConversationContext
             {
-                SystemInstruction = systemPromptBuilder.ToString(),
+                SystemInstruction = systemPrompt,
                 MaxContextMessages = 20
             };
             
@@ -177,7 +142,7 @@ class Program
                     toolRegistry,
                     toolExecutor,
                     feed,
-                    systemPromptBuilder.ToString());
+                    systemPrompt);
                 feed.AddMarkdownRich("[model] Andy.Llm with Cerebras provider (tool-enabled)");
             }
             catch (Exception ex)
@@ -249,7 +214,7 @@ class Program
                                 // Update the LLM client and reset conversation context
                                 llmClient = modelCommand.GetCurrentClient();
                                 conversation.Clear();
-                                conversation.SystemInstruction = systemPromptBuilder.ToString();
+                                conversation.SystemInstruction = systemPrompt;
                                 
                                 // Update AI service with new client
                                 if (llmClient != null)
@@ -260,7 +225,7 @@ class Program
                                         toolRegistry,
                                         toolExecutor,
                                         feed,
-                                        systemPromptBuilder.ToString());
+                                        systemPrompt);
                                 }
                                 
                                 feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
@@ -660,7 +625,7 @@ class Program
                                             // Update the LLM client and reset conversation context
                                             llmClient = modelCommand.GetCurrentClient();
                                             conversation.Clear();
-                                            conversation.SystemInstruction = systemPromptBuilder.ToString();
+                                            conversation.SystemInstruction = systemPrompt;
                                             
                                             // Update AI service with new client
                                             if (llmClient != null)
@@ -671,7 +636,7 @@ class Program
                                                     toolRegistry,
                                                     toolExecutor,
                                                     feed,
-                                                    systemPromptBuilder.ToString());
+                                                    systemPrompt);
                                             }
                                             
                                             feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
