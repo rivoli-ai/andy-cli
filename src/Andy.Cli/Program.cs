@@ -85,6 +85,7 @@ class Program
             services.AddSingleton<IToolExecutor, ToolExecutor>();
             services.AddSingleton<ISecurityManager, SecurityManager>();
             services.AddSingleton<IPermissionProfileService, PermissionProfileService>();
+            services.AddSingleton<Andy.Tools.Validation.IToolValidator, Andy.Tools.Validation.ToolValidator>();
             
             // Register built-in tools
             services.AddBuiltInTools();
@@ -165,8 +166,22 @@ class Program
             }
             catch (Exception ex)
             {
-                feed.AddMarkdown(ConsoleColors.ErrorPrefix(ex.Message));
+                feed.AddMarkdown(ConsoleColors.ErrorPrefix($"Error: {ex.Message}"));
+                if (ex.InnerException != null)
+                {
+                    feed.AddMarkdown(ConsoleColors.ErrorPrefix($"Inner: {ex.InnerException.Message}"));
+                }
                 feed.AddMarkdownRich(ConsoleColors.NotePrefix("Set CEREBRAS_API_KEY to enable AI responses"));
+                
+                // Try to at least get the LLM client without tools for basic chat
+                try
+                {
+                    llmClient = serviceProvider.GetService<LlmClient>();
+                }
+                catch
+                {
+                    // Ignore secondary error
+                }
             }
             
             // Setup command palette commands
@@ -969,6 +984,7 @@ class Program
         services.AddSingleton<IToolExecutor, ToolExecutor>();
         services.AddSingleton<ISecurityManager, SecurityManager>();
         services.AddSingleton<IPermissionProfileService, PermissionProfileService>();
+        services.AddSingleton<Andy.Tools.Validation.IToolValidator, Andy.Tools.Validation.ToolValidator>();
         
         // Register built-in tools
         services.AddBuiltInTools();
