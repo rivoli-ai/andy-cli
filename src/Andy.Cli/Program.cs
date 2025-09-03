@@ -124,25 +124,26 @@ class Program
             
             systemPromptBuilder.AppendLine();
             systemPromptBuilder.AppendLine("## Tool Usage Instructions");
-            systemPromptBuilder.AppendLine("When you need to use a tool to complete a task, use the following format:");
-            systemPromptBuilder.AppendLine("```");
-            systemPromptBuilder.AppendLine("<tool_use>");
+            systemPromptBuilder.AppendLine("When you need to use a tool to complete a task, respond with a JSON object:");
+            systemPromptBuilder.AppendLine("```json");
             systemPromptBuilder.AppendLine("{");
             systemPromptBuilder.AppendLine("  \"tool\": \"tool_id\",");
             systemPromptBuilder.AppendLine("  \"parameters\": {");
             systemPromptBuilder.AppendLine("    \"param_name\": \"value\"");
             systemPromptBuilder.AppendLine("  }");
             systemPromptBuilder.AppendLine("}");
-            systemPromptBuilder.AppendLine("</tool_use>");
             systemPromptBuilder.AppendLine("```");
             systemPromptBuilder.AppendLine();
             systemPromptBuilder.AppendLine("Examples:");
-            systemPromptBuilder.AppendLine("- If asked to list files or directories, use list_directory");
-            systemPromptBuilder.AppendLine("- If asked to read a file, use read_file");
-            systemPromptBuilder.AppendLine("- If asked to write or save a file, use write_file");
-            systemPromptBuilder.AppendLine("- If asked about system information, use process_info");
+            systemPromptBuilder.AppendLine("- To list files: {\"tool\": \"list_directory\", \"parameters\": {\"path\": \".\"}}");
+            systemPromptBuilder.AppendLine("- To read a file: {\"tool\": \"read_file\", \"parameters\": {\"file_path\": \"example.txt\"}}");
+            systemPromptBuilder.AppendLine("- To write a file: {\"tool\": \"write_file\", \"parameters\": {\"file_path\": \"output.txt\", \"content\": \"text\"}}");
+            systemPromptBuilder.AppendLine("- For system info: {\"tool\": \"process_info\", \"parameters\": {}}");
             systemPromptBuilder.AppendLine();
-            systemPromptBuilder.AppendLine("IMPORTANT: Always use tools when they can help fulfill the user's request rather than explaining what you would do.");
+            systemPromptBuilder.AppendLine("IMPORTANT: ");
+            systemPromptBuilder.AppendLine("- Always use tools when they can help fulfill the user's request");
+            systemPromptBuilder.AppendLine("- Return ONLY the JSON object when invoking a tool, no additional text");
+            systemPromptBuilder.AppendLine("- After receiving tool results, provide a natural language response");
             
             var conversation = new ConversationContext
             {

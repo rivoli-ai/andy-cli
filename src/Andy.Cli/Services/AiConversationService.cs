@@ -89,12 +89,20 @@ public class AiConversationService
             
             if (toolCalls.Any())
             {
+                // Check if there's any text before the tool call (explanation)
+                var beforeToolText = ExtractTextBeforeToolCall(response.Content);
+                if (!string.IsNullOrEmpty(beforeToolText))
+                {
+                    _feed.AddMarkdownRich(beforeToolText);
+                    finalResponse.AppendLine(beforeToolText);
+                }
+                
                 // Execute tools and collect results
                 var toolResults = new List<string>();
                 
                 foreach (var toolCall in toolCalls)
                 {
-                    _feed.AddMarkdownRich($"**Calling tool:** `{toolCall.ToolId}`");
+                    _feed.AddMarkdownRich($"*Executing: `{toolCall.ToolId}`*");
                     
                     var result = await _toolService.ExecuteToolAsync(
                         toolCall.ToolId,
@@ -269,60 +277,175 @@ public class AiConversationService
             return toolCalls;
         }
 
-        // Look for tool_use blocks
-        var content = response.Content;
+        var content = response.Content.Trim();
+        
+        // First try to extract from <tool_use> blocks
+        toolCalls = ExtractWrappedToolCalls(content);
+        
+        // If no wrapped tool calls found, try to parse as direct JSON
+        if (!toolCalls.Any())
+        {
+            toolCalls = ExtractDirectJsonToolCalls(content);
+        }
+        
+        return toolCalls;
+    }
+    
+    /// <summary>
+    /// Extract tool calls wrapped in <tool_use> tags
+    /// </summary>
+    private List<ToolCall> ExtractWrappedToolCalls(string content)
+    {
+        var toolCalls = new List<ToolCall>();
         var startTag = "<tool_use>";
         var endTag = "</tool_use>";
         
         var startIndex = 0;
-        while ((startIndex = content.IndexOf(startTag, startIndex)) != -1)
+        while ((startIndex = content.IndexOf(startTag, startIndex, StringComparison.OrdinalIgnoreCase)) != -1)
         {
-            var endIndex = content.IndexOf(endTag, startIndex);
+            var endIndex = content.IndexOf(endTag, startIndex, StringComparison.OrdinalIgnoreCase);
             if (endIndex == -1) break;
             
             var toolJson = content.Substring(
                 startIndex + startTag.Length,
                 endIndex - startIndex - startTag.Length).Trim();
             
-            try
+            var toolCall = ParseToolCallJson(toolJson);
+            if (toolCall != null)
             {
-                // Parse JSON
-                using var doc = JsonDocument.Parse(toolJson);
-                var root = doc.RootElement;
-                
-                var toolCall = new ToolCall
-                {
-                    ToolId = root.GetProperty("tool").GetString() ?? "",
-                    Parameters = new Dictionary<string, object?>()
-                };
-                
-                if (root.TryGetProperty("parameters", out var parameters))
-                {
-                    foreach (var param in parameters.EnumerateObject())
-                    {
-                        toolCall.Parameters[param.Name] = param.Value.ValueKind switch
-                        {
-                            JsonValueKind.String => param.Value.GetString(),
-                            JsonValueKind.Number => param.Value.GetDouble(),
-                            JsonValueKind.True => true,
-                            JsonValueKind.False => false,
-                            JsonValueKind.Null => null,
-                            _ => param.Value.GetRawText()
-                        };
-                    }
-                }
-                
                 toolCalls.Add(toolCall);
-            }
-            catch (JsonException ex)
-            {
-                _feed.AddMarkdownRich($"*Failed to parse tool call: {ex.Message}*");
             }
             
             startIndex = endIndex + endTag.Length;
         }
-
+        
         return toolCalls;
+    }
+    
+    /// <summary>
+    /// Extract tool calls from direct JSON format
+    /// </summary>
+    private List<ToolCall> ExtractDirectJsonToolCalls(string content)
+    {
+        var toolCalls = new List<ToolCall>();
+        
+        // Check if the content looks like JSON (starts with { and has "tool" property)
+        if (!content.TrimStart().StartsWith("{") || !content.Contains("\"tool\""))
+        {
+            return toolCalls;
+        }
+        
+        // Try to find JSON objects in the content
+        var jsonStart = content.IndexOf('{');
+        while (jsonStart >= 0)
+        {
+            // Find matching closing brace
+            int braceCount = 0;
+            int jsonEnd = jsonStart;
+            
+            for (int i = jsonStart; i < content.Length; i++)
+            {
+                if (content[i] == '{')
+                    braceCount++;
+                else if (content[i] == '}')
+                {
+                    braceCount--;
+                    if (braceCount == 0)
+                    {
+                        jsonEnd = i;
+                        break;
+                    }
+                }
+            }
+            
+            if (jsonEnd > jsonStart)
+            {
+                var jsonStr = content.Substring(jsonStart, jsonEnd - jsonStart + 1);
+                var toolCall = ParseToolCallJson(jsonStr);
+                
+                if (toolCall != null)
+                {
+                    toolCalls.Add(toolCall);
+                    
+                    // For now, only handle the first tool call in direct JSON format
+                    // Most LLMs return a single tool call at a time
+                    break;
+                }
+            }
+            
+            // Look for next potential JSON object
+            jsonStart = content.IndexOf('{', jsonEnd + 1);
+        }
+        
+        return toolCalls;
+    }
+    
+    /// <summary>
+    /// Parse a JSON string into a ToolCall
+    /// </summary>
+    private ToolCall? ParseToolCallJson(string jsonStr)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(jsonStr);
+            var root = doc.RootElement;
+            
+            // Check if this looks like a tool call
+            if (!root.TryGetProperty("tool", out _) && !root.TryGetProperty("function", out _))
+            {
+                return null;
+            }
+            
+            var toolCall = new ToolCall();
+            
+            // Support both "tool" and "function" property names
+            if (root.TryGetProperty("tool", out var toolProp))
+            {
+                toolCall.ToolId = toolProp.GetString() ?? "";
+            }
+            else if (root.TryGetProperty("function", out var funcProp))
+            {
+                toolCall.ToolId = funcProp.GetString() ?? "";
+            }
+            
+            // Support both "parameters" and "arguments" property names  
+            if (root.TryGetProperty("parameters", out var parameters))
+            {
+                ParseParameters(parameters, toolCall.Parameters);
+            }
+            else if (root.TryGetProperty("arguments", out var arguments))
+            {
+                ParseParameters(arguments, toolCall.Parameters);
+            }
+            
+            return toolCall;
+        }
+        catch (JsonException)
+        {
+            // Not valid JSON or not a tool call
+            return null;
+        }
+    }
+    
+    /// <summary>
+    /// Parse parameters from a JSON element
+    /// </summary>
+    private void ParseParameters(JsonElement parameters, Dictionary<string, object?> target)
+    {
+        foreach (var param in parameters.EnumerateObject())
+        {
+            target[param.Name] = param.Value.ValueKind switch
+            {
+                JsonValueKind.String => param.Value.GetString(),
+                JsonValueKind.Number => param.Value.GetDouble(),
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
+                JsonValueKind.Null => null,
+                JsonValueKind.Array => param.Value.GetRawText(),
+                JsonValueKind.Object => param.Value.GetRawText(),
+                _ => param.Value.GetRawText()
+            };
+        }
     }
 
     /// <summary>
@@ -340,6 +463,34 @@ public class AiConversationService
         }
         
         return sb.ToString();
+    }
+    
+    /// <summary>
+    /// Extract any text that appears before tool calls in the response
+    /// </summary>
+    private string? ExtractTextBeforeToolCall(string? content)
+    {
+        if (string.IsNullOrEmpty(content))
+            return null;
+        
+        // Find the start of JSON tool call
+        var jsonStart = content.IndexOf('{');
+        if (jsonStart > 0)
+        {
+            var beforeText = content.Substring(0, jsonStart).Trim();
+            // Filter out markdown code block markers
+            beforeText = beforeText.Replace("```json", "").Replace("```", "").Trim();
+            return string.IsNullOrWhiteSpace(beforeText) ? null : beforeText;
+        }
+        
+        // Find the start of wrapped tool call
+        var toolUseStart = content.IndexOf("<tool_use>", StringComparison.OrdinalIgnoreCase);
+        if (toolUseStart > 0)
+        {
+            return content.Substring(0, toolUseStart).Trim();
+        }
+        
+        return null;
     }
 
     /// <summary>
