@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -7,6 +8,7 @@ using Andy.Tui.Backend.Terminal;
 using Andy.Cli.Widgets;
 using Andy.Cli.Commands;
 using Andy.Cli.Services;
+using Andy.Cli.Tools;
 using Andy.Llm;
 using Andy.Llm.Models;
 using Andy.Llm.Extensions;
@@ -146,6 +148,13 @@ class Program
             
             // Register built-in tools
             services.AddBuiltInTools();
+            
+            // Register custom tools
+            services.AddSingleton(new ToolRegistrationInfo 
+            { 
+                ToolType = typeof(Andy.Cli.Tools.CreateDirectoryTool),
+                Configuration = new Dictionary<string, object?>()
+            });
             
             var serviceProvider = services.BuildServiceProvider();
             
@@ -1027,6 +1036,13 @@ class Program
         
         // Register built-in tools
         services.AddBuiltInTools();
+        
+        // Register custom tools
+        services.AddSingleton(new ToolRegistrationInfo 
+        { 
+            ToolType = typeof(Andy.Cli.Tools.CreateDirectoryTool),
+            Configuration = new Dictionary<string, object?>()
+        });
         
         var serviceProvider = services.BuildServiceProvider();
         
