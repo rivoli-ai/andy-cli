@@ -63,11 +63,11 @@ public class SystemPromptService
 
     private void AddWorkflowGuidelines()
     {
-        _prompt.AppendLine("## Tool Usage");
-        _prompt.AppendLine("Invoke tools with JSON: `{\"tool\":\"tool_id\",\"parameters\":{\"param\":\"value\"}}`");
-        _prompt.AppendLine("- Use `list_directory` to list files, `read_file` to read, `write_file` to save");
-        _prompt.AppendLine("- Display code/text inline unless explicitly asked to save to file");
-        _prompt.AppendLine("- Chain multiple tools when needed for complex tasks");
+        _prompt.AppendLine("## How Tools Work");
+        _prompt.AppendLine("When you need to use a tool:");
+        _prompt.AppendLine("1. Output ONLY the JSON: {\"tool\":\"tool_id\",\"parameters\":{}}");
+        _prompt.AppendLine("2. I will execute the tool and respond with [Tool Results]");
+        _prompt.AppendLine("3. Then continue with your response based on the actual results");
         _prompt.AppendLine();
     }
 
@@ -78,12 +78,17 @@ public class SystemPromptService
 
     private void AddCriticalInstructions()
     {
-        _prompt.AppendLine("## Critical Rules");
-        _prompt.AppendLine("1. Return ONLY JSON when invoking tools: `{\"tool\":\"id\",\"parameters\":{...}}`");
-        _prompt.AppendLine("2. NEVER claim success until you receive [Tool Results]");
-        _prompt.AppendLine("3. Base responses on ACTUAL tool results, not assumptions");
-        _prompt.AppendLine("4. Display code/text directly unless explicitly asked to save to file");
-        _prompt.AppendLine("5. Chain tool calls when needed to complete complex tasks");
+        _prompt.AppendLine("## CRITICAL: How to Use Tools");
+        _prompt.AppendLine("To execute a tool, you MUST respond with ONLY this JSON format:");
+        _prompt.AppendLine("```json");
+        _prompt.AppendLine("{\"tool\":\"tool_id\",\"parameters\":{}}");
+        _prompt.AppendLine("```");
+        _prompt.AppendLine();
+        _prompt.AppendLine("IMPORTANT:");
+        _prompt.AppendLine("- NEVER write fake [Tool Results] - I will provide real results");
+        _prompt.AppendLine("- NEVER pretend a tool was called - actually call it with JSON");
+        _prompt.AppendLine("- Wait for my [Tool Results] response before continuing");
+        _prompt.AppendLine("- For 'list files': use {\"tool\":\"list_directory\",\"parameters\":{\"path\":\".\"}}");
         _prompt.AppendLine();
     }
 

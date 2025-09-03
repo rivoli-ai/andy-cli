@@ -89,14 +89,8 @@ public class AiConversationService
             
             if (toolCalls.Any())
             {
-                // Don't display the raw tool call JSON - it will be shown in execution
-                // Only show any explanatory text that came before the JSON
-                var beforeToolText = ExtractTextBeforeToolCall(response.Content);
-                if (!string.IsNullOrEmpty(beforeToolText) && !beforeToolText.Contains("```"))
-                {
-                    _feed.AddMarkdownRich(beforeToolText);
-                    finalResponse.AppendLine(beforeToolText);
-                }
+                // Don't display the raw response when tool calls are detected
+                // The tool execution will show what's happening
                 
                 // Execute tools and collect results
                 var toolResults = new List<string>();
@@ -132,8 +126,8 @@ public class AiConversationService
                 finalResponse.AppendLine(response.Content);
                 _contextManager.AddAssistantMessage(response.Content ?? "");
                 
-                // Display the response
-                if (!string.IsNullOrEmpty(response.Content))
+                // Display the response only if not streaming (already displayed during streaming)
+                if (!enableStreaming && !string.IsNullOrEmpty(response.Content))
                 {
                     _feed.AddMarkdownRich(response.Content);
                 }
@@ -156,59 +150,14 @@ public class AiConversationService
     {
         var context = _contextManager.GetContext();
         var request = context.CreateRequest();
-
-        // Add tool definitions to the request
-        // This format will depend on your LLM provider
-        // For now, we'll add them to the system prompt
-        if (tools.Any())
-        {
-            var toolPrompt = BuildToolPrompt(tools);
-            request.SystemPrompt = $"{request.SystemPrompt}\n\n{toolPrompt}";
-        }
-
+        
+        // Tool definitions are already in the system prompt from SystemPromptService
+        // Don't add them again to avoid duplication
+        
         return request;
     }
 
-    /// <summary>
-    /// Build tool usage prompt
-    /// </summary>
-    private string BuildToolPrompt(List<ToolRegistration> tools)
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine("You have access to the following tools:");
-        sb.AppendLine();
-
-        foreach (var tool in tools)
-        {
-            sb.AppendLine($"Tool: {tool.Metadata.Id}");
-            sb.AppendLine($"Description: {tool.Metadata.Description}");
-            
-            if (tool.Metadata.Parameters.Any())
-            {
-                sb.AppendLine("Parameters:");
-                foreach (var param in tool.Metadata.Parameters)
-                {
-                    var required = param.Required ? "required" : "optional";
-                    sb.AppendLine($"  - {param.Name} ({param.Type}, {required}): {param.Description}");
-                }
-            }
-            sb.AppendLine();
-        }
-
-        sb.AppendLine("To use a tool, respond with:");
-        sb.AppendLine("<tool_use>");
-        sb.AppendLine("{");
-        sb.AppendLine("  \"tool\": \"tool_id\",");
-        sb.AppendLine("  \"parameters\": {");
-        sb.AppendLine("    \"param_name\": \"value\"");
-        sb.AppendLine("  }");
-        sb.AppendLine("}");
-        sb.AppendLine("</tool_use>");
-        sb.AppendLine();
-        sb.AppendLine("You can use multiple tools in sequence. After receiving tool results, continue with your response.");
-
-        return sb.ToString();
-    }
+    // Removed BuildToolPrompt - tool definitions are in system prompt
 
     /// <summary>
     /// Get LLM response with streaming support
