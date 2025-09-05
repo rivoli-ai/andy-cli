@@ -33,7 +33,8 @@ public class ContextManagerTests
 
         // Assert
         Assert.Equal(2, context.Messages.Count); // System + User
-        Assert.Contains(context.Messages, m => m.GetText() == userMessage && m.Role == Andy.Llm.Models.MessageRole.User);
+        Assert.Contains(context.Messages, m => m.Role == Andy.Llm.Models.MessageRole.User && 
+            m.Parts.OfType<Andy.Llm.Models.TextPart>().Any(p => p.Text == userMessage));
     }
 
     [Fact]
@@ -49,7 +50,8 @@ public class ContextManagerTests
 
         // Assert
         Assert.Equal(2, context.Messages.Count); // System + Assistant
-        Assert.Contains(context.Messages, m => m.GetText() == assistantMessage && m.Role == Andy.Llm.Models.MessageRole.Assistant);
+        Assert.Contains(context.Messages, m => m.Role == Andy.Llm.Models.MessageRole.Assistant && 
+            m.Parts.OfType<Andy.Llm.Models.TextPart>().Any(p => p.Text == assistantMessage));
     }
 
     [Fact]
@@ -67,7 +69,7 @@ public class ContextManagerTests
 
         // Assert
         Assert.Equal(1, stats.ToolCallCount);
-        Assert.Equal(3, stats.MessageCount); // System + Tool Call + Tool Result
+        Assert.Equal(2, stats.MessageCount); // System prompt + 1 tool message
     }
 
     [Fact]
@@ -181,13 +183,18 @@ public class ContextManagerTests
         manager.AddToolExecution(toolId, parameters, result);
         var context = manager.GetContext();
 
-        // Assert
-        var toolCallMessage = context.Messages.FirstOrDefault(m => m.Role == Andy.Llm.Models.MessageRole.Assistant);
-        var toolResultMessage = context.Messages.FirstOrDefault(m => m.Role == Andy.Llm.Models.MessageRole.User && m.GetText().Contains("Tool Results"));
+        // Assert - Tool executions are now stored as Tool messages with ToolResponsePart
+        var toolMessage = context.Messages.FirstOrDefault(m => m.Role == Andy.Llm.Models.MessageRole.Tool);
+        Assert.NotNull(toolMessage);
         
-        Assert.NotNull(toolCallMessage);
-        Assert.Contains(toolId, toolCallMessage?.GetText() ?? "");
-        Assert.NotNull(toolResultMessage);
-        Assert.Contains(result, toolResultMessage?.GetText() ?? "");
+        var toolResponsePart = toolMessage?.Parts.OfType<Andy.Llm.Models.ToolResponsePart>().FirstOrDefault();
+        Assert.NotNull(toolResponsePart);
+        Assert.Equal(toolId, toolResponsePart?.ToolName);
+        
+        // The formatted tool execution is in the Response field
+        var responseText = toolResponsePart?.Response?.ToString() ?? "";
+        Assert.Contains("[Tool Execution: read_file]", responseText);
+        Assert.Contains("file.txt", responseText);
+        Assert.Contains(result, responseText);
     }
 }

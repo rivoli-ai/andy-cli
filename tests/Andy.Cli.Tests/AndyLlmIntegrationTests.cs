@@ -48,14 +48,11 @@ public class AndyLlmIntegrationTests
         // Assert
         Assert.NotNull(request);
         Assert.NotNull(request.Messages);
-        Assert.Equal(4, request.Messages.Count); // System + 3 conversation messages
+        Assert.Equal(3, request.Messages.Count); // 3 conversation messages (system is in SystemPrompt)
         
-        // Check system message
-        var systemMessage = request.Messages.FirstOrDefault(m => m.Role == MessageRole.System);
-        Assert.NotNull(systemMessage);
-        var systemTextPart = systemMessage.Parts.OfType<TextPart>().FirstOrDefault();
-        Assert.NotNull(systemTextPart);
-        Assert.Equal("You are a helpful AI assistant.", systemTextPart.Text);
+        // Check system prompt
+        Assert.NotNull(request.SystemPrompt);
+        Assert.Equal("You are a helpful AI assistant.", request.SystemPrompt);
         
         // Check conversation messages
         var userMessages = request.Messages.Where(m => m.Role == MessageRole.User).ToList();

@@ -68,7 +68,7 @@ public class AiConversationServiceTests
             .ReturnsAsync(toolResponse)
             .ReturnsAsync(finalResponse);
 
-        _mockToolRegistry.Setup(x => x.GetTools(It.IsAny<bool>()))
+        _mockToolRegistry.Setup(x => x.GetTools(It.IsAny<ToolCategory?>(), It.IsAny<ToolCapability?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<bool>()))
             .Returns(new List<ToolRegistration>());
 
         var mockToolService = new Mock<ToolExecutionService>(
@@ -110,7 +110,7 @@ public class AiConversationServiceTests
         _mockLlmClient.Setup(x => x.CompleteAsync(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(llmResponse);
 
-        _mockToolRegistry.Setup(x => x.GetTools(It.IsAny<bool>()))
+        _mockToolRegistry.Setup(x => x.GetTools(It.IsAny<ToolCategory?>(), It.IsAny<ToolCapability?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<bool>()))
             .Returns(new List<ToolRegistration>());
 
         // Act

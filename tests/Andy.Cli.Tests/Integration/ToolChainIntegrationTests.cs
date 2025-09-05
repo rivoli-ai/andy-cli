@@ -84,18 +84,27 @@ public class ToolChainIntegrationTests
 
         // Assert
         Assert.Equal(1, stats.ToolCallCount);
-        Assert.True(stats.MessageCount >= 3); // System + User + Tool messages
+        Assert.Equal(3, stats.MessageCount); // System prompt + User + Tool messages
         
-        // Verify tool result is in context
-        var lastMessage = context.Messages[context.Messages.Count - 1];
-        Assert.Contains("README.md", lastMessage.Content);
+        // Verify tool result is in context - should be in the Tool message
+        var toolMessages = context.Messages.Where(m => m.Role == Andy.Llm.Models.MessageRole.Tool).ToList();
+        Assert.NotEmpty(toolMessages);
+        
+        // Tool responses are stored as ToolResponsePart, not TextPart
+        var toolResponsePart = toolMessages.First().Parts.OfType<Andy.Llm.Models.ToolResponsePart>().FirstOrDefault();
+        Assert.NotNull(toolResponsePart);
+        
+        // The response is stored as an object, convert to string
+        var toolResponseText = toolResponsePart?.Response?.ToString() ?? "";
+        Assert.Contains("README.md", toolResponseText);
     }
 
     [Fact]
     public void ContextCompression_MaintainsImportantInformation()
     {
         // Arrange
-        var manager = new ContextManager("System prompt with tool access.");
+        // Set a low compression threshold to ensure compression happens
+        var manager = new ContextManager("System prompt with tool access.", maxTokens: 8000, compressionThreshold: 100);
         
         // Add important tool executions
         manager.AddUserMessage("List files");
@@ -125,9 +134,46 @@ public class ToolChainIntegrationTests
         Assert.True(stats.ToolCallCount >= 2);
         
         // The context should still contain references to the tools
-        var contextStr = string.Join("\n", context.Messages.ConvertAll(m => m.Content));
-        Assert.Contains("list_directory", contextStr);
-        Assert.Contains("read_file", contextStr);
+        // Tool names can appear in: 
+        // 1. The summary text (for older messages)
+        // 2. Tool response parts (for recent messages)
+        // 3. The formatted tool execution content
+        
+        var textContent = string.Join("\n", context.Messages
+            .SelectMany(m => m.Parts.OfType<Andy.Llm.Models.TextPart>())
+            .Select(p => p.Text ?? ""));
+        
+        var toolNames = context.Messages
+            .SelectMany(m => m.Parts.OfType<Andy.Llm.Models.ToolResponsePart>())
+            .Select(p => p.ToolName ?? "")
+            .Where(name => !string.IsNullOrEmpty(name));
+        
+        // The read_file should be in recent messages as a tool response
+        Assert.Contains("read_file", toolNames);
+        
+        // The list_directory should be in the summary
+        // Since it's in the older messages, it should appear in the summary
+        // Debug: Output what we have to understand the failure
+        if (!textContent.Contains("list_directory"))
+        {
+            // Let's see what's actually in the text content
+            var summaryMessage = context.Messages
+                .Where(m => m.Parts.OfType<Andy.Llm.Models.TextPart>()
+                    .Any(p => p.Text != null && p.Text.Contains("[Previous conversation summary:")))
+                .FirstOrDefault();
+            
+            if (summaryMessage != null)
+            {
+                var summaryText = summaryMessage.Parts.OfType<Andy.Llm.Models.TextPart>().First().Text;
+                // The summary should mention list_directory
+                Assert.Contains("list_directory", summaryText ?? "");
+            }
+            else
+            {
+                // No summary was created - this shouldn't happen with 64 messages
+                Assert.True(false, "No summary was created despite having 64 messages");
+            }
+        }
     }
 
     [Fact]
@@ -147,7 +193,9 @@ public class ToolChainIntegrationTests
         // Assert
         Assert.Equal(1, stats.ToolCallCount);
         var context = manager.GetContext();
-        Assert.Contains(context.Messages, m => m.Content.Contains("Error"));
+        Assert.Contains(context.Messages, m => 
+            m.Parts.OfType<Andy.Llm.Models.ToolResponsePart>().Any(p => 
+                p.Response != null && p.Response.ToString()!.Contains("Error")));
     }
 
     [Fact]

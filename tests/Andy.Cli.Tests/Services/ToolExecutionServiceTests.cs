@@ -47,7 +47,7 @@ public class ToolExecutionServiceTests
             }
         };
 
-        var executionResult = new ToolResult
+        var executionResult = new Andy.Tools.Core.ToolExecutionResult
         {
             IsSuccessful = true,
             Data = new Dictionary<string, object>
@@ -59,7 +59,7 @@ public class ToolExecutionServiceTests
 
         _mockRegistry.Setup(x => x.GetTool(toolId)).Returns(toolReg);
         _mockExecutor.Setup(x => x.ExecuteAsync(toolId, parameters, It.IsAny<ToolExecutionContext>()))
-            .ReturnsAsync(executionResult);
+            .Returns(Task.FromResult(executionResult));
 
         // Act
         var result = await _service.ExecuteToolAsync(toolId, parameters);
@@ -113,7 +113,7 @@ public class ToolExecutionServiceTests
             largeData[$"item_{i}"] = $"value_{i}";
         }
 
-        var executionResult = new ToolResult
+        var executionResult = new Andy.Tools.Core.ToolExecutionResult
         {
             IsSuccessful = true,
             Data = largeData
@@ -121,7 +121,7 @@ public class ToolExecutionServiceTests
 
         _mockRegistry.Setup(x => x.GetTool(toolId)).Returns(toolReg);
         _mockExecutor.Setup(x => x.ExecuteAsync(toolId, parameters, It.IsAny<ToolExecutionContext>()))
-            .ReturnsAsync(executionResult);
+            .Returns(Task.FromResult(executionResult));
 
         // Act
         var result = await _service.ExecuteToolAsync(toolId, parameters);
@@ -187,7 +187,7 @@ public class ToolExecutionServiceTests
             }
         };
 
-        var executionResult = new ToolResult
+        var executionResult = new Andy.Tools.Core.ToolExecutionResult
         {
             IsSuccessful = true,
             Message = "Executed successfully"
@@ -195,7 +195,7 @@ public class ToolExecutionServiceTests
 
         _mockRegistry.Setup(x => x.GetTool(toolId)).Returns(toolReg);
         _mockExecutor.Setup(x => x.ExecuteAsync(toolId, parameters, It.IsAny<ToolExecutionContext>()))
-            .ReturnsAsync(executionResult);
+            .Returns(Task.FromResult(executionResult));
 
         // Act
         var result = await _service.ExecuteToolAsync(toolId, parameters);

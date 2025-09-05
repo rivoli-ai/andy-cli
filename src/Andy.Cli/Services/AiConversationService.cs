@@ -281,8 +281,8 @@ public class AiConversationService
         // Clean up the content first (remove code blocks)
         content = content.Replace("```json", "").Replace("```", "").Trim();
         
-        // Check if the content looks like JSON (starts with { and has "tool" property)
-        if (!content.TrimStart().StartsWith("{") || !content.Contains("\"tool\""))
+        // Check if the content contains tool JSON (don't require it to start with {)
+        if (!content.Contains("{") || (!content.Contains("\"tool\"") && !content.Contains("\"function\"")))
         {
             return toolCalls;
         }

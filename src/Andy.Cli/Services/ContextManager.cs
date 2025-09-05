@@ -108,7 +108,11 @@ public class ContextManager
                 {
                     context.AddAssistantMessage(entry.Content);
                 }
-                // Tool messages are included in the content
+                else if (entry.Role == MessageRole.Tool)
+                {
+                    // Tool messages need to be added as tool responses
+                    context.AddToolResponse(entry.ToolId ?? "tool", "call_" + Guid.NewGuid().ToString("N"), entry.Content);
+                }
             }
         }
 
@@ -146,6 +150,14 @@ public class ContextManager
             else if (entry.Role == MessageRole.Assistant)
             {
                 context.AddAssistantMessage(entry.Content);
+            }
+            else if (entry.Role == MessageRole.Tool)
+            {
+                context.AddToolResponse(
+                    entry.ToolId ?? "tool",
+                    "call_" + Guid.NewGuid().ToString("N"),
+                    entry.ToolResult ?? entry.Content
+                );
             }
         }
 
@@ -243,7 +255,7 @@ public class ContextManager
     {
         return new ContextStats
         {
-            MessageCount = _history.Count,
+            MessageCount = _history.Count + 1, // +1 for system prompt
             EstimatedTokens = _history.Sum(h => h.TokenEstimate) + EstimateTokens(_systemPrompt),
             ToolCallCount = _history.Count(h => h.Role == MessageRole.Tool),
             OldestMessage = _history.FirstOrDefault()?.Timestamp,
