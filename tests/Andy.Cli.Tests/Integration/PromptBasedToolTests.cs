@@ -104,6 +104,30 @@ public class PromptBasedToolTests : IDisposable
         _serviceProvider?.Dispose();
     }
 
+    private AiConversationService CreateAiService(string? systemPrompt = null)
+    {
+        if (systemPrompt == null)
+        {
+            var systemPromptService = new SystemPromptService();
+            systemPrompt = systemPromptService.BuildSystemPrompt(_toolRegistry.GetTools());
+        }
+        
+        var parser = new QwenResponseParser(
+            new JsonRepairService(),
+            new StreamingToolCallAccumulator(new JsonRepairService(), null),
+            null);
+        var validator = new ToolCallValidator(_toolRegistry);
+        
+        return new AiConversationService(
+            _mockLlmClient.Object,
+            _toolRegistry,
+            _toolExecutor,
+            _feed,
+            systemPrompt,
+            parser,
+            validator);
+    }
+
     #region Basic Tool Tests
 
     [Fact]
@@ -118,14 +142,7 @@ public class PromptBasedToolTests : IDisposable
             .Setup(x => x.CompleteAsync(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => responses.Count > 0 ? responses.Dequeue() : new LlmResponse { Content = "Done" });
         
-        var systemPromptService = new SystemPromptService();
-        var systemPrompt = systemPromptService.BuildSystemPrompt(_toolRegistry.GetTools());
-        var aiService = new AiConversationService(
-            _mockLlmClient.Object,
-            _toolRegistry,
-            _toolExecutor,
-            _feed,
-            systemPrompt);
+        var aiService = CreateAiService();
         
         // Act
         await aiService.ProcessMessageAsync("List the files in the current directory", false);
@@ -184,14 +201,7 @@ public class PromptBasedToolTests : IDisposable
             .Setup(x => x.CompleteAsync(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(TestResponseHelper.CreateResponse("{\"tool\":\"non_existent_tool\",\"parameters\":{}}"));
         
-        var systemPromptService = new SystemPromptService();
-        var systemPrompt = systemPromptService.BuildSystemPrompt(_toolRegistry.GetTools());
-        var aiService = new AiConversationService(
-            _mockLlmClient.Object,
-            _toolRegistry,
-            _toolExecutor,
-            _feed,
-            systemPrompt);
+        var aiService = CreateAiService();
         
         // Act & Assert - should not throw
         await aiService.ProcessMessageAsync("do something impossible", false);
@@ -207,14 +217,7 @@ public class PromptBasedToolTests : IDisposable
             .Setup(x => x.CompleteAsync(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(TestResponseHelper.CreateResponse("{\"tool\":\"copy_file\",\"parameters\":{}}"));
         
-        var systemPromptService = new SystemPromptService();
-        var systemPrompt = systemPromptService.BuildSystemPrompt(_toolRegistry.GetTools());
-        var aiService = new AiConversationService(
-            _mockLlmClient.Object,
-            _toolRegistry,
-            _toolExecutor,
-            _feed,
-            systemPrompt);
+        var aiService = CreateAiService();
         
         // Act & Assert - should handle gracefully
         await aiService.ProcessMessageAsync("copy a file", false);
@@ -230,14 +233,7 @@ public class PromptBasedToolTests : IDisposable
             .Setup(x => x.CompleteAsync(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(TestResponseHelper.Scenarios.NonToolClarification());
         
-        var systemPromptService = new SystemPromptService();
-        var systemPrompt = systemPromptService.BuildSystemPrompt(_toolRegistry.GetTools());
-        var aiService = new AiConversationService(
-            _mockLlmClient.Object,
-            _toolRegistry,
-            _toolExecutor,
-            _feed,
-            systemPrompt);
+        var aiService = CreateAiService();
         
         // Act
         await aiService.ProcessMessageAsync("do something with the file", false);
@@ -272,14 +268,23 @@ public class PromptBasedToolTests : IDisposable
                 .Setup(x => x.CompleteAsync(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(TestResponseHelper.CreateResponse(expectedResponse));
             
+            // Use the mock client instead of the field for this test
+            var parser = new QwenResponseParser(
+                new JsonRepairService(),
+                new StreamingToolCallAccumulator(new JsonRepairService(), null),
+                null);
+            var validator = new ToolCallValidator(_toolRegistry);
             var systemPromptService = new SystemPromptService();
             var systemPrompt = systemPromptService.BuildSystemPrompt(_toolRegistry.GetTools());
+            
             var aiService = new AiConversationService(
                 mockClient.Object,
                 _toolRegistry,
                 _toolExecutor,
                 _feed,
-                systemPrompt);
+                systemPrompt,
+                parser,
+                validator);
             
             // Act
             await aiService.ProcessMessageAsync(prompt, false);
@@ -312,14 +317,7 @@ public class PromptBasedToolTests : IDisposable
                 };
             });
         
-        var systemPromptService = new SystemPromptService();
-        var systemPrompt = systemPromptService.BuildSystemPrompt(_toolRegistry.GetTools());
-        var aiService = new AiConversationService(
-            _mockLlmClient.Object,
-            _toolRegistry,
-            _toolExecutor,
-            _feed,
-            systemPrompt);
+        var aiService = CreateAiService();
         
         // Act - simulate error and recovery flow
         await aiService.ProcessMessageAsync("Try to read a file that doesn't exist", false);
@@ -340,14 +338,7 @@ public class PromptBasedToolTests : IDisposable
             .Setup(x => x.StreamCompleteAsync(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()))
             .Returns(chunks.ToAsyncEnumerable());
         
-        var systemPromptService = new SystemPromptService();
-        var systemPrompt = systemPromptService.BuildSystemPrompt(_toolRegistry.GetTools());
-        var aiService = new AiConversationService(
-            _mockLlmClient.Object,
-            _toolRegistry,
-            _toolExecutor,
-            _feed,
-            systemPrompt);
+        var aiService = CreateAiService();
         
         // Act - collect streaming response
         var collectedResponse = "";

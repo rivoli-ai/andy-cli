@@ -30,12 +30,20 @@ public class AiConversationServiceTests
         _feed = new FeedView();
         
         var systemPrompt = "You are a helpful assistant with access to tools.";
+        var parser = new QwenResponseParser(
+            new JsonRepairService(),
+            new StreamingToolCallAccumulator(new JsonRepairService(), null),
+            null);
+        var validator = new ToolCallValidator(_mockToolRegistry.Object);
+        
         _service = new AiConversationService(
             _mockLlmClient.Object,
             _mockToolRegistry.Object,
             _mockToolExecutor.Object,
             _feed,
-            systemPrompt);
+            systemPrompt,
+            parser,
+            validator);
     }
 
     [Fact]

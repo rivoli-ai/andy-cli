@@ -50,6 +50,14 @@ namespace Andy.Cli.Widgets
             AddItem(item);
             return item;
         }
+        
+        /// <summary>Add a tool execution display with dotted yellow line.</summary>
+        public void AddToolExecution(string toolId, Dictionary<string, object?> parameters, string? result = null, bool isSuccess = true)
+        {
+            AddItem(new ToolExecutionItem(toolId, parameters, result, isSuccess));
+            // Add a blank line after tool output for better readability
+            AddItem(new SpacerItem(1));
+        }
 
         /// <summary>Clear all items from the feed.</summary>
         public void Clear()
@@ -138,7 +146,17 @@ namespace Andy.Cli.Widgets
                 if (itemStart >= startLine + h) break; // after viewport
                 int sliceStart = Math.Max(0, startLine - itemStart);
                 int maxLines = Math.Min(itemLines - sliceStart, (startLine + h) - Math.Max(startLine, itemStart));
+                
+                // Critical fix: Ensure we never render beyond the allocated height
+                maxLines = Math.Min(maxLines, h - drawn);
                 if (maxLines <= 0) continue;
+                
+                // Additional safety: ensure cy is within the allocated region
+                if (cy + maxLines > y + h) {
+                    maxLines = Math.Max(0, (y + h) - cy);
+                    if (maxLines <= 0) break;
+                }
+                
                 _items[i].RenderSlice(x+1, cy, w-2, sliceStart, maxLines, baseDl, b);
                 cy += maxLines;
                 drawn += maxLines;
@@ -525,11 +543,316 @@ namespace Andy.Cli.Widgets
         }
     }
     
+    /// <summary>Tool execution display with dotted yellow line on the left side.</summary>
+    public sealed class ToolExecutionItem : IFeedItem
+    {
+        private readonly string _toolId;
+        private readonly Dictionary<string, object?> _parameters;
+        private readonly string? _result;
+        private readonly bool _isSuccess;
+        private readonly string[] _lines;
+        
+        public ToolExecutionItem(string toolId, Dictionary<string, object?> parameters, string? result = null, bool isSuccess = true)
+        {
+            _toolId = toolId;
+            _parameters = parameters;
+            _result = result;
+            _isSuccess = isSuccess;
+            
+            // Build the display lines
+            var lines = new List<string>();
+            
+            // Tool header
+            lines.Add($"Tool: {toolId}");
+            
+            // Parameters
+            if (parameters?.Any() == true)
+            {
+                lines.Add("Parameters:");
+                foreach (var param in parameters.Take(3))
+                {
+                    var value = param.Value?.ToString() ?? "null";
+                    if (value.Length > 50) value = value.Substring(0, 47) + "...";
+                    lines.Add($"  {param.Key}: {value}");
+                }
+                if (parameters.Count > 3)
+                {
+                    lines.Add($"  ... and {parameters.Count - 3} more");
+                }
+            }
+            
+            // Result - check if this is a directory listing
+            if (!string.IsNullOrEmpty(result))
+            {
+                lines.Add("Result:");
+                
+                // Check if this looks like directory listing JSON and format as tree
+                if (toolId == "list_directory" || result.Contains("\"items\"") && result.Contains("\"type\""))
+                {
+                    var treeLines = TryFormatAsDirectoryTree(result);
+                    if (treeLines != null)
+                    {
+                        lines.AddRange(treeLines);
+                    }
+                    else
+                    {
+                        // Fallback to normal display
+                        AddResultLines(lines, result);
+                    }
+                }
+                else
+                {
+                    AddResultLines(lines, result);
+                }
+            }
+            
+            _lines = lines.ToArray();
+        }
+        
+        private static void AddResultLines(List<string> lines, string result)
+        {
+            var resultLines = result.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+            foreach (var line in resultLines.Take(8))
+            {
+                lines.Add($"  {line}");
+            }
+            if (resultLines.Length > 8)
+            {
+                lines.Add($"  ... ({resultLines.Length - 8} more lines)");
+            }
+        }
+        
+        private static List<string>? TryFormatAsDirectoryTree(string jsonResult)
+        {
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(jsonResult);
+                var root = doc.RootElement;
+                
+                // Look for the items array
+                if (!root.TryGetProperty("items", out var items) || items.ValueKind != System.Text.Json.JsonValueKind.Array)
+                {
+                    return null;
+                }
+                
+                var treeLines = new List<string>();
+                var entries = new List<(string name, string type, int depth, string? size)>();
+                
+                // Parse all entries
+                foreach (var item in items.EnumerateArray())
+                {
+                    var name = item.GetProperty("name").GetString() ?? "";
+                    var type = item.GetProperty("type").GetString() ?? "file";
+                    var depth = 0;
+                    string? size = null;
+                    
+                    if (item.TryGetProperty("depth", out var depthProp))
+                    {
+                        depth = depthProp.GetInt32();
+                    }
+                    
+                    if (item.TryGetProperty("sizeFormatted", out var sizeProp) && sizeProp.ValueKind == System.Text.Json.JsonValueKind.String)
+                    {
+                        size = sizeProp.GetString();
+                    }
+                    
+                    entries.Add((name, type, depth, size));
+                }
+                
+                // Build tree structure
+                // Track which depths have more items coming (for vertical lines)
+                var depthHasMore = new Dictionary<int, bool>();
+                
+                for (int i = 0; i < entries.Count; i++)
+                {
+                    var (name, type, depth, size) = entries[i];
+                    
+                    // Check if this is the last item at this depth level
+                    var isLast = true;
+                    for (int j = i + 1; j < entries.Count; j++)
+                    {
+                        if (entries[j].depth < depth) break; // Parent level, we're done
+                        if (entries[j].depth == depth)
+                        {
+                            isLast = false; // Found a sibling
+                            break;
+                        }
+                    }
+                    
+                    var line = new System.Text.StringBuilder();
+                    
+                    // Add indentation based on depth with proper vertical lines
+                    for (int d = 0; d < depth; d++)
+                    {
+                        // Check if we should draw a vertical line at this depth
+                        if (depthHasMore.GetValueOrDefault(d, false))
+                        {
+                            line.Append("│   ");
+                        }
+                        else
+                        {
+                            line.Append("    ");
+                        }
+                    }
+                    
+                    // Update depth tracking
+                    depthHasMore[depth] = !isLast;
+                    
+                    // Add tree branch
+                    line.Append(isLast ? "└─ " : "├─ ");
+                    
+                    // Add name with type indicator
+                    if (type == "directory")
+                    {
+                        line.Append(name);
+                        if (!name.EndsWith("/")) line.Append("/");
+                    }
+                    else
+                    {
+                        line.Append(name);
+                        if (!string.IsNullOrEmpty(size))
+                        {
+                            line.Append($" ({size})");
+                        }
+                    }
+                    
+                    treeLines.Add(line.ToString());
+                }
+                
+                // If no tree structure (all at depth 0), create a simple tree  
+                if (entries.All(e => e.depth == 0))
+                {
+                    treeLines.Clear();
+                    for (int i = 0; i < entries.Count; i++)
+                    {
+                        var (name, type, _, size) = entries[i];
+                        var isLast = i == entries.Count - 1;
+                        
+                        var line = new System.Text.StringBuilder();
+                        line.Append(isLast ? "└─ " : "├─ ");
+                        
+                        if (type == "directory")
+                        {
+                            line.Append(name);
+                            if (!name.EndsWith("/")) line.Append("/");
+                        }
+                        else
+                        {
+                            line.Append(name);
+                            if (!string.IsNullOrEmpty(size))
+                            {
+                                line.Append($" ({size})");
+                            }
+                        }
+                        
+                        treeLines.Add(line.ToString());
+                    }
+                }
+                
+                return treeLines;
+            }
+            catch
+            {
+                // If parsing fails, return null to use fallback
+                return null;
+            }
+        }
+        
+        public int MeasureLineCount(int width)
+        {
+            // Account for wrapped lines
+            int totalLines = 0;
+            foreach (var line in _lines)
+            {
+                if (string.IsNullOrEmpty(line))
+                    totalLines++;
+                else
+                {
+                    // Account for the dotted line prefix (4 chars: "┊   ")
+                    int effectiveWidth = Math.Max(1, width - 4);
+                    totalLines += Math.Max(1, (int)Math.Ceiling((double)(line.Length) / effectiveWidth));
+                }
+            }
+            return Math.Max(1, totalLines);
+        }
+        
+        public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
+        {
+            var dottedLineColor = new DL.Rgb24(200, 180, 100); // Yellow/gold
+            var headerColor = new DL.Rgb24(150, 200, 255);     // Light blue
+            var paramColor = new DL.Rgb24(180, 180, 200);      // Light gray
+            var resultColor = _isSuccess ? new DL.Rgb24(150, 220, 150) : new DL.Rgb24(220, 150, 150); // Green/Red
+            
+            int currentVisualLine = 0;
+            int renderedLines = 0;
+            
+            for (int i = 0; i < _lines.Length && renderedLines < maxLines; i++)
+            {
+                var line = _lines[i];
+                int lineVisualLines = string.IsNullOrEmpty(line) ? 1 : 
+                    Math.Max(1, (int)Math.Ceiling((double)line.Length / Math.Max(1, width - 4)));
+                
+                // Skip lines before the viewport
+                if (currentVisualLine + lineVisualLines <= startLine)
+                {
+                    currentVisualLine += lineVisualLines;
+                    continue;
+                }
+                
+                // Render visible portion of this line
+                int lineStartOffset = Math.Max(0, startLine - currentVisualLine);
+                int linesToRender = Math.Min(lineVisualLines - lineStartOffset, maxLines - renderedLines);
+                
+                for (int j = lineStartOffset; j < lineStartOffset + linesToRender; j++)
+                {
+                    int row = y + renderedLines;
+                    
+                    // Draw dotted line on the left
+                    b.DrawText(new DL.TextRun(x, row, "┊", dottedLineColor, new DL.Rgb24(0,0,0), DL.CellAttrFlags.None));
+                    
+                    // Draw content
+                    int contentX = x + 2;
+                    int contentWidth = Math.Max(1, width - 4);
+                    
+                    // Determine which part of the line to show (for wrapped lines)
+                    int charStart = j * contentWidth;
+                    if (charStart < line.Length)
+                    {
+                        int charLength = Math.Min(contentWidth, line.Length - charStart);
+                        string segment = line.Substring(charStart, charLength);
+                        
+                        // Choose color based on line type
+                        DL.Rgb24 textColor;
+                        if (i == 0) // Tool header
+                            textColor = headerColor;
+                        else if (line.StartsWith("Parameters:") || line.StartsWith("Result:"))
+                            textColor = headerColor;
+                        else if (line.StartsWith("  "))
+                            textColor = line.Contains("Result:") ? resultColor : paramColor;
+                        else
+                            textColor = paramColor;
+                        
+                        b.DrawText(new DL.TextRun(contentX, row, segment, textColor, new DL.Rgb24(0,0,0), 
+                            i == 0 ? DL.CellAttrFlags.Bold : DL.CellAttrFlags.None));
+                    }
+                    
+                    renderedLines++;
+                }
+                
+                currentVisualLine += lineVisualLines;
+                
+                if (currentVisualLine >= startLine + maxLines)
+                    break;
+            }
+        }
+    }
+    
     /// <summary>A streaming message that can be updated progressively.</summary>
     public sealed class StreamingMessageItem : IFeedItem
     {
         private readonly System.Text.StringBuilder _content = new();
         private bool _completed = false;
+        private bool _hidden = false;
         private string[] _lines = Array.Empty<string>();
         
         /// <summary>Append content to the streaming message.</summary>
@@ -548,9 +871,25 @@ namespace Andy.Cli.Widgets
             _completed = true;
         }
         
+        /// <summary>Hide the streaming message (used when content will be reformatted).</summary>
+        public void Hide()
+        {
+            _hidden = true;
+            _lines = Array.Empty<string>();
+        }
+        
+        /// <summary>Get the full content of the streaming message.</summary>
+        public string GetContent()
+        {
+            return _content.ToString();
+        }
+        
         private void UpdateLines()
         {
-            _lines = _content.ToString().Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+            if (!_hidden)
+            {
+                _lines = _content.ToString().Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+            }
         }
         
         /// <inheritdoc />

@@ -102,7 +102,7 @@ class Program
             bool running = true;
             var hints = new KeyHintsBar();
             hints.SetHints(new[]{("Ctrl+P","Commands"),("F2","Toggle HUD"),("ESC","Quit")});
-            var toast = new Toast(); toast.Show("What would you like to explore today?", 120);
+            var toast = new Toast(); // Don't show initial toast as it interferes with prompt
             var tokenCounter = new TokenCounter();
             var statusMessage = new StatusMessage();
             var status = new StatusLine(); status.Set("Idle", spinner:false);
@@ -125,6 +125,13 @@ class Program
             {
                 options.DefaultProvider = "cerebras"; // Use Cerebras as default
             });
+            
+            // Register new Qwen parsing components
+            services.AddSingleton<IJsonRepairService, JsonRepairService>();
+            services.AddSingleton<StreamingToolCallAccumulator>();
+            services.AddSingleton<IQwenResponseParser, QwenResponseParser>();
+            services.AddSingleton<IToolCallValidator, ToolCallValidator>();
+            services.AddSingleton<IModelResponseInterpreter, ModelResponseInterpreter>();
             
             // Configure Tool services - manually register to avoid HostedService requirement
             // Core services from AddAndyTools
@@ -177,7 +184,9 @@ class Program
             // Build comprehensive system prompt
             var systemPromptService = new SystemPromptService();
             var availableTools = toolRegistry.GetTools(enabledOnly: true);
-            var systemPrompt = systemPromptService.BuildSystemPrompt(availableTools);
+            var currentModel = modelCommand.GetCurrentModel();
+            var currentProvider = modelCommand.GetCurrentProvider();
+            var systemPrompt = systemPromptService.BuildSystemPrompt(availableTools, currentModel, currentProvider);
             
             var conversation = new ConversationContext
             {
@@ -189,13 +198,23 @@ class Program
             {
                 llmClient = serviceProvider.GetRequiredService<LlmClient>();
                 var toolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
+                var parser = serviceProvider.GetRequiredService<IQwenResponseParser>();
+                var validator = serviceProvider.GetRequiredService<IToolCallValidator>();
                 aiService = new AiConversationService(
                     llmClient,
                     toolRegistry,
                     toolExecutor,
                     feed,
-                    systemPrompt);
-                feed.AddMarkdownRich("[model] Andy.Llm with Cerebras provider (tool-enabled)");
+                    systemPrompt,
+                    parser,
+                    validator);
+                
+                // Get actual model and provider information from ModelCommand
+                // Set initial model info
+                aiService.SetModelInfo(currentModel, currentProvider);
+                var providerUrl = GetProviderUrl(currentProvider);
+                
+                feed.AddMarkdownRich($"[model] {currentModel} with {currentProvider} provider [{providerUrl}] (tool-enabled)");
             }
             catch (Exception ex)
             {
@@ -266,18 +285,33 @@ class Program
                                 // Update the LLM client and reset conversation context
                                 llmClient = modelCommand.GetCurrentClient();
                                 conversation.Clear();
+                                
+                                // Rebuild system prompt for the new model
+                                var newModel = modelCommand.GetCurrentModel();
+                                var newProvider = modelCommand.GetCurrentProvider();
+                                systemPrompt = systemPromptService.BuildSystemPrompt(availableTools, newModel, newProvider);
                                 conversation.SystemInstruction = systemPrompt;
                                 
                                 // Update AI service with new client
                                 if (llmClient != null)
                                 {
                                     var toolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
+                                    var parser = serviceProvider.GetRequiredService<IQwenResponseParser>();
+                                    var validator = serviceProvider.GetRequiredService<IToolCallValidator>();
                                     aiService = new AiConversationService(
                                         llmClient,
                                         toolRegistry,
                                         toolExecutor,
                                         feed,
-                                        systemPrompt);
+                                        systemPrompt,
+                                        parser,
+                                        validator);
+                                    
+                                    // Set model info for response interpretation
+                                    aiService.SetModelInfo(
+                                        modelCommand.GetCurrentModel(),
+                                        modelCommand.GetCurrentProvider()
+                                    );
                                 }
                                 
                                 feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
@@ -677,18 +711,33 @@ class Program
                                             // Update the LLM client and reset conversation context
                                             llmClient = modelCommand.GetCurrentClient();
                                             conversation.Clear();
+                                            
+                                            // Rebuild system prompt for the new model
+                                            var newModel = modelCommand.GetCurrentModel();
+                                            var newProvider = modelCommand.GetCurrentProvider();
+                                            systemPrompt = systemPromptService.BuildSystemPrompt(availableTools, newModel, newProvider);
                                             conversation.SystemInstruction = systemPrompt;
                                             
                                             // Update AI service with new client
                                             if (llmClient != null)
                                             {
                                                 var toolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
+                                                var parser = serviceProvider.GetRequiredService<IQwenResponseParser>();
+                                                var validator = serviceProvider.GetRequiredService<IToolCallValidator>();
                                                 aiService = new AiConversationService(
                                                     llmClient,
                                                     toolRegistry,
                                                     toolExecutor,
                                                     feed,
-                                                    systemPrompt);
+                                                    systemPrompt,
+                                                    parser,
+                                                    validator);
+                                                
+                                                // Set model info for response interpretation
+                                                aiService.SetModelInfo(
+                                                    modelCommand.GetCurrentModel(),
+                                                    modelCommand.GetCurrentProvider()
+                                                );
                                             }
                                             
                                             feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
@@ -883,6 +932,7 @@ class Program
                 var baseDl = b.Build();
                 var wb = new DL.DisplayListBuilder();
                 hints.Render(viewport, baseDl, wb);
+                toast.Tick(); // Advance toast TTL
                 toast.RenderAt(2, viewport.Height - 4, baseDl, wb);
                 
                 // Render token counter on same line as hints
@@ -1000,6 +1050,19 @@ class Program
         // Add static response separator with token information
         feed.AddResponseSeparator(inputTokens, outputTokens);
     }
+    
+    private static string GetProviderUrl(string provider)
+    {
+        return provider switch
+        {
+            "cerebras" => "https://api.cerebras.ai",
+            "openai" => Environment.GetEnvironmentVariable("OPENAI_API_BASE") ?? "https://api.openai.com",
+            "anthropic" => "https://api.anthropic.com",
+            "gemini" => "https://generativelanguage.googleapis.com",
+            "ollama" => Environment.GetEnvironmentVariable("OLLAMA_API_BASE") ?? "http://localhost:11434",
+            _ => "unknown"
+        };
+    }
 
     private static async Task HandleCommandLineArgs(string[] args)
     {
@@ -1013,6 +1076,13 @@ class Program
         {
             options.DefaultProvider = "cerebras";
         });
+        
+        // Register new Qwen parsing components
+        services.AddSingleton<IJsonRepairService, JsonRepairService>();
+        services.AddSingleton<StreamingToolCallAccumulator>();
+        services.AddSingleton<IQwenResponseParser, QwenResponseParser>();
+        services.AddSingleton<IToolCallValidator, ToolCallValidator>();
+        services.AddSingleton<IModelResponseInterpreter, ModelResponseInterpreter>();
         
         // Configure Tool services - manually register to avoid HostedService requirement
         // Core services from AddAndyTools

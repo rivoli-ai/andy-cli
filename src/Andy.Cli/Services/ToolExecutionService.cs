@@ -53,25 +53,9 @@ public class ToolExecutionService
                 TruncatedForDisplay = false
             };
         }
-
-        // More concise tool execution display
-        var execDisplay = new StringBuilder();
-        execDisplay.Append($"**Tool:** `{toolId}`");
         
-        // Display key parameters inline for brevity
-        if (parameters.Any())
-        {
-            var keyParams = parameters.Take(2).Select(p => 
-            {
-                var val = p.Value?.ToString() ?? "null";
-                if (val.Length > 40) val = val.Substring(0, 37) + "...";
-                return $"{p.Key}={val}";
-            });
-            execDisplay.Append($" ({string.Join(", ", keyParams)})");
-            if (parameters.Count > 2) execDisplay.Append($" +{parameters.Count - 2} more");
-        }
-        
-        _feed.AddMarkdownRich(execDisplay.ToString());
+        // Map parameter names to what the tool expects
+        var mappedParameters = ParameterMapper.MapParameters(toolId, parameters, toolReg.Metadata);
 
         // Create execution context
         var context = new ToolExecutionContext
@@ -80,24 +64,19 @@ public class ToolExecutionService
         };
 
         // Track output for display
-        var outputLines = new List<string>();
         var fullOutput = new StringBuilder();
-        var displayedLines = 0;
         var truncated = false;
 
         try
         {
-            // Execute the tool
-            var result = await _toolExecutor.ExecuteAsync(toolId, parameters, context);
+            // Execute the tool with mapped parameters
+            var result = await _toolExecutor.ExecuteAsync(toolId, mappedParameters, context);
             
-            // Display completion status more concisely
+            // Prepare the output for display
+            string output = "";
+            
             if (result.IsSuccessful)
             {
-                // Success is shown through the output, no need for extra message
-                
-                // Display the output if available
-                string output = "";
-                
                 // Handle different output types
                 if (result.Data != null)
                 {
@@ -113,39 +92,25 @@ public class ToolExecutionService
                     // Fallback to Output property
                     output = result.Output.ToString() ?? "";
                 }
-                
-                if (!string.IsNullOrEmpty(output))
+                else if (!string.IsNullOrEmpty(result.Message))
                 {
-                    fullOutput.Append(output);
-                    var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-                    outputLines.AddRange(lines);
-                    
-                    foreach (var line in lines)
-                    {
-                        if (displayedLines < _maxDisplayLines)
-                        {
-                            _feed.AddCode(line, "json");
-                            displayedLines++;
-                        }
-                        else if (!truncated)
-                        {
-                            truncated = true;
-                            _feed.AddMarkdownRich($"*... output truncated (showing first {_maxDisplayLines} lines) ...*");
-                        }
-                    }
+                    output = result.Message;
                 }
                 
-                // If output was truncated, show summary
-                if (truncated)
-                {
-                    var totalLines = outputLines.Count;
-                    _feed.AddMarkdownRich($"*Total output: {totalLines} lines, {fullOutput.Length} characters*");
-                }
+                fullOutput.Append(output);
             }
             else
             {
-                _feed.AddMarkdownRich($"**Tool execution failed:** {result.Error}");
+                output = $"Error: {result.Error ?? result.ErrorMessage ?? "Unknown error"}";
+                fullOutput.Append(output);
             }
+            
+            // Check if output is truncated (more than 10 lines or 1000 chars)
+            var lines = output.Split('\n');
+            truncated = lines.Length > 10 || output.Length > 1000;
+            
+            // Display the tool execution with the new styled item
+            _feed.AddToolExecution(toolId, mappedParameters, output, result.IsSuccessful);
 
             // Create extended result with properly serialized output
             var extendedResult = new ToolExecutionResult

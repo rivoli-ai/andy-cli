@@ -293,13 +293,22 @@ public abstract class PromptTestBase : IDisposable
         var systemPromptService = new SystemPromptService();
         var systemPrompt = systemPromptService.BuildSystemPrompt(ToolRegistry.GetTools());
         
+        // Create parser and validator
+        var parser = new QwenResponseParser(
+            new JsonRepairService(),
+            new StreamingToolCallAccumulator(new JsonRepairService(), null),
+            null);
+        var validator = new ToolCallValidator(ToolRegistry);
+        
         // Create AI service
         AiService = new AiConversationService(
             MockLlmClient.Object,
             ToolRegistry,
             ToolExecutor,
             Feed,
-            systemPrompt);
+            systemPrompt,
+            parser,
+            validator);
     }
     
     private void RegisterTools()

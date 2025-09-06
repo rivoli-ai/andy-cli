@@ -23,19 +23,40 @@ public class AiConversationService
     private readonly ContextManager _contextManager;
     private readonly FeedView _feed;
     private readonly IToolRegistry _toolRegistry;
+    private readonly IQwenResponseParser _parser;
+    private readonly IToolCallValidator _validator;
+    private string _currentModel = "";
+    private string _currentProvider = "";
 
     public AiConversationService(
         LlmClient llmClient,
         IToolRegistry toolRegistry,
         IToolExecutor toolExecutor,
         FeedView feed,
-        string systemPrompt)
+        string systemPrompt,
+        IQwenResponseParser parser,
+        IToolCallValidator validator,
+        string modelName = "",
+        string providerName = "")
     {
         _llmClient = llmClient;
         _toolRegistry = toolRegistry;
         _feed = feed;
         _toolService = new ToolExecutionService(toolRegistry, toolExecutor, feed);
         _contextManager = new ContextManager(systemPrompt);
+        _parser = parser;
+        _validator = validator;
+        _currentModel = modelName;
+        _currentProvider = providerName;
+    }
+    
+    /// <summary>
+    /// Update the current model and provider information
+    /// </summary>
+    public void UpdateModelInfo(string modelName, string providerName)
+    {
+        _currentModel = modelName;
+        _currentProvider = providerName;
     }
 
     /// <summary>
@@ -89,8 +110,12 @@ public class AiConversationService
             
             if (toolCalls.Any())
             {
-                // Don't display the raw response when tool calls are detected
-                // The tool execution will show what's happening
+                // Clean and display the response text (without tool call artifacts)
+                var cleanedContent = _parser.CleanResponseText(response.Content);
+                if (!string.IsNullOrWhiteSpace(cleanedContent))
+                {
+                    _feed.AddMarkdownRich(cleanedContent);
+                }
                 
                 // Execute tools and collect results
                 var toolResults = new List<string>();
@@ -103,8 +128,8 @@ public class AiConversationService
                         toolCall.Parameters,
                         cancellationToken);
                     
-                    // Add to context - use FullOutput which contains the properly serialized data
-                    var outputStr = result.FullOutput ?? result.ErrorMessage ?? "No output";
+                    // Add to context - use Data which contains the properly serialized data
+                    var outputStr = result.Data?.ToString() ?? result.ErrorMessage ?? "No output";
                     _contextManager.AddToolExecution(
                         toolCall.ToolId,
                         toolCall.Parameters,
@@ -123,13 +148,61 @@ public class AiConversationService
             else
             {
                 // Regular text response
-                finalResponse.AppendLine(response.Content);
-                _contextManager.AddAssistantMessage(response.Content ?? "");
+                var content = response.Content ?? "";
                 
-                // Display the response only if not streaming (already displayed during streaming)
-                if (!enableStreaming && !string.IsNullOrEmpty(response.Content))
+                // Debug: Show raw LLM output (can be controlled by environment variable)
+                if (Environment.GetEnvironmentVariable("ANDY_DEBUG_RAW") == "true" && !string.IsNullOrWhiteSpace(content))
                 {
-                    _feed.AddMarkdownRich(response.Content);
+                    _feed.AddMarkdownRich("```raw-llm-output");
+                    _feed.AddMarkdownRich(content);
+                    _feed.AddMarkdownRich("```");
+                }
+                
+                // Clean the response using the model-specific interpreter
+                content = _parser.CleanResponseText(content);
+                
+                // Check if the response looks like a raw tool execution result (escaped JSON)
+                if (content.StartsWith("\"\\\"[Tool Execution:") || content.StartsWith("\"[Tool Execution:"))
+                {
+                    // Try to unescape and parse the content
+                    try
+                    {
+                        // Remove outer quotes if present
+                        if (content.StartsWith("\"") && content.EndsWith("\""))
+                        {
+                            content = content.Substring(1, content.Length - 2);
+                        }
+                        
+                        // Unescape the content
+                        content = content.Replace("\\n", "\n")
+                                       .Replace("\\\"", "\"")
+                                       .Replace("\\\\", "\\")
+                                       .Replace("\\u0022", "\"");
+                    }
+                    catch
+                    {
+                        // If unescaping fails, use original content
+                    }
+                    
+                    finalResponse.AppendLine(content);
+                    _contextManager.AddAssistantMessage(content);
+                    
+                    // Display the cleaned response
+                    if (!string.IsNullOrEmpty(content))
+                    {
+                        _feed.AddMarkdownRich(content);
+                    }
+                }
+                else
+                {
+                    finalResponse.AppendLine(content);
+                    _contextManager.AddAssistantMessage(content);
+                    
+                    // Display the cleaned response
+                    if (!string.IsNullOrEmpty(content))
+                    {
+                        _feed.AddMarkdownRich(content);
+                    }
                 }
                 
                 break; // No more tool calls, we're done
@@ -188,23 +261,33 @@ public class AiConversationService
         try
         {
             var fullContent = new StringBuilder();
-            var streamingMessage = _feed.AddStreamingMessage();
             
+            // Don't display content during streaming - just accumulate it
+            // This prevents duplication when we display the cleaned content later
             await foreach (var chunk in _llmClient.StreamCompleteAsync(request, cancellationToken))
             {
                 if (!string.IsNullOrEmpty(chunk.TextDelta))
                 {
                     fullContent.Append(chunk.TextDelta);
-                    streamingMessage.AppendContent(chunk.TextDelta);
                 }
             }
             
-            streamingMessage.Complete();
+            var content = fullContent.ToString();
             
-            // Return the complete response
+            // Debug: Show raw LLM output (can be controlled by environment variable)
+            if (Environment.GetEnvironmentVariable("ANDY_DEBUG_RAW") == "true" && !string.IsNullOrWhiteSpace(content))
+            {
+                _feed.AddMarkdownRich("```raw-llm-output");
+                _feed.AddMarkdownRich(content);
+                _feed.AddMarkdownRich("```");
+            }
+            
+            // The main ProcessMessageAsync will handle displaying the cleaned content
+            
+            // Return the raw content for processing in the main loop
             return new LlmResponse
             {
-                Content = fullContent.ToString()
+                Content = content
             };
         }
         catch (Exception ex)
@@ -219,203 +302,58 @@ public class AiConversationService
     /// </summary>
     private List<ToolCall> ExtractToolCalls(LlmResponse response)
     {
-        var toolCalls = new List<ToolCall>();
-        
         if (string.IsNullOrEmpty(response.Content))
         {
-            return toolCalls;
+            return new List<ToolCall>();
         }
 
-        var content = response.Content.Trim();
+        // Use the model-specific interpreter
+        var parsedResponse = _parser.Parse(response.Content);
+        var modelToolCalls = parsedResponse.ToolCalls;
         
-        // First try to extract from <tool_use> blocks
-        toolCalls = ExtractWrappedToolCalls(content);
-        
-        // If no wrapped tool calls found, try to parse as direct JSON
-        if (!toolCalls.Any())
+        // Convert from interpreter's ModelToolCall to our internal ToolCall format
+        var result = new List<ToolCall>();
+        foreach (var call in modelToolCalls)
         {
-            toolCalls = ExtractDirectJsonToolCalls(content);
+            result.Add(new ToolCall
+            {
+                ToolId = call.ToolId,
+                Parameters = call.Parameters
+            });
         }
         
-        return toolCalls;
+        return result;
     }
     
-    /// <summary>
-    /// Extract tool calls wrapped in <tool_use> tags
-    /// </summary>
-    private List<ToolCall> ExtractWrappedToolCalls(string content)
-    {
-        var toolCalls = new List<ToolCall>();
-        var startTag = "<tool_use>";
-        var endTag = "</tool_use>";
-        
-        var startIndex = 0;
-        while ((startIndex = content.IndexOf(startTag, startIndex, StringComparison.OrdinalIgnoreCase)) != -1)
-        {
-            var endIndex = content.IndexOf(endTag, startIndex, StringComparison.OrdinalIgnoreCase);
-            if (endIndex == -1) break;
-            
-            var toolJson = content.Substring(
-                startIndex + startTag.Length,
-                endIndex - startIndex - startTag.Length).Trim();
-            
-            var toolCall = ParseToolCallJson(toolJson);
-            if (toolCall != null)
-            {
-                toolCalls.Add(toolCall);
-            }
-            
-            startIndex = endIndex + endTag.Length;
-        }
-        
-        return toolCalls;
-    }
+    // Note: ExtractWrappedToolCalls removed - now handled by ModelResponseInterpreter
     
-    /// <summary>
-    /// Extract tool calls from direct JSON format
-    /// </summary>
-    private List<ToolCall> ExtractDirectJsonToolCalls(string content)
-    {
-        var toolCalls = new List<ToolCall>();
-        
-        // Clean up the content first (remove code blocks)
-        content = content.Replace("```json", "").Replace("```", "").Trim();
-        
-        // Check if the content contains tool JSON (don't require it to start with {)
-        if (!content.Contains("{") || (!content.Contains("\"tool\"") && !content.Contains("\"function\"")))
-        {
-            return toolCalls;
-        }
-        
-        // Try to find JSON objects in the content
-        var jsonStart = content.IndexOf('{');
-        while (jsonStart >= 0)
-        {
-            // Find matching closing brace
-            int braceCount = 0;
-            int jsonEnd = jsonStart;
-            
-            for (int i = jsonStart; i < content.Length; i++)
-            {
-                if (content[i] == '{')
-                    braceCount++;
-                else if (content[i] == '}')
-                {
-                    braceCount--;
-                    if (braceCount == 0)
-                    {
-                        jsonEnd = i;
-                        break;
-                    }
-                }
-            }
-            
-            if (jsonEnd > jsonStart)
-            {
-                var jsonStr = content.Substring(jsonStart, jsonEnd - jsonStart + 1);
-                var toolCall = ParseToolCallJson(jsonStr);
-                
-                if (toolCall != null)
-                {
-                    toolCalls.Add(toolCall);
-                    
-                    // For now, only handle the first tool call in direct JSON format
-                    // Most LLMs return a single tool call at a time
-                    break;
-                }
-            }
-            
-            // Look for next potential JSON object
-            jsonStart = content.IndexOf('{', jsonEnd + 1);
-        }
-        
-        return toolCalls;
-    }
+    // Note: ExtractDirectJsonToolCalls removed - now handled by ModelResponseInterpreter
     
-    /// <summary>
-    /// Parse a JSON string into a ToolCall
-    /// </summary>
-    private ToolCall? ParseToolCallJson(string jsonStr)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(jsonStr);
-            var root = doc.RootElement;
-            
-            // Check if this looks like a tool call
-            if (!root.TryGetProperty("tool", out _) && !root.TryGetProperty("function", out _))
-            {
-                return null;
-            }
-            
-            var toolCall = new ToolCall();
-            
-            // Support both "tool" and "function" property names
-            if (root.TryGetProperty("tool", out var toolProp))
-            {
-                toolCall.ToolId = toolProp.GetString() ?? "";
-            }
-            else if (root.TryGetProperty("function", out var funcProp))
-            {
-                toolCall.ToolId = funcProp.GetString() ?? "";
-            }
-            
-            // Support both "parameters" and "arguments" property names  
-            if (root.TryGetProperty("parameters", out var parameters))
-            {
-                ParseParameters(parameters, toolCall.Parameters);
-            }
-            else if (root.TryGetProperty("arguments", out var arguments))
-            {
-                ParseParameters(arguments, toolCall.Parameters);
-            }
-            
-            return toolCall;
-        }
-        catch (JsonException)
-        {
-            // Not valid JSON or not a tool call
-            return null;
-        }
-    }
-    
-    /// <summary>
-    /// Parse parameters from a JSON element
-    /// </summary>
-    private void ParseParameters(JsonElement parameters, Dictionary<string, object?> target)
-    {
-        foreach (var param in parameters.EnumerateObject())
-        {
-            target[param.Name] = param.Value.ValueKind switch
-            {
-                JsonValueKind.String => param.Value.GetString(),
-                JsonValueKind.Number => param.Value.GetDouble(),
-                JsonValueKind.True => true,
-                JsonValueKind.False => false,
-                JsonValueKind.Null => null,
-                JsonValueKind.Array => param.Value.GetRawText(),
-                JsonValueKind.Object => param.Value.GetRawText(),
-                _ => param.Value.GetRawText()
-            };
-        }
-    }
+    // Note: ParseToolCallJson and ParseParameters removed - now handled by ModelResponseInterpreter
 
     /// <summary>
     /// Format tool results for LLM
     /// </summary>
     private string FormatToolResults(List<ToolCall> toolCalls, List<string> results)
     {
+        // Convert our internal ToolCall to ModelToolCall for the interpreter
+        var modelToolCalls = toolCalls.Select(tc => new ModelToolCall 
+        { 
+            ToolId = tc.ToolId, 
+            Parameters = tc.Parameters 
+        }).ToList();
+        
+        // Use the model-specific interpreter for formatting
+        // Format the tool results for the model
         var sb = new StringBuilder();
-        
-        for (int i = 0; i < toolCalls.Count; i++)
+        foreach (var result in results)
         {
-            sb.AppendLine($"Tool: {toolCalls[i].ToolId}");
-            sb.AppendLine($"Result: {results[i]}");
-            sb.AppendLine();
+            sb.AppendLine($"Tool result: {result}");
         }
-        
         return sb.ToString();
     }
+    
+    // Note: FindJsonEnd removed - no longer needed with ModelResponseInterpreter
     
     /// <summary>
     /// Extract any text that appears before tool calls in the response
@@ -451,6 +389,15 @@ public class AiConversationService
     public void UpdateSystemPrompt(string prompt)
     {
         _contextManager.UpdateSystemPrompt(prompt);
+    }
+
+    /// <summary>
+    /// Set the current model and provider for response interpretation
+    /// </summary>
+    public void SetModelInfo(string modelName, string providerName)
+    {
+        _currentModel = modelName ?? "";
+        _currentProvider = providerName ?? "";
     }
 
     /// <summary>
