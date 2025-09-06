@@ -5,11 +5,15 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Andy.Cli.Parsing;
+using Andy.Cli.Parsing.Compiler;
+using Andy.Cli.Parsing.Rendering;
 using Andy.Cli.Widgets;
 using Andy.Llm;
 using Andy.Llm.Models;
 using Andy.Tools.Core;
 using Andy.Tools.Execution;
+using Microsoft.Extensions.Logging;
 
 namespace Andy.Cli.Services;
 
@@ -23,8 +27,9 @@ public class AiConversationService
     private readonly ContextManager _contextManager;
     private readonly FeedView _feed;
     private readonly IToolRegistry _toolRegistry;
-    private readonly IQwenResponseParser _parser;
-    private readonly IToolCallValidator _validator;
+    private readonly LlmResponseCompiler _compiler;
+    private readonly AstRenderer _renderer;
+    private readonly ILogger<AiConversationService>? _logger;
     private string _currentModel = "";
     private string _currentProvider = "";
 
@@ -34,18 +39,24 @@ public class AiConversationService
         IToolExecutor toolExecutor,
         FeedView feed,
         string systemPrompt,
-        IQwenResponseParser parser,
-        IToolCallValidator validator,
+        IJsonRepairService jsonRepair,
+        ILogger<AiConversationService>? logger = null,
         string modelName = "",
         string providerName = "")
     {
         _llmClient = llmClient;
         _toolRegistry = toolRegistry;
         _feed = feed;
+        _logger = logger;
         _toolService = new ToolExecutionService(toolRegistry, toolExecutor, feed);
         _contextManager = new ContextManager(systemPrompt);
-        _parser = parser;
-        _validator = validator;
+        _compiler = new LlmResponseCompiler(providerName, jsonRepair, null);
+        _renderer = new AstRenderer(new RenderOptions 
+        { 
+            ShowToolCalls = false,
+            UseEmoji = false,
+            ToolCallFormat = ToolCallDisplayFormat.Hidden
+        }, null);
         _currentModel = modelName;
         _currentProvider = providerName;
     }
@@ -105,23 +116,84 @@ public class AiConversationService
                 break;
             }
 
-            // Check if response contains tool calls
-            var toolCalls = ExtractToolCalls(response);
-            
-            if (toolCalls.Any())
+            // Parse the response using the AST compiler
+            var compilerOptions = new CompilerOptions
             {
-                // Clean and display the response text (without tool call artifacts)
-                var cleanedContent = _parser.CleanResponseText(response.Content);
-                if (!string.IsNullOrWhiteSpace(cleanedContent))
+                ModelProvider = _currentProvider,
+                ModelName = _currentModel,
+                PreserveThoughts = false,
+                EnableOptimizations = true
+            };
+            
+            var compilationResult = _compiler.Compile(response.Content ?? "", compilerOptions);
+            
+            // Log any compilation diagnostics
+            foreach (var diagnostic in compilationResult.Diagnostics)
+            {
+                if (diagnostic.Severity == DiagnosticSeverity.Error)
+                    _logger?.LogError("Compilation error: {Message}", diagnostic.Message);
+                else if (diagnostic.Severity == DiagnosticSeverity.Warning)
+                    _logger?.LogWarning("Compilation warning: {Message}", diagnostic.Message);
+            }
+            
+            if (!compilationResult.Success || compilationResult.Ast == null)
+            {
+                _logger?.LogWarning("Failed to parse response cleanly, falling back to basic parsing");
+                
+                // Fall back to basic parsing - still try to extract tool calls
+                compilationResult.Ast = new ResponseNode
                 {
-                    _feed.AddMarkdownRich(cleanedContent);
+                    ModelProvider = _currentProvider,
+                    ModelName = _currentModel
+                };
+                
+                // Add the raw text as a text node (will be cleaned by renderer)
+                compilationResult.Ast.Children.Add(new TextNode
+                {
+                    Content = response.Content ?? "",
+                    Format = TextFormat.Plain
+                });
+            }
+            
+            // Render the AST for display and tool extraction
+            var renderResult = _renderer.RenderForStreaming(compilationResult.Ast);
+            
+            if (renderResult.ToolCalls.Any())
+            {
+                // Display text content if it exists
+                if (!string.IsNullOrWhiteSpace(renderResult.TextContent))
+                {
+                    _feed.AddMarkdownRich(renderResult.TextContent);
                 }
+                
+                // Generate call IDs for each tool call first
+                var contextToolCalls = new List<ContextToolCall>();
+                var callIdMap = new Dictionary<int, string>();
+                
+                for (int i = 0; i < renderResult.ToolCalls.Count; i++)
+                {
+                    var callId = "call_" + Guid.NewGuid().ToString("N");
+                    callIdMap[i] = callId;
+                    contextToolCalls.Add(new ContextToolCall
+                    {
+                        CallId = callId,
+                        ToolId = renderResult.ToolCalls[i].ToolId,
+                        Parameters = renderResult.ToolCalls[i].Parameters
+                    });
+                }
+                
+                // Add assistant message with tool calls to context
+                // This is critical - the assistant message must include tool_calls
+                _contextManager.AddAssistantMessage(renderResult.TextContent ?? "", contextToolCalls);
                 
                 // Execute tools and collect results
                 var toolResults = new List<string>();
                 
-                foreach (var toolCall in toolCalls)
+                for (int i = 0; i < renderResult.ToolCalls.Count; i++)
                 {
+                    var toolCall = renderResult.ToolCalls[i];
+                    var callId = callIdMap[i];
+                    
                     // Tool execution is displayed by ToolExecutionService
                     var result = await _toolService.ExecuteToolAsync(
                         toolCall.ToolId,
@@ -132,34 +204,22 @@ public class AiConversationService
                     var outputStr = result.Data?.ToString() ?? result.ErrorMessage ?? "No output";
                     _contextManager.AddToolExecution(
                         toolCall.ToolId,
+                        callId,
                         toolCall.Parameters,
                         outputStr);
                     
                     toolResults.Add(outputStr);
                 }
 
-                // Continue conversation with tool results
-                var toolResultMessage = FormatToolResults(toolCalls, toolResults);
-                _contextManager.AddUserMessage($"[Tool Results]\n{toolResultMessage}");
+                // Don't add tool results as user message - they're already in context as tool responses
                 
                 // Update request for next iteration
                 request = _contextManager.GetContext().CreateRequest();
             }
             else
             {
-                // Regular text response
-                var content = response.Content ?? "";
-                
-                // Debug: Show raw LLM output (can be controlled by environment variable)
-                if (Environment.GetEnvironmentVariable("ANDY_DEBUG_RAW") == "true" && !string.IsNullOrWhiteSpace(content))
-                {
-                    _feed.AddMarkdownRich("```raw-llm-output");
-                    _feed.AddMarkdownRich(content);
-                    _feed.AddMarkdownRich("```");
-                }
-                
-                // Clean the response using the model-specific interpreter
-                content = _parser.CleanResponseText(content);
+                // Regular text response - rendered content without tool calls
+                var content = renderResult.TextContent ?? "";
                 
                 // Check if the response looks like a raw tool execution result (escaped JSON)
                 if (content.StartsWith("\"\\\"[Tool Execution:") || content.StartsWith("\"[Tool Execution:"))
@@ -261,14 +321,30 @@ public class AiConversationService
         try
         {
             var fullContent = new StringBuilder();
+            var isComplete = false;
+            string? finishReason = null;
+            var functionCalls = new List<FunctionCall>();
             
-            // Don't display content during streaming - just accumulate it
-            // This prevents duplication when we display the cleaned content later
+            // Accumulate the entire response during streaming
+            // For Qwen models, tool calls are only valid when streaming is complete
             await foreach (var chunk in _llmClient.StreamCompleteAsync(request, cancellationToken))
             {
                 if (!string.IsNullOrEmpty(chunk.TextDelta))
                 {
                     fullContent.Append(chunk.TextDelta);
+                }
+                
+                // Accumulate function calls
+                if (chunk.FunctionCall != null)
+                {
+                    functionCalls.Add(chunk.FunctionCall);
+                }
+                
+                // Check if streaming is complete
+                if (chunk.IsComplete)
+                {
+                    isComplete = true;
+                    finishReason = "stop";  // Set a default finish reason
                 }
             }
             
@@ -282,12 +358,18 @@ public class AiConversationService
                 _feed.AddMarkdownRich("```");
             }
             
-            // The main ProcessMessageAsync will handle displaying the cleaned content
+            // Only process tool calls if streaming is complete
+            // This matches qwen-code's behavior of waiting for finish_reason
+            if (!isComplete)
+            {
+                _feed.AddMarkdownRich("**Warning:** Streaming did not complete properly");
+            }
             
             // Return the raw content for processing in the main loop
             return new LlmResponse
             {
-                Content = content
+                Content = content,
+                FinishReason = finishReason
             };
         }
         catch (Exception ex)
@@ -297,91 +379,9 @@ public class AiConversationService
         }
     }
 
-    /// <summary>
-    /// Extract tool calls from LLM response
-    /// </summary>
-    private List<ToolCall> ExtractToolCalls(LlmResponse response)
-    {
-        if (string.IsNullOrEmpty(response.Content))
-        {
-            return new List<ToolCall>();
-        }
+    // Tool call extraction now handled by AST compiler
 
-        // Use the model-specific interpreter
-        var parsedResponse = _parser.Parse(response.Content);
-        var modelToolCalls = parsedResponse.ToolCalls;
-        
-        // Convert from interpreter's ModelToolCall to our internal ToolCall format
-        var result = new List<ToolCall>();
-        foreach (var call in modelToolCalls)
-        {
-            result.Add(new ToolCall
-            {
-                ToolId = call.ToolId,
-                Parameters = call.Parameters
-            });
-        }
-        
-        return result;
-    }
-    
-    // Note: ExtractWrappedToolCalls removed - now handled by ModelResponseInterpreter
-    
-    // Note: ExtractDirectJsonToolCalls removed - now handled by ModelResponseInterpreter
-    
-    // Note: ParseToolCallJson and ParseParameters removed - now handled by ModelResponseInterpreter
-
-    /// <summary>
-    /// Format tool results for LLM
-    /// </summary>
-    private string FormatToolResults(List<ToolCall> toolCalls, List<string> results)
-    {
-        // Convert our internal ToolCall to ModelToolCall for the interpreter
-        var modelToolCalls = toolCalls.Select(tc => new ModelToolCall 
-        { 
-            ToolId = tc.ToolId, 
-            Parameters = tc.Parameters 
-        }).ToList();
-        
-        // Use the model-specific interpreter for formatting
-        // Format the tool results for the model
-        var sb = new StringBuilder();
-        foreach (var result in results)
-        {
-            sb.AppendLine($"Tool result: {result}");
-        }
-        return sb.ToString();
-    }
-    
-    // Note: FindJsonEnd removed - no longer needed with ModelResponseInterpreter
-    
-    /// <summary>
-    /// Extract any text that appears before tool calls in the response
-    /// </summary>
-    private string? ExtractTextBeforeToolCall(string? content)
-    {
-        if (string.IsNullOrEmpty(content))
-            return null;
-        
-        // Find the start of JSON tool call
-        var jsonStart = content.IndexOf('{');
-        if (jsonStart > 0)
-        {
-            var beforeText = content.Substring(0, jsonStart).Trim();
-            // Filter out markdown code block markers
-            beforeText = beforeText.Replace("```json", "").Replace("```", "").Trim();
-            return string.IsNullOrWhiteSpace(beforeText) ? null : beforeText;
-        }
-        
-        // Find the start of wrapped tool call
-        var toolUseStart = content.IndexOf("<tool_use>", StringComparison.OrdinalIgnoreCase);
-        if (toolUseStart > 0)
-        {
-            return content.Substring(0, toolUseStart).Trim();
-        }
-        
-        return null;
-    }
+    // Tool result formatting and text extraction now handled by AST compiler
 
     /// <summary>
     /// Update the system prompt
@@ -414,5 +414,14 @@ public class AiConversationService
     public ContextStats GetContextStats()
     {
         return _contextManager.GetStats();
+    }
+    
+    /// <summary>
+    /// Internal tool call representation
+    /// </summary>
+    private class ToolCall
+    {
+        public string ToolId { get; set; } = "";
+        public Dictionary<string, object?> Parameters { get; set; } = new();
     }
 }

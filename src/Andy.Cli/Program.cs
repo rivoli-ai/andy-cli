@@ -128,10 +128,17 @@ class Program
             
             // Register new Qwen parsing components
             services.AddSingleton<IJsonRepairService, JsonRepairService>();
+            // JSON repair service for malformed responses
+            services.AddSingleton<IJsonRepairService, JsonRepairService>();
+            
+            // Legacy parsers (kept for backward compatibility)
             services.AddSingleton<StreamingToolCallAccumulator>();
-            services.AddSingleton<IQwenResponseParser, QwenResponseParser>();
+            services.AddSingleton<IQwenResponseParser, SimpleQwenParser>();
             services.AddSingleton<IToolCallValidator, ToolCallValidator>();
-            services.AddSingleton<IModelResponseInterpreter, ModelResponseInterpreter>();
+            
+            // AST-based parser components (new architecture)
+            services.AddTransient<Andy.Cli.Parsing.Compiler.LlmResponseCompiler>();
+            services.AddTransient<Andy.Cli.Parsing.Rendering.AstRenderer>();
             
             // Configure Tool services - manually register to avoid HostedService requirement
             // Core services from AddAndyTools
@@ -198,20 +205,20 @@ class Program
             {
                 llmClient = serviceProvider.GetRequiredService<LlmClient>();
                 var toolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
-                var parser = serviceProvider.GetRequiredService<IQwenResponseParser>();
-                var validator = serviceProvider.GetRequiredService<IToolCallValidator>();
+                var jsonRepair = serviceProvider.GetRequiredService<IJsonRepairService>();
+                var logger = serviceProvider.GetService<ILogger<AiConversationService>>();
                 aiService = new AiConversationService(
                     llmClient,
                     toolRegistry,
                     toolExecutor,
                     feed,
                     systemPrompt,
-                    parser,
-                    validator);
+                    jsonRepair,
+                    logger);
                 
                 // Get actual model and provider information from ModelCommand
                 // Set initial model info
-                aiService.SetModelInfo(currentModel, currentProvider);
+                aiService.UpdateModelInfo(currentModel, currentProvider);
                 var providerUrl = GetProviderUrl(currentProvider);
                 
                 feed.AddMarkdownRich($"[model] {currentModel} with {currentProvider} provider [{providerUrl}] (tool-enabled)");
@@ -296,19 +303,19 @@ class Program
                                 if (llmClient != null)
                                 {
                                     var toolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
-                                    var parser = serviceProvider.GetRequiredService<IQwenResponseParser>();
-                                    var validator = serviceProvider.GetRequiredService<IToolCallValidator>();
+                                    var jsonRepair = serviceProvider.GetRequiredService<IJsonRepairService>();
+                                    var logger = serviceProvider.GetService<ILogger<AiConversationService>>();
                                     aiService = new AiConversationService(
                                         llmClient,
                                         toolRegistry,
                                         toolExecutor,
                                         feed,
                                         systemPrompt,
-                                        parser,
-                                        validator);
+                                        jsonRepair,
+                                        logger);
                                     
                                     // Set model info for response interpretation
-                                    aiService.SetModelInfo(
+                                    aiService.UpdateModelInfo(
                                         modelCommand.GetCurrentModel(),
                                         modelCommand.GetCurrentProvider()
                                     );
@@ -722,19 +729,19 @@ class Program
                                             if (llmClient != null)
                                             {
                                                 var toolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
-                                                var parser = serviceProvider.GetRequiredService<IQwenResponseParser>();
-                                                var validator = serviceProvider.GetRequiredService<IToolCallValidator>();
+                                                var jsonRepair = serviceProvider.GetRequiredService<IJsonRepairService>();
+                                                var logger = serviceProvider.GetService<ILogger<AiConversationService>>();
                                                 aiService = new AiConversationService(
                                                     llmClient,
                                                     toolRegistry,
                                                     toolExecutor,
                                                     feed,
                                                     systemPrompt,
-                                                    parser,
-                                                    validator);
+                                                    jsonRepair,
+                                                    logger);
                                                 
                                                 // Set model info for response interpretation
-                                                aiService.SetModelInfo(
+                                                aiService.UpdateModelInfo(
                                                     modelCommand.GetCurrentModel(),
                                                     modelCommand.GetCurrentProvider()
                                                 );
@@ -1079,10 +1086,17 @@ class Program
         
         // Register new Qwen parsing components
         services.AddSingleton<IJsonRepairService, JsonRepairService>();
+        // JSON repair service for malformed responses
+        services.AddSingleton<IJsonRepairService, JsonRepairService>();
+        
+        // Legacy parsers (kept for backward compatibility)
         services.AddSingleton<StreamingToolCallAccumulator>();
-        services.AddSingleton<IQwenResponseParser, QwenResponseParser>();
+        services.AddSingleton<IQwenResponseParser, SimpleQwenParser>();
         services.AddSingleton<IToolCallValidator, ToolCallValidator>();
-        services.AddSingleton<IModelResponseInterpreter, ModelResponseInterpreter>();
+        
+        // AST-based parser components (new architecture)
+        services.AddTransient<Andy.Cli.Parsing.Compiler.LlmResponseCompiler>();
+        services.AddTransient<Andy.Cli.Parsing.Rendering.AstRenderer>();
         
         // Configure Tool services - manually register to avoid HostedService requirement
         // Core services from AddAndyTools
