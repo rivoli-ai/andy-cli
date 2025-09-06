@@ -108,8 +108,20 @@ public class QwenResponseParser : IQwenResponseParser
         RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
     
     private static readonly Regex InternalThoughtPattern = new(
-        @"(?:I'll|Let me|I need to|I'm going to|Now I'll|No need to|I should|I can|I will|Responding with|Using|Calling|Executing|Need to|Going to|Looking for|Searching for|Checking|Let's)[^.!?]*[.!?]",
+        @"(?:I'll|Let me|I need to|I'm going to|Now I'll|No need to|I should|I can|I will|Responding with|Using|Calling|Executing|Need to|Going to|Looking for|Searching for|Checking|Let's|Try this)[^.!?]*[.!?:]*",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    
+    private static readonly Regex ToolResultsPattern = new(
+        @"\[Tool Results\][\s\S]*?(?=\n\n|$)",
+        RegexOptions.Multiline | RegexOptions.Compiled);
+    
+    private static readonly Regex GarbageTextPattern = new(
+        @"^Y[‌\u200C\u200D\u200E\u200F\uFEFF]*ou\b",
+        RegexOptions.Multiline | RegexOptions.Compiled);
+    
+    private static readonly Regex StrayBracesPattern = new(
+        @"^\s*[{}]\s*$",
+        RegexOptions.Multiline | RegexOptions.Compiled);
 
     public QwenResponseParser(
         IJsonRepairService jsonRepair,
@@ -338,6 +350,12 @@ public class QwenResponseParser : IQwenResponseParser
             return "";
         
         var cleaned = response;
+        
+        // Remove garbage text patterns (like "Y‌ou" with invisible characters)
+        cleaned = GarbageTextPattern.Replace(cleaned, "");
+        
+        // Remove [Tool Results] sections that contain raw JSON
+        cleaned = ToolResultsPattern.Replace(cleaned, "");
         
         // Remove tool call tags and their content (be more specific with newlines)
         cleaned = ToolCallTagPattern.Replace(cleaned, "\n");
