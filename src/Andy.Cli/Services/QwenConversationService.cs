@@ -52,7 +52,7 @@ public class QwenConversationService
     private readonly ContextManager _contextManager;
     private readonly FeedView _feed;
     private readonly ILogger<QwenConversationService>? _logger;
-    
+
     private string _currentModel = "";
     private string _currentProvider = "";
     private readonly int _maxIterations = 5;
@@ -106,27 +106,27 @@ public class QwenConversationService
     {
         // Add user message to context
         _contextManager.AddUserMessage(userMessage);
-        
+
         // Track iterations to prevent infinite loops
         var iteration = 0;
         var continueProcessing = true;
-        
+
         while (continueProcessing && iteration < _maxIterations)
         {
             iteration++;
             _logger?.LogDebug("Processing iteration {Iteration} of {Max}", iteration, _maxIterations);
-            
+
             // Clear accumulator for new response
             _accumulator.Clear();
-            
+
             // Create request with available tools
             var availableTools = _toolRegistry.GetTools(enabledOnly: true).ToList();
             var request = CreateRequestWithTools(availableTools);
-            
+
             // Stream response from LLM
             var streamingResponse = StreamLlmResponseAsync(request, cancellationToken);
             var parsedResponse = await _parser.ParseStreamingAsync(streamingResponse, cancellationToken);
-            
+
             // Yield text content if any
             if (!string.IsNullOrWhiteSpace(parsedResponse.TextContent))
             {
@@ -136,17 +136,17 @@ public class QwenConversationService
                     Type = ChunkType.Text,
                     IsComplete = !parsedResponse.HasToolCalls
                 };
-                
+
                 _contextManager.AddAssistantMessage(parsedResponse.TextContent);
             }
-            
+
             // Process tool calls if any
             if (parsedResponse.HasToolCalls)
             {
                 _logger?.LogDebug("Processing {Count} tool calls", parsedResponse.ToolCalls.Count);
-                
+
                 var toolResults = new List<string>();
-                
+
                 foreach (var toolCall in parsedResponse.ToolCalls)
                 {
                     // Validate and repair tool call
@@ -154,28 +154,28 @@ public class QwenConversationService
                     if (toolMetadata == null)
                     {
                         _logger?.LogWarning("Tool '{ToolId}' not found in registry", toolCall.ToolId);
-                        
+
                         yield return new ConversationChunk
                         {
                             TextContent = $"Error: Tool '{toolCall.ToolId}' not found",
                             Type = ChunkType.Error,
                             IsComplete = false
                         };
-                        
+
                         toolResults.Add($"Error: Tool '{toolCall.ToolId}' not found");
                         continue;
                     }
-                    
+
                     var validation = _validator.Validate(toolCall, toolMetadata);
                     var callToExecute = validation.IsValid ? toolCall : validation.RepairedCall ?? toolCall;
-                    
+
                     // Log validation warnings
                     foreach (var warning in validation.Warnings)
                     {
-                        _logger?.LogWarning("Validation warning for {Tool}: {Message}", 
+                        _logger?.LogWarning("Validation warning for {Tool}: {Message}",
                             toolCall.ToolId, warning.Message);
                     }
-                    
+
                     // Yield tool call chunk
                     yield return new ConversationChunk
                     {
@@ -183,13 +183,13 @@ public class QwenConversationService
                         Type = ChunkType.ToolCall,
                         IsComplete = false
                     };
-                    
+
                     // Execute tool
                     var result = await _toolExecutionService.ExecuteToolAsync(
                         callToExecute.ToolId,
                         callToExecute.Parameters,
                         cancellationToken);
-                    
+
                     // Yield tool result chunk
                     yield return new ConversationChunk
                     {
@@ -197,13 +197,13 @@ public class QwenConversationService
                         Type = ChunkType.ToolResult,
                         IsComplete = false
                     };
-                    
+
                     // Collect result for context
-                    toolResults.Add(result.IsSuccessful 
+                    toolResults.Add(result.IsSuccessful
                         ? result.FullOutput ?? "No output"
                         : $"Error: {result.ErrorMessage ?? "Unknown error"}");
                 }
-                
+
                 // Add tool results to context
                 if (toolResults.Any())
                 {
@@ -211,6 +211,7 @@ public class QwenConversationService
                     {
                         _contextManager.AddToolExecution(
                             parsedResponse.ToolCalls[i].ToolId,
+                            "call_" + Guid.NewGuid().ToString("N"),
                             parsedResponse.ToolCalls[i].Parameters,
                             toolResults[i]);
                     }
@@ -221,14 +222,14 @@ public class QwenConversationService
                 // No tool calls, we're done
                 continueProcessing = false;
             }
-            
+
             // Check for errors that should stop processing
             if (parsedResponse.HasErrors)
             {
                 foreach (var error in parsedResponse.Errors)
                 {
                     _logger?.LogError("Parse error: {Type} - {Message}", error.Type, error.Message);
-                    
+
                     if (error.Type == ParseErrorType.IncompleteResponse)
                     {
                         // Try to continue with partial response
@@ -237,11 +238,11 @@ public class QwenConversationService
                 }
             }
         }
-        
+
         if (iteration >= _maxIterations)
         {
             _logger?.LogWarning("Reached maximum iterations ({Max}), stopping", _maxIterations);
-            
+
             yield return new ConversationChunk
             {
                 TextContent = "Maximum conversation iterations reached. Please start a new conversation if needed.",
@@ -259,7 +260,7 @@ public class QwenConversationService
         CancellationToken cancellationToken = default)
     {
         var responseBuilder = new StringBuilder();
-        
+
         await foreach (var chunk in ProcessStreamingAsync(userMessage, cancellationToken))
         {
             if (chunk.Type == ChunkType.Text && !string.IsNullOrWhiteSpace(chunk.TextContent))
@@ -267,7 +268,7 @@ public class QwenConversationService
                 responseBuilder.Append(chunk.TextContent);
             }
         }
-        
+
         return responseBuilder.ToString();
     }
 
@@ -280,9 +281,9 @@ public class QwenConversationService
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(_streamTimeout);
-        
+
         IAsyncEnumerable<LlmStreamResponse> streamResponse;
-        
+
         try
         {
             streamResponse = _llmClient.StreamCompleteAsync(request, cts.Token);
@@ -292,7 +293,7 @@ public class QwenConversationService
             _logger?.LogError("LLM streaming response timed out after {Timeout}", _streamTimeout);
             throw new TimeoutException($"LLM response timed out after {_streamTimeout}");
         }
-        
+
         await foreach (var chunk in streamResponse)
         {
             if (!string.IsNullOrEmpty(chunk.TextDelta))
@@ -309,28 +310,28 @@ public class QwenConversationService
     {
         var context = _contextManager.GetContext();
         var request = context.CreateRequest();
-        
+
         // Set streaming parameters
         request.Temperature = 0.7f;
         request.MaxTokens = 2000;
         request.Stream = true;
-        
+
         // Tool definitions are already in the system prompt from SystemPromptService
         // For Qwen models, we add specific formatting instructions
         if (_currentModel.Contains("qwen", StringComparison.OrdinalIgnoreCase) && tools.Any())
         {
             // Update system instruction with Qwen-specific tool call format
-            context.SystemInstruction += 
+            context.SystemInstruction +=
                 "\n\nWhen you need to use a tool, output it in the following format:\n" +
                 "<tool_call>\n{\"name\": \"tool_name\", \"arguments\": {\"param1\": \"value1\"}}\n</tool_call>";
-            
+
             // Recreate request with updated context
             request = context.CreateRequest();
             request.Temperature = 0.7f;
             request.MaxTokens = 2000;
             request.Stream = true;
         }
-        
+
         return request;
     }
 
@@ -343,14 +344,14 @@ public class QwenConversationService
         var formatted = new StringBuilder();
         formatted.AppendLine("Tool Execution Results:");
         formatted.AppendLine();
-        
+
         for (int i = 0; i < Math.Min(toolCalls.Count, results.Count); i++)
         {
             formatted.AppendLine($"Tool: {toolCalls[i].ToolId}");
             formatted.AppendLine($"Result: {results[i]}");
             formatted.AppendLine();
         }
-        
+
         return formatted.ToString();
     }
 

@@ -15,7 +15,7 @@ public class AstRenderer : IAstVisitor<string>
     private readonly ILogger<AstRenderer>? _logger;
     private readonly RenderOptions _options;
     private readonly StringBuilder _output = new();
-    
+
     public AstRenderer(RenderOptions? options = null, ILogger<AstRenderer>? logger = null)
     {
         _options = options ?? new RenderOptions();
@@ -38,11 +38,11 @@ public class AstRenderer : IAstVisitor<string>
     public StreamingRenderResult RenderForStreaming(ResponseNode ast)
     {
         var result = new StreamingRenderResult();
-        
+
         // Separate tool calls from content
         var toolCalls = ast.Children.OfType<ToolCallNode>().ToList();
         var contentNodes = ast.Children.Where(n => n is not ToolCallNode and not ThoughtNode).ToList();
-        
+
         // Render content
         foreach (var node in contentNodes)
         {
@@ -52,7 +52,7 @@ public class AstRenderer : IAstVisitor<string>
                 result.TextContent += rendered;
             }
         }
-        
+
         // Extract tool calls for execution
         foreach (var toolCall in toolCalls)
         {
@@ -62,10 +62,10 @@ public class AstRenderer : IAstVisitor<string>
                 Parameters = toolCall.Arguments
             });
         }
-        
+
         result.HasContent = !string.IsNullOrWhiteSpace(result.TextContent);
         result.HasToolCalls = result.ToolCalls.Any();
-        
+
         return result;
     }
 
@@ -77,20 +77,20 @@ public class AstRenderer : IAstVisitor<string>
     public string VisitResponse(ResponseNode node)
     {
         var parts = new List<string>();
-        
+
         foreach (var child in node.Children)
         {
             // Skip thoughts unless explicitly requested
             if (child is ThoughtNode && !_options.ShowThoughts)
                 continue;
-            
+
             var rendered = child.Accept(this);
             if (!string.IsNullOrWhiteSpace(rendered))
             {
                 parts.Add(rendered);
             }
         }
-        
+
         return string.Join(_options.NodeSeparator, parts);
     }
 
@@ -98,7 +98,7 @@ public class AstRenderer : IAstVisitor<string>
     {
         if (string.IsNullOrWhiteSpace(node.Content))
             return "";
-        
+
         // Apply formatting based on text format
         return node.Format switch
         {
@@ -112,38 +112,63 @@ public class AstRenderer : IAstVisitor<string>
     {
         if (!_options.ShowToolCalls)
             return "";
-        
+
         // Don't render tool call JSON in the output - it's handled separately
         if (_options.ToolCallFormat == ToolCallDisplayFormat.Hidden)
             return "";
-        
+
         if (_options.ToolCallFormat == ToolCallDisplayFormat.Summary)
         {
             return $"[Calling {node.ToolName}]";
         }
-        
+
         // Full format
         var args = System.Text.Json.JsonSerializer.Serialize(node.Arguments, new System.Text.Json.JsonSerializerOptions
         {
             WriteIndented = true
         });
-        
+
         return $"Tool Call: {node.ToolName}\nArguments: {args}";
+    }
+
+    public string VisitToolResult(ToolResultNode node)
+    {
+        if (!_options.ShowToolResults)
+            return "";
+
+        // Don't render tool results in normal output - they're handled by the tool execution system
+        if (_options.ToolResultFormat == ToolResultDisplayFormat.Hidden)
+            return "";
+
+        if (_options.ToolResultFormat == ToolResultDisplayFormat.Summary)
+        {
+            var status = node.IsSuccess ? "✅" : "❌";
+            return $"[{node.ToolName} {(node.IsSuccess ? "completed" : "failed")}]";
+        }
+
+        // Full format
+        var result = node.Result?.ToString() ?? "null";
+        if (!string.IsNullOrEmpty(node.ErrorMessage))
+        {
+            result = $"Error: {node.ErrorMessage}";
+        }
+
+        return $"Tool Result ({node.ToolName}): {result}";
     }
 
     public string VisitCode(CodeNode node)
     {
         if (!_options.ShowCode)
             return "";
-        
+
         var sb = new StringBuilder();
-        
+
         // Add filename comment if available
         if (!string.IsNullOrEmpty(node.FileName))
         {
             sb.AppendLine($"// File: {node.FileName}");
         }
-        
+
         // Format code block
         if (_options.UseCodeBlockMarkers)
         {
@@ -155,7 +180,7 @@ public class AstRenderer : IAstVisitor<string>
         {
             sb.AppendLine(node.Code);
         }
-        
+
         return sb.ToString();
     }
 
@@ -163,7 +188,7 @@ public class AstRenderer : IAstVisitor<string>
     {
         if (!_options.HighlightFileReferences)
             return node.Path;
-        
+
         // Format file reference with context
         var prefix = node.ReferenceType switch
         {
@@ -174,13 +199,13 @@ public class AstRenderer : IAstVisitor<string>
             FileReferenceType.Modify => "📝 Modify: ",
             _ => ""
         };
-        
+
         var path = node.Path;
         if (!string.IsNullOrEmpty(node.LineReference))
         {
             path += node.LineReference;
         }
-        
+
         return _options.UseEmoji ? $"{prefix}{path}" : path;
     }
 
@@ -188,15 +213,15 @@ public class AstRenderer : IAstVisitor<string>
     {
         if (!_options.HighlightQuestions)
             return node.Question;
-        
+
         var question = node.Question;
-        
+
         // Add options if available
         if (node.SuggestedOptions?.Any() == true)
         {
             question += $" [{string.Join(" / ", node.SuggestedOptions)}]";
         }
-        
+
         return _options.UseEmoji ? $"❓ {question}" : question;
     }
 
@@ -204,7 +229,7 @@ public class AstRenderer : IAstVisitor<string>
     {
         if (!_options.ShowThoughts)
             return "";
-        
+
         return $"[Thinking: {node.Content}]";
     }
 
@@ -223,7 +248,7 @@ public class AstRenderer : IAstVisitor<string>
     {
         if (!_options.ShowErrors)
             return "";
-        
+
         var prefix = node.Severity switch
         {
             ErrorSeverity.Critical => _options.UseEmoji ? "🔴" : "[CRITICAL]",
@@ -231,7 +256,7 @@ public class AstRenderer : IAstVisitor<string>
             ErrorSeverity.Warning => _options.UseEmoji ? "⚠️" : "[WARNING]",
             _ => _options.UseEmoji ? "ℹ️" : "[INFO]"
         };
-        
+
         return $"{prefix} {node.Message}";
     }
 
@@ -239,9 +264,9 @@ public class AstRenderer : IAstVisitor<string>
     {
         if (!_options.ShowCommands)
             return node.Command;
-        
-        return _options.UseCodeBlockMarkers 
-            ? $"```bash\n{node.Command}\n```" 
+
+        return _options.UseCodeBlockMarkers
+            ? $"```bash\n{node.Command}\n```"
             : $"$ {node.Command}";
     }
 
@@ -274,6 +299,7 @@ public class AstRenderer : IAstVisitor<string>
 public class RenderOptions
 {
     public bool ShowToolCalls { get; set; } = false;
+    public bool ShowToolResults { get; set; } = false;
     public bool ShowThoughts { get; set; } = false;
     public bool ShowCode { get; set; } = true;
     public bool ShowErrors { get; set; } = true;
@@ -285,9 +311,17 @@ public class RenderOptions
     public bool FormatJson { get; set; } = true;
     public string NodeSeparator { get; set; } = "\n";
     public ToolCallDisplayFormat ToolCallFormat { get; set; } = ToolCallDisplayFormat.Hidden;
+    public ToolResultDisplayFormat ToolResultFormat { get; set; } = ToolResultDisplayFormat.Hidden;
 }
 
 public enum ToolCallDisplayFormat
+{
+    Hidden,
+    Summary,
+    Full
+}
+
+public enum ToolResultDisplayFormat
 {
     Hidden,
     Summary,

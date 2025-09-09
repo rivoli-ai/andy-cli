@@ -248,7 +248,7 @@ What would you like me to help you with?";
         public const string ConfirmingDangerousAction = "You're asking me to delete multiple files. This action cannot be undone. Are you sure you want to proceed? Please confirm by saying 'yes, delete all' if you want to continue.";
 
         public const string TaskComplete = "All done! I've completed the requested operations successfully. The files have been organized and the backup has been created. Is there anything else you'd like me to help with?";
-        
+
         public const string Clarification = "I need more information. What would you like to do with which file?";
     }
 

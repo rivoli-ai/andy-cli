@@ -21,14 +21,14 @@ public class QwenMissingToolCallTest
     {
         // This is the case where Qwen says it will do something but doesn't output a tool call
         var response = @"Let's list the contents of the src directory.";
-        
+
         // Check if any tool calls are extracted
         var toolCalls = _interpreter.ExtractToolCalls(response, "qwen-3-coder-480b", "cerebras");
         _output.WriteLine($"Tool calls found: {toolCalls.Count}");
-        
+
         // This response indicates intent but has no tool call
         Assert.Empty(toolCalls);
-        
+
         // The response suggests Qwen wants to use a tool but didn't
         Assert.Contains("list", response.ToLower());
         Assert.Contains("directory", response.ToLower());
@@ -41,19 +41,19 @@ public class QwenMissingToolCallTest
         var expectedResponse = @"Let's list the contents of the src directory.
 
 {""tool"":""list_directory"",""parameters"":{""path"":""src""}}";
-        
+
         var toolCalls = _interpreter.ExtractToolCalls(expectedResponse, "qwen-3-coder-480b", "cerebras");
         _output.WriteLine($"Tool calls found: {toolCalls.Count}");
-        
+
         // Should find the tool call
         Assert.Single(toolCalls);
         Assert.Equal("list_directory", toolCalls[0].ToolId);
         Assert.Equal("src", toolCalls[0].Parameters["path"]);
-        
+
         // Clean the response
         var cleaned = _interpreter.CleanResponseForDisplay(expectedResponse, "qwen-3-coder-480b");
         _output.WriteLine($"Cleaned: '{cleaned}'");
-        
+
         // Should not contain the JSON
         Assert.DoesNotContain("{\"tool\"", cleaned);
     }
@@ -74,7 +74,7 @@ public class QwenMissingToolCallTest
         {
             var toolCalls = _interpreter.ExtractToolCalls(response, "qwen-3-coder-480b", "cerebras");
             _output.WriteLine($"Response: '{response}' - Tool calls: {toolCalls.Count}");
-            
+
             // These responses suggest tool use but have no actual tool calls
             Assert.Empty(toolCalls);
         }
@@ -90,10 +90,10 @@ public class QwenMissingToolCallTest
 
         var toolCalls = _interpreter.ExtractToolCalls(response, "qwen-3-coder-480b", "cerebras");
         _output.WriteLine($"Tool calls found: {toolCalls.Count}");
-        
+
         Assert.Single(toolCalls);
         Assert.Equal("list_directory", toolCalls[0].ToolId);
-        
+
         // Verify the path parameter
         Assert.True(toolCalls[0].Parameters.ContainsKey("path"));
         Assert.Equal("src", toolCalls[0].Parameters["path"]);

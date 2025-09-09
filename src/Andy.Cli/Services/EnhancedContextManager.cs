@@ -37,7 +37,7 @@ public class EnhancedContextManager
     public void AddUserMessage(string message)
     {
         _logger?.LogDebug("Adding user message of length {Length}", message.Length);
-        
+
         _history.Add(new EnhancedContextEntry
         {
             Role = MessageRole.User,
@@ -53,7 +53,7 @@ public class EnhancedContextManager
     public void AddAssistantMessage(string message, List<TrackedToolCall>? toolCalls = null)
     {
         _logger?.LogDebug("Adding assistant message with {Count} tool calls", toolCalls?.Count ?? 0);
-        
+
         _history.Add(new EnhancedContextEntry
         {
             Role = MessageRole.Assistant,
@@ -70,7 +70,7 @@ public class EnhancedContextManager
     public void AddToolResponse(string toolId, string callId, string result)
     {
         _logger?.LogDebug("Adding tool response for {ToolId} with call ID {CallId}", toolId, callId);
-        
+
         _history.Add(new EnhancedContextEntry
         {
             Role = MessageRole.Tool,
@@ -95,7 +95,7 @@ public class EnhancedContextManager
 
         // Clean up orphaned tool calls before building context
         var cleanedHistory = CleanOrphanedToolCalls(_history);
-        
+
         // Check if we need compression
         var totalTokens = EstimateTokens(_systemPrompt);
         foreach (var entry in cleanedHistory)
@@ -145,7 +145,7 @@ public class EnhancedContextManager
             }
         }
 
-        _logger?.LogDebug("Found {CallCount} tool calls and {ResponseCount} responses", 
+        _logger?.LogDebug("Found {CallCount} tool calls and {ResponseCount} responses",
             toolCallIds.Count, toolResponseIds.Count);
 
         // Second pass: filter out orphaned entries
@@ -219,7 +219,7 @@ public class EnhancedContextManager
                     Name = tc.ToolId,
                     Arguments = tc.Parameters
                 }).ToList();
-                
+
                 context.AddAssistantMessageWithToolCalls(entry.Content, functionCalls);
             }
             else
@@ -273,7 +273,7 @@ public class EnhancedContextManager
     {
         var summary = new StringBuilder();
         summary.AppendLine($"Discussed {messages.Count} messages:");
-        
+
         // Group by tool usage
         var toolCalls = messages.Where(m => m.Role == MessageRole.Tool).ToList();
         if (toolCalls.Any())
@@ -347,7 +347,7 @@ public class EnhancedContextEntry
     public string? ToolCallId { get; set; }
     public string? ToolResult { get; set; }
     public List<TrackedToolCall>? ToolCalls { get; set; }
-    
+
     public EnhancedContextEntry Clone()
     {
         return new EnhancedContextEntry
@@ -372,7 +372,7 @@ public class TrackedToolCall
     public string CallId { get; set; } = "";
     public string ToolId { get; set; } = "";
     public Dictionary<string, object?> Parameters { get; set; } = new();
-    
+
     public TrackedToolCall Clone()
     {
         return new TrackedToolCall

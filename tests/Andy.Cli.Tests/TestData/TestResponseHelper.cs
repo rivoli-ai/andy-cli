@@ -36,19 +36,19 @@ public static class TestResponseHelper
     {
         const string marker = "[Tool Request]";
         var markerIndex = response.IndexOf(marker);
-        
+
         if (markerIndex == -1)
             return null;
-            
+
         var jsonStart = markerIndex + marker.Length;
         var jsonContent = response.Substring(jsonStart).Trim();
-        
+
         // Find the JSON object (starts with { and ends with })
         var braceCount = 0;
         var startIndex = jsonContent.IndexOf('{');
         if (startIndex == -1)
             return null;
-            
+
         var endIndex = -1;
         for (int i = startIndex; i < jsonContent.Length; i++)
         {
@@ -64,10 +64,10 @@ public static class TestResponseHelper
                 }
             }
         }
-        
+
         if (endIndex == -1)
             return null;
-            
+
         return jsonContent.Substring(startIndex, endIndex - startIndex + 1);
     }
 
@@ -94,7 +94,7 @@ public static class TestResponseHelper
     public static List<LlmStreamResponse> CreateStreamingChunks(string response, int chunkSize = 10)
     {
         var chunks = new List<LlmStreamResponse>();
-        
+
         for (int i = 0; i < response.Length; i += chunkSize)
         {
             var chunk = response.Substring(i, Math.Min(chunkSize, response.Length - i));
@@ -104,7 +104,7 @@ public static class TestResponseHelper
                 IsComplete = i + chunkSize >= response.Length
             });
         }
-        
+
         return chunks;
     }
 
@@ -139,7 +139,7 @@ public static class TestResponseHelper
 
         public static LlmResponse AskingForClarification()
             => CreateResponse(SampleLlmResponses.NonToolResponses.AskingForClarification);
-        
+
         public static LlmResponse NonToolClarification()
             => CreateResponse(SampleLlmResponses.NonToolResponses.Clarification);
     }

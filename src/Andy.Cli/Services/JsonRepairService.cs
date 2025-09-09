@@ -13,17 +13,17 @@ public interface IJsonRepairService
     /// Safely parse JSON string with repair fallback for malformed JSON
     /// </summary>
     T? SafeParse<T>(string json, T? fallback = default);
-    
+
     /// <summary>
     /// Try to repair malformed JSON
     /// </summary>
     bool TryRepairJson(string malformedJson, out string repairedJson);
-    
+
     /// <summary>
     /// Check if a string appears to be complete JSON
     /// </summary>
     bool IsCompleteJson(string json);
-    
+
     /// <summary>
     /// Attempt to parse JSON without repair (for performance when JSON is known to be valid)
     /// </summary>
@@ -64,15 +64,15 @@ public class JsonRepairService : IJsonRepairService
         try
         {
             var repairedJson = JsonRepairSharp.JsonRepair.RepairJson(json);
-            
+
             if (repairedJson != json)
             {
-                _logger?.LogDebug("JSON was repaired. Original length: {OrigLen}, Repaired length: {RepLen}", 
+                _logger?.LogDebug("JSON was repaired. Original length: {OrigLen}, Repaired length: {RepLen}",
                     json.Length, repairedJson.Length);
             }
 
             result = JsonSerializer.Deserialize<T>(repairedJson, _jsonOptions);
-            
+
             if (result != null)
             {
                 _logger?.LogDebug("Successfully parsed repaired JSON");
@@ -81,8 +81,25 @@ public class JsonRepairService : IJsonRepairService
         }
         catch (Exception repairEx)
         {
-            _logger?.LogWarning(repairEx, "Failed to parse JSON even after repair attempt. JSON snippet: {Json}", 
+            _logger?.LogWarning(repairEx, "Failed to parse JSON even after repair attempt. JSON snippet: {Json}",
                 json.Length > 200 ? json.Substring(0, 200) + "..." : json);
+        }
+
+        // Third attempt: minimal heuristic repair for unquoted keys and trailing commas
+        try
+        {
+            var heur = JsonRepairExtensions.MinimalHeuristicRepair(json);
+            if (!string.Equals(heur, json, StringComparison.Ordinal))
+            {
+                if (TryParseWithoutRepair<T>(heur, out var hres))
+                {
+                    return hres;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogDebug(ex, "Minimal heuristic repair failed");
         }
 
         return fallback;
@@ -91,7 +108,7 @@ public class JsonRepairService : IJsonRepairService
     public bool TryRepairJson(string malformedJson, out string repairedJson)
     {
         repairedJson = malformedJson;
-        
+
         if (string.IsNullOrWhiteSpace(malformedJson))
         {
             return false;
@@ -100,10 +117,10 @@ public class JsonRepairService : IJsonRepairService
         try
         {
             repairedJson = JsonRepairSharp.JsonRepair.RepairJson(malformedJson);
-            
+
             // Validate that the repaired JSON is actually valid
             using var doc = JsonDocument.Parse(repairedJson);
-            
+
             _logger?.LogDebug("Successfully repaired JSON");
             return true;
         }
@@ -123,7 +140,7 @@ public class JsonRepairService : IJsonRepairService
         }
 
         json = json.Trim();
-        
+
         // Quick checks for obviously incomplete JSON
         if (!json.StartsWith('{') && !json.StartsWith('['))
         {
@@ -180,10 +197,10 @@ public class JsonRepairService : IJsonRepairService
 
         // JSON is complete if all brackets/braces are balanced
         bool isComplete = braceDepth == 0 && bracketDepth == 0 && !inString;
-        
+
         if (!isComplete)
         {
-            _logger?.LogDebug("Incomplete JSON detected. Brace depth: {BraceDepth}, Bracket depth: {BracketDepth}, In string: {InString}", 
+            _logger?.LogDebug("Incomplete JSON detected. Brace depth: {BraceDepth}, Bracket depth: {BracketDepth}, In string: {InString}",
                 braceDepth, bracketDepth, inString);
         }
 
@@ -193,7 +210,7 @@ public class JsonRepairService : IJsonRepairService
     public bool TryParseWithoutRepair<T>(string json, out T? result)
     {
         result = default;
-        
+
         if (string.IsNullOrWhiteSpace(json))
         {
             return false;
@@ -217,6 +234,18 @@ public class JsonRepairService : IJsonRepairService
 /// </summary>
 public static class JsonRepairExtensions
 {
+    // Minimal heuristic repair: quote keys and remove trailing commas
+    internal static string MinimalHeuristicRepair(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return input;
+        var s = input;
+        // Quote unquoted keys: {name: "x"} -> {"name": "x"}
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"(?m)(\{|,|\s)([A-Za-z_][A-Za-z0-9_\-]*)(\s*:)",
+            m => $"{m.Groups[1].Value}\"{m.Groups[2].Value}\"{m.Groups[3].Value}");
+        // Remove trailing commas before } or ]
+        s = System.Text.RegularExpressions.Regex.Replace(s, @",\s*(\}|\])", "$1");
+        return s;
+    }
     /// <summary>
     /// Try to extract tool call JSON from various formats that Qwen models might produce
     /// </summary>
@@ -228,7 +257,7 @@ public static class JsonRepairExtensions
         // Try to find JSON within <tool_call> tags first (Qwen's preferred format)
         var toolCallStart = response.IndexOf("<tool_call>", StringComparison.OrdinalIgnoreCase);
         var toolCallEnd = response.IndexOf("</tool_call>", StringComparison.OrdinalIgnoreCase);
-        
+
         if (toolCallStart >= 0 && toolCallEnd > toolCallStart)
         {
             var startIdx = toolCallStart + "<tool_call>".Length;
@@ -242,7 +271,7 @@ public static class JsonRepairExtensions
             // Find the matching closing brace
             int braceCount = 0;
             int i = jsonStart;
-            
+
             for (; i < response.Length; i++)
             {
                 if (response[i] == '{')
@@ -256,7 +285,7 @@ public static class JsonRepairExtensions
                     }
                 }
             }
-            
+
             // If we didn't find a matching brace, return what we have (incomplete JSON)
             if (braceCount > 0)
             {

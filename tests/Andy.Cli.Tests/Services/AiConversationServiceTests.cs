@@ -28,22 +28,17 @@ public class AiConversationServiceTests
         _mockToolRegistry = new Mock<IToolRegistry>();
         _mockToolExecutor = new Mock<IToolExecutor>();
         _feed = new FeedView();
-        
+
         var systemPrompt = "You are a helpful assistant with access to tools.";
-        var parser = new QwenResponseParser(
-            new JsonRepairService(),
-            new StreamingToolCallAccumulator(new JsonRepairService(), null),
-            null);
-        var validator = new ToolCallValidator(_mockToolRegistry.Object);
-        
+        var jsonRepair = new JsonRepairService();
+
         _service = new AiConversationService(
             _mockLlmClient.Object,
             _mockToolRegistry.Object,
             _mockToolExecutor.Object,
             _feed,
             systemPrompt,
-            parser,
-            validator);
+            jsonRepair);
     }
 
     [Fact]
@@ -55,7 +50,7 @@ public class AiConversationServiceTests
         {
             Content = @"{""tool"": ""list_directory"", ""parameters"": {""path"": "".""}}"
         };
-        
+
         var toolResult = new ToolExecutionResult
         {
             IsSuccessful = true,
@@ -98,7 +93,7 @@ public class AiConversationServiceTests
     [InlineData(@"{""tool"": ""read_file"", ""parameters"": {""path"": ""test.txt""}}", "read_file", "path", "test.txt")]
     [InlineData(@"{""function"": ""write_file"", ""arguments"": {""content"": ""hello""}}", "write_file", "content", "hello")]
     [InlineData(@"<tool_use>{""tool"": ""list_directory"", ""parameters"": {""recursive"": true}}</tool_use>", "list_directory", "recursive", true)]
-    public void ExtractToolCalls_ParsesVariousFormats(string llmResponse, string expectedTool, string paramName, object paramValue)
+    public void ExtractToolCalls_ParsesVariousFormats(string expectedTool, object paramValue)
     {
         // This test would need access to private methods, so we'll test through the public interface
         // In a real scenario, we might refactor to make this testable or use reflection

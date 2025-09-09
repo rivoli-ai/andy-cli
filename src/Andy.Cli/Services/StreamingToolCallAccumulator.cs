@@ -18,12 +18,12 @@ public class AccumulatedToolCall
     public bool IsComplete { get; set; }
     public int ChunkCount { get; set; }
     public DateTime StartTime { get; set; } = DateTime.UtcNow;
-    
+
     /// <summary>
     /// Check if this accumulated call has enough data to be considered valid
     /// </summary>
     public bool HasMinimumData => !string.IsNullOrWhiteSpace(Name);
-    
+
     /// <summary>
     /// Get the accumulated arguments as a string
     /// </summary>
@@ -78,7 +78,7 @@ public class StreamingToolCallAccumulator
             if (chunk.ToolCallIndex.HasValue)
             {
                 var index = chunk.ToolCallIndex.Value;
-                
+
                 // Get or create the accumulated call for this index
                 if (!_streamingCalls.TryGetValue(index, out var accumulatedCall))
                 {
@@ -97,19 +97,19 @@ public class StreamingToolCallAccumulator
                 {
                     // If we get a new function name and already have arguments,
                     // this might be a new call with the same index (shouldn't happen but be defensive)
-                    if (!string.IsNullOrEmpty(accumulatedCall.Name) && 
+                    if (!string.IsNullOrEmpty(accumulatedCall.Name) &&
                         accumulatedCall.Name != chunk.ToolCallName &&
                         accumulatedCall.Arguments.Length > 0)
                     {
-                        _logger?.LogWarning("Received new function name '{NewName}' but already accumulating '{OldName}' at index {Index}", 
+                        _logger?.LogWarning("Received new function name '{NewName}' but already accumulating '{OldName}' at index {Index}",
                             chunk.ToolCallName, accumulatedCall.Name, index);
-                        
+
                         // Check if current arguments form complete JSON
                         if (_jsonRepair.IsCompleteJson(accumulatedCall.GetArgumentsString()))
                         {
                             // Mark current as complete and start a new one
                             accumulatedCall.IsComplete = true;
-                            
+
                             // Create new accumulator for the new function
                             accumulatedCall = new AccumulatedToolCall
                             {
@@ -123,7 +123,7 @@ public class StreamingToolCallAccumulator
                             accumulatedCall.Arguments.Clear();
                         }
                     }
-                    
+
                     accumulatedCall.Name = chunk.ToolCallName;
                 }
 
@@ -139,7 +139,7 @@ public class StreamingToolCallAccumulator
             if (chunk.IsFinished)
             {
                 _logger?.LogDebug("Stream finished with reason: {Reason}", chunk.FinishReason);
-                
+
                 // Mark all accumulated calls as complete
                 foreach (var call in _streamingCalls.Values)
                 {
@@ -155,9 +155,9 @@ public class StreamingToolCallAccumulator
     private void AppendArguments(AccumulatedToolCall call, string newArguments)
     {
         var currentArgs = call.GetArgumentsString();
-        
+
         // Check if we already have complete JSON and new arguments start a new object
-        if (!string.IsNullOrWhiteSpace(currentArgs) && 
+        if (!string.IsNullOrWhiteSpace(currentArgs) &&
             newArguments.TrimStart().StartsWith('{'))
         {
             if (_jsonRepair.IsCompleteJson(currentArgs))
@@ -184,7 +184,7 @@ public class StreamingToolCallAccumulator
             foreach (var kvp in _streamingCalls)
             {
                 var call = kvp.Value;
-                
+
                 if (call.IsComplete && call.HasMinimumData)
                 {
                     var toolCall = ConvertToToolCall(call);
@@ -192,8 +192,8 @@ public class StreamingToolCallAccumulator
                     {
                         completedCalls.Add(toolCall);
                         keysToRemove.Add(kvp.Key);
-                        
-                        _logger?.LogDebug("Completed tool call: {Name} with {ArgLength} chars of arguments", 
+
+                        _logger?.LogDebug("Completed tool call: {Name} with {ArgLength} chars of arguments",
                             call.Name, call.Arguments.Length);
                     }
                 }
@@ -247,7 +247,7 @@ public class StreamingToolCallAccumulator
             ToolId = accumulated.Name,
             Parameters = new Dictionary<string, object?>()
         };
-        
+
         // Store the call ID in parameters if needed for correlation
         if (!string.IsNullOrWhiteSpace(accumulated.Id))
         {
@@ -260,18 +260,18 @@ public class StreamingToolCallAccumulator
         {
             // Use JsonRepairService to handle potentially malformed JSON
             var parsedArgs = _jsonRepair.SafeParse<Dictionary<string, object?>>(
-                argsString, 
+                argsString,
                 new Dictionary<string, object?>());
-            
+
             if (parsedArgs != null)
             {
                 toolCall.Parameters = parsedArgs;
             }
             else
             {
-                _logger?.LogWarning("Failed to parse tool call arguments for {Name}. Raw: {Args}", 
+                _logger?.LogWarning("Failed to parse tool call arguments for {Name}. Raw: {Args}",
                     accumulated.Name, argsString);
-                
+
                 // Store raw arguments as a single parameter if parsing fails
                 toolCall.Parameters["_raw_arguments"] = argsString;
             }
@@ -313,7 +313,7 @@ public class StreamingToolCallAccumulator
                 CompleteCalls = _streamingCalls.Count(x => x.Value.IsComplete),
                 IncompleteCalls = _streamingCalls.Count(x => !x.Value.IsComplete),
                 TotalChunks = _streamingCalls.Sum(x => x.Value.ChunkCount),
-                OldestCallAge = _streamingCalls.Any() 
+                OldestCallAge = _streamingCalls.Any()
                     ? DateTime.UtcNow - _streamingCalls.Values.Min(x => x.StartTime)
                     : TimeSpan.Zero
             };

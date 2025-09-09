@@ -110,23 +110,23 @@ public class ToolCallExtractor
     public List<ToolCall> ExtractToolCalls(LlmResponse response)
     {
         var toolCalls = new List<ToolCall>();
-        
+
         if (string.IsNullOrEmpty(response.Content))
         {
             return toolCalls;
         }
 
         var content = response.Content.Trim();
-        
+
         // First try to extract from <tool_use> blocks
         toolCalls = ExtractWrappedToolCalls(content);
-        
+
         // If no wrapped tool calls found, try to parse as direct JSON
         if (!toolCalls.Any())
         {
             toolCalls = ExtractDirectJsonToolCalls(content);
         }
-        
+
         return toolCalls;
     }
 
@@ -135,42 +135,42 @@ public class ToolCallExtractor
         var toolCalls = new List<ToolCall>();
         var startTag = "<tool_use>";
         var endTag = "</tool_use>";
-        
+
         var startIndex = 0;
         while ((startIndex = content.IndexOf(startTag, startIndex, System.StringComparison.OrdinalIgnoreCase)) != -1)
         {
             var endIndex = content.IndexOf(endTag, startIndex, System.StringComparison.OrdinalIgnoreCase);
             if (endIndex == -1) break;
-            
+
             var toolJson = content.Substring(
                 startIndex + startTag.Length,
                 endIndex - startIndex - startTag.Length).Trim();
-            
+
             var toolCall = ParseToolCallJson(toolJson);
             if (toolCall != null)
             {
                 toolCalls.Add(toolCall);
             }
-            
+
             startIndex = endIndex + endTag.Length;
         }
-        
+
         return toolCalls;
     }
 
     private List<ToolCall> ExtractDirectJsonToolCalls(string content)
     {
         var toolCalls = new List<ToolCall>();
-        
+
         // Clean up the content first (remove code blocks)
         content = content.Replace("```json", "").Replace("```", "").Trim();
-        
+
         // Check if the content contains tool/function JSON (don't require it to start with {)
         if (!content.Contains("{") || (!content.Contains("\"tool\"") && !content.Contains("\"function\"")))
         {
             return toolCalls;
         }
-        
+
         // Try to find JSON objects in the content
         var jsonStart = content.IndexOf('{');
         while (jsonStart >= 0)
@@ -178,7 +178,7 @@ public class ToolCallExtractor
             // Find matching closing brace
             int braceCount = 0;
             int jsonEnd = jsonStart;
-            
+
             for (int i = jsonStart; i < content.Length; i++)
             {
                 if (content[i] == '{')
@@ -193,26 +193,26 @@ public class ToolCallExtractor
                     }
                 }
             }
-            
+
             if (jsonEnd > jsonStart)
             {
                 var jsonStr = content.Substring(jsonStart, jsonEnd - jsonStart + 1);
                 var toolCall = ParseToolCallJson(jsonStr);
-                
+
                 if (toolCall != null)
                 {
                     toolCalls.Add(toolCall);
-                    
+
                     // For now, only handle the first tool call in direct JSON format
                     // Most LLMs return a single tool call at a time
                     break;
                 }
             }
-            
+
             // Look for next potential JSON object
             jsonStart = content.IndexOf('{', jsonEnd + 1);
         }
-        
+
         return toolCalls;
     }
 
@@ -222,15 +222,15 @@ public class ToolCallExtractor
         {
             using var doc = System.Text.Json.JsonDocument.Parse(jsonStr);
             var root = doc.RootElement;
-            
+
             // Check if this looks like a tool call
             if (!root.TryGetProperty("tool", out _) && !root.TryGetProperty("function", out _))
             {
                 return null;
             }
-            
+
             var toolCall = new ToolCall();
-            
+
             // Support both "tool" and "function" property names
             if (root.TryGetProperty("tool", out var toolProp))
             {
@@ -240,7 +240,7 @@ public class ToolCallExtractor
             {
                 toolCall.ToolId = funcProp.GetString() ?? "";
             }
-            
+
             // Support both "parameters" and "arguments" property names  
             if (root.TryGetProperty("parameters", out var parameters))
             {
@@ -250,7 +250,7 @@ public class ToolCallExtractor
             {
                 ParseParameters(arguments, toolCall.Parameters);
             }
-            
+
             return toolCall;
         }
         catch (System.Text.Json.JsonException)

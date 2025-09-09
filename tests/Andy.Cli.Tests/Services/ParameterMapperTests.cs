@@ -44,7 +44,7 @@ public class ParameterMapperTests
         Assert.True(mapped.ContainsKey("file_path"));
         Assert.Equal("/Users/test/file.txt", mapped["file_path"]);
         Assert.False(mapped.ContainsKey("path"));
-        
+
         _output.WriteLine($"Successfully mapped 'path' to 'file_path': {mapped["file_path"]}");
     }
 
@@ -76,7 +76,7 @@ public class ParameterMapperTests
         Assert.Equal("/tmp/test.txt", mapped["file_path"]);
         Assert.True(mapped.ContainsKey("content"));
         Assert.Equal("Hello World", mapped["content"]);
-        
+
         _output.WriteLine($"Mapped 'path' -> 'file_path' and 'data' -> 'content'");
     }
 
@@ -107,7 +107,7 @@ public class ParameterMapperTests
         Assert.Equal(2, mapped.Count);
         Assert.Equal("/correct/path.txt", mapped["file_path"]);
         Assert.Equal("utf-8", mapped["encoding"]);
-        
+
         _output.WriteLine("Parameters already correct - no mapping needed");
     }
 
@@ -139,7 +139,7 @@ public class ParameterMapperTests
         Assert.Equal("/source.txt", mapped["source_path"]);
         Assert.True(mapped.ContainsKey("destination_path"));
         Assert.Equal("/destination.txt", mapped["destination_path"]);
-        
+
         _output.WriteLine("Mapped 'src' -> 'source_path' and 'dest' -> 'destination_path'");
     }
 
@@ -168,7 +168,7 @@ public class ParameterMapperTests
         Assert.True(mapped.ContainsKey("path"));
         Assert.Equal("/tmp", mapped["path"]);
         Assert.False(mapped.ContainsKey("dir"));
-        
+
         _output.WriteLine("Mapped 'dir' -> 'path' for list_directory");
     }
 
@@ -197,7 +197,7 @@ public class ParameterMapperTests
         // The unknown parameter is preserved for the tool to handle
         Assert.True(mapped.ContainsKey("custom_param"));
         Assert.Equal("value", mapped["custom_param"]);
-        
+
         _output.WriteLine("Unknown parameter preserved for tool to handle");
     }
 
@@ -230,7 +230,7 @@ public class ParameterMapperTests
         var array = (string[])value;
         Assert.Single(array);
         Assert.Equal("repo", array[0]);
-        
+
         _output.WriteLine($"Converted string 'repo' to array: [{string.Join(", ", array)}]");
     }
 
@@ -265,7 +265,7 @@ public class ParameterMapperTests
         Assert.Equal("foo", array[0]);
         Assert.Equal("bar", array[1]);
         Assert.Equal("baz", array[2]);
-        
+
         _output.WriteLine($"Converted comma-separated string to array: [{string.Join(", ", array)}]");
     }
 
@@ -294,7 +294,7 @@ public class ParameterMapperTests
         // Assert
         Assert.True(mapped.ContainsKey("items"));
         Assert.Same(originalArray, mapped["items"]);
-        
+
         _output.WriteLine("Array parameter preserved as-is");
     }
 
@@ -330,7 +330,7 @@ public class ParameterMapperTests
         Assert.Equal(true, mapped["flag2"]);
         Assert.Equal(true, mapped["flag3"]);
         Assert.Equal(false, mapped["flag4"]);
-        
+
         _output.WriteLine("Boolean conversions successful");
     }
 }

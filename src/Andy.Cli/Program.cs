@@ -29,11 +29,11 @@ class Program
     // Minimum terminal dimensions to prevent crashes
     private const int MIN_WIDTH = 40;
     private const int MIN_HEIGHT = 10;
-    
+
     // Git info cache
     private static string? _gitBranch;
     private static string? _gitCommit;
-    
+
     private static (string branch, string commit) GetGitInfo()
     {
         if (_gitBranch == null || _gitCommit == null)
@@ -51,7 +51,7 @@ class Program
                 });
                 _gitBranch = branchProcess?.StandardOutput.ReadToEnd().Trim() ?? "unknown";
                 branchProcess?.WaitForExit();
-                
+
                 // Get short commit hash
                 var commitProcess = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
                 {
@@ -72,9 +72,23 @@ class Program
         }
         return (_gitBranch, _gitCommit);
     }
-    
+
     static async Task Main(string[] args)
     {
+        // Debug: Check if ANDY_DEBUG_RAW is set
+        var debugRawEnv = Environment.GetEnvironmentVariable("ANDY_DEBUG_RAW");
+        if (!string.IsNullOrEmpty(debugRawEnv))
+        {
+            var debugCheckFile = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".andy",
+                "diagnostics",
+                "ENV_CHECK.txt"
+            );
+            Directory.CreateDirectory(Path.GetDirectoryName(debugCheckFile)!);
+            File.WriteAllText(debugCheckFile, $"Program.Main() at {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC\nANDY_DEBUG_RAW = '{debugRawEnv}'\nArgs: {string.Join(", ", args)}\n");
+        }
+
         // Check if we have command-line arguments for non-TUI commands
         if (args.Length > 0 && !args[0].StartsWith("-"))
         {
@@ -82,7 +96,7 @@ class Program
             return;
         }
         var caps = Andy.Tui.Backend.Terminal.CapabilityDetector.DetectFromEnvironment();
-        
+
         // Ensure minimum viewport size to prevent crashes
         const int MIN_WIDTH = 40;
         const int MIN_HEIGHT = 10;
@@ -92,20 +106,20 @@ class Program
         scheduler.SetMetricsSink(hud);
         var pty = new LocalStdoutPty();
         Console.Write("\u001b[?1049h\u001b[?25l\u001b[?7l");
-        
+
         // Set console background to black after entering alternate screen
         Console.BackgroundColor = ConsoleColor.Black;
         Console.Clear();
-        
+
         try
         {
             bool running = true;
             var hints = new KeyHintsBar();
-            hints.SetHints(new[]{("Ctrl+P","Commands"),("F2","Toggle HUD"),("ESC","Quit")});
+            hints.SetHints(new[] { ("Ctrl+P", "Commands"), ("F2", "Toggle HUD"), ("ESC", "Quit") });
             var toast = new Toast(); // Don't show initial toast as it interferes with prompt
             var tokenCounter = new TokenCounter();
             var statusMessage = new StatusMessage();
-            var status = new StatusLine(); status.Set("Idle", spinner:false);
+            var status = new StatusLine(); status.Set("Idle", spinner: false);
             var prompt = new PromptLine();
             prompt.SetBorder(true);
             prompt.SetShowCaret(true);
@@ -114,32 +128,32 @@ class Program
             feed.SetFocused(false);
             feed.SetAnimationSpeed(8); // faster scroll-in
             feed.AddMarkdownRich("**Ready to assist!** What can I help you learn or explore today?");
-            
+
             // Initialize Andy.Llm and Andy.Tools services
             var services = new ServiceCollection();
             services.AddLogging(); // Basic logging without console provider
-            
+
             // Configure LLM services
             services.ConfigureLlmFromEnvironment();
             services.AddLlmServices(options =>
             {
                 options.DefaultProvider = "cerebras"; // Use Cerebras as default
             });
-            
+
             // Register new Qwen parsing components
             services.AddSingleton<IJsonRepairService, JsonRepairService>();
             // JSON repair service for malformed responses
             services.AddSingleton<IJsonRepairService, JsonRepairService>();
-            
+
             // Legacy parsers (kept for backward compatibility)
             services.AddSingleton<StreamingToolCallAccumulator>();
             services.AddSingleton<IQwenResponseParser, SimpleQwenParser>();
             services.AddSingleton<IToolCallValidator, ToolCallValidator>();
-            
+
             // AST-based parser components (new architecture)
             services.AddTransient<Andy.Cli.Parsing.Compiler.LlmResponseCompiler>();
             services.AddTransient<Andy.Cli.Parsing.Rendering.AstRenderer>();
-            
+
             // Configure Tool services - manually register to avoid HostedService requirement
             // Core services from AddAndyTools
             services.AddSingleton<Andy.Tools.Validation.IToolValidator, Andy.Tools.Validation.ToolValidator>();
@@ -151,7 +165,7 @@ class Program
             services.AddSingleton<IToolExecutor, ToolExecutor>();
             services.AddSingleton<Andy.Tools.Core.IPermissionProfileService, Andy.Tools.Core.PermissionProfileService>();
             services.AddSingleton<Andy.Tools.Framework.IToolLifecycleManager, Andy.Tools.Framework.ToolLifecycleManager>();
-            
+
             // Framework options
             services.AddSingleton(new Andy.Tools.Framework.ToolFrameworkOptions
             {
@@ -159,19 +173,24 @@ class Program
                 EnableObservability = false,
                 AutoDiscoverTools = false
             });
-            
+
             // Register built-in tools
             services.AddBuiltInTools();
-            
+
             // Register custom tools
-            services.AddSingleton(new ToolRegistrationInfo 
-            { 
+            services.AddSingleton(new ToolRegistrationInfo
+            {
                 ToolType = typeof(Andy.Cli.Tools.CreateDirectoryTool),
                 Configuration = new Dictionary<string, object?>()
             });
-            
+            services.AddSingleton(new ToolRegistrationInfo
+            {
+                ToolType = typeof(Andy.Cli.Tools.BashCommandTool),
+                Configuration = new Dictionary<string, object?>()
+            });
+
             var serviceProvider = services.BuildServiceProvider();
-            
+
             // Initialize tool registry and register tools
             var toolRegistry = serviceProvider.GetRequiredService<IToolRegistry>();
             var toolRegistrations = serviceProvider.GetServices<ToolRegistrationInfo>();
@@ -179,28 +198,28 @@ class Program
             {
                 toolRegistry.RegisterTool(registration.ToolType, registration.Configuration);
             }
-            
+
             // Initialize commands
             var modelCommand = new ModelCommand(serviceProvider);
             var toolsCommand = new ToolsCommand(serviceProvider);
             var commandPalette = new CommandPalette();
-            
+
             LlmClient? llmClient = null;
             AiConversationService? aiService = null;
-            
+
             // Build comprehensive system prompt
             var systemPromptService = new SystemPromptService();
             var availableTools = toolRegistry.GetTools(enabledOnly: true);
             var currentModel = modelCommand.GetCurrentModel();
             var currentProvider = modelCommand.GetCurrentProvider();
             var systemPrompt = systemPromptService.BuildSystemPrompt(availableTools, currentModel, currentProvider);
-            
+
             var conversation = new ConversationContext
             {
                 SystemInstruction = systemPrompt,
                 MaxContextMessages = 20
             };
-            
+
             try
             {
                 llmClient = serviceProvider.GetRequiredService<LlmClient>();
@@ -215,12 +234,12 @@ class Program
                     systemPrompt,
                     jsonRepair,
                     logger);
-                
+
                 // Get actual model and provider information from ModelCommand
                 // Set initial model info
                 aiService.UpdateModelInfo(currentModel, currentProvider);
                 var providerUrl = GetProviderUrl(currentProvider);
-                
+
                 feed.AddMarkdownRich($"[model] {currentModel} with {currentProvider} provider [{providerUrl}] (tool-enabled)");
             }
             catch (Exception ex)
@@ -231,7 +250,7 @@ class Program
                     feed.AddMarkdown(ConsoleColors.ErrorPrefix($"Inner: {ex.InnerException.Message}"));
                 }
                 feed.AddMarkdownRich(ConsoleColors.NotePrefix("Set CEREBRAS_API_KEY to enable AI responses"));
-                
+
                 // Try to at least get the LLM client without tools for basic chat
                 try
                 {
@@ -242,42 +261,42 @@ class Program
                     // Ignore secondary error
                 }
             }
-            
+
             // Setup command palette commands
             commandPalette.SetCommands(new[]
             {
-                new CommandPalette.CommandItem 
-                { 
-                    Name = "Exit", 
+                new CommandPalette.CommandItem
+                {
+                    Name = "Exit",
                     Description = "Quit the application",
                     Category = "General",
                     Aliases = new[] { "quit", "exit", "bye", "q" },
-                    Action = args => 
+                    Action = args =>
                     {
                         running = false;
                     }
                 },
-                new CommandPalette.CommandItem 
-                { 
-                    Name = "List Models", 
+                new CommandPalette.CommandItem
+                {
+                    Name = "List Models",
                     Description = "Show available AI models",
                     Category = "Model",
                     Aliases = new[] { "models", "list" },
-                    Action = async args => 
+                    Action = async args =>
                     {
                         var modelListItem = await modelCommand.CreateModelListItemAsync();
                         feed.AddItem(modelListItem);
                     }
                 },
-                new CommandPalette.CommandItem 
-                { 
-                    Name = "Switch Model", 
+                new CommandPalette.CommandItem
+                {
+                    Name = "Switch Model",
                     Description = "Change AI provider/model",
                     Category = "Model",
                     Aliases = new[] { "switch", "change" },
                     RequiredParams = new[] { "provider" },
                     ParameterHint = "Example: cerebras or openai gpt-4o",
-                    Action = async args => 
+                    Action = async args =>
                     {
                         if (args.Length < 1)
                         {
@@ -320,51 +339,51 @@ class Program
                                         modelCommand.GetCurrentProvider()
                                     );
                                 }
-                                
+
                                 feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
                             }
                         }
                     }
                 },
-                new CommandPalette.CommandItem 
-                { 
-                    Name = "Model Info", 
+                new CommandPalette.CommandItem
+                {
+                    Name = "Model Info",
                     Description = "Show current model details",
                     Category = "Model",
                     Aliases = new[] { "info", "current" },
-                    Action = async args => 
+                    Action = async args =>
                     {
                         var result = await modelCommand.ExecuteAsync(new[] { "info" });
                         feed.AddMarkdownRich(result.Message);
                     }
                 },
-                new CommandPalette.CommandItem 
-                { 
-                    Name = "Test Model", 
+                new CommandPalette.CommandItem
+                {
+                    Name = "Test Model",
                     Description = "Test current model",
                     Category = "Model",
                     Aliases = new[] { "test" },
-                    Action = async args => 
+                    Action = async args =>
                     {
                         var result = await modelCommand.ExecuteAsync(new[] { "test" }.Concat(args).ToArray());
                         feed.AddMarkdownRich(result.Message);
                     }
                 },
-                new CommandPalette.CommandItem 
-                { 
-                    Name = "List Tools", 
+                new CommandPalette.CommandItem
+                {
+                    Name = "List Tools",
                     Description = "Show available AI tools",
                     Category = "Tools",
                     Aliases = new[] { "tools", "tool list" },
-                    Action = args => 
+                    Action = args =>
                     {
                         var toolListItem = toolsCommand.CreateToolListItem();
                         feed.AddItem(toolListItem);
                     }
                 },
-                new CommandPalette.CommandItem 
-                { 
-                    Name = "Tool Info", 
+                new CommandPalette.CommandItem
+                {
+                    Name = "Tool Info",
                     Description = "Show details about a specific tool",
                     Category = "Tools",
                     Aliases = new[] { "tool info", "tool details" },
@@ -384,7 +403,7 @@ class Program
                         }
                         return Array.Empty<string>();
                     },
-                    Action = async args => 
+                    Action = async args =>
                     {
                         if (args.Length < 1)
                         {
@@ -397,9 +416,9 @@ class Program
                         }
                     }
                 },
-                new CommandPalette.CommandItem 
-                { 
-                    Name = "Execute Tool", 
+                new CommandPalette.CommandItem
+                {
+                    Name = "Execute Tool",
                     Description = "Run a tool with parameters",
                     Category = "Tools",
                     Aliases = new[] { "tool exec", "tool run" },
@@ -419,7 +438,7 @@ class Program
                         }
                         return Array.Empty<string>();
                     },
-                    Action = async args => 
+                    Action = async args =>
                     {
                         if (args.Length < 1)
                         {
@@ -432,13 +451,13 @@ class Program
                         }
                     }
                 },
-                new CommandPalette.CommandItem 
-                { 
-                    Name = "Clear Chat", 
+                new CommandPalette.CommandItem
+                {
+                    Name = "Clear Chat",
                     Description = "Clear conversation history",
                     Category = "Chat",
                     Aliases = new[] { "clear", "reset" },
-                    Action = args => 
+                    Action = args =>
                     {
                         conversation.Clear();
                         if (aiService != null)
@@ -449,25 +468,25 @@ class Program
                         feed.AddMarkdownRich("**Chat cleared!** Ready for a fresh conversation.");
                     }
                 },
-                new CommandPalette.CommandItem 
-                { 
-                    Name = "Toggle HUD", 
+                new CommandPalette.CommandItem
+                {
+                    Name = "Toggle HUD",
                     Description = "Show/hide performance overlay",
                     Category = "UI",
                     Aliases = new[] { "hud", "debug" },
-                    Action = args => 
+                    Action = args =>
                     {
                         hud.Enabled = !hud.Enabled;
                         toast.Show(hud.Enabled ? "HUD enabled" : "HUD disabled", 60);
                     }
                 },
-                new CommandPalette.CommandItem 
-                { 
-                    Name = "Help", 
+                new CommandPalette.CommandItem
+                {
+                    Name = "Help",
                     Description = "Show help information",
                     Category = "General",
                     Aliases = new[] { "?", "help" },
-                    Action = args => 
+                    Action = args =>
                     {
                         feed.AddMarkdownRich("# Andy CLI Help\n\n" +
                             "## Keyboard Shortcuts:\n" +
@@ -488,11 +507,11 @@ class Program
                     }
                 }
             });
-            
+
             bool cursorStyledShown = false;
             var lastWidth = viewport.Width;
             var lastHeight = viewport.Height;
-            
+
             while (running)
             {
                 // Check for terminal resize
@@ -516,62 +535,62 @@ class Program
                             commandPalette.Close();
                             return;
                         }
-                        
+
                         // Confirmation dialog with buttons
                         bool confirmExit = false;
                         bool dialogOpen = true;
                         bool yesSelected = false; // Default to No
-                        
+
                         while (dialogOpen)
                         {
                             var confirmB = new DL.DisplayListBuilder();
-                            confirmB.PushClip(new DL.ClipPush(0,0,viewport.Width, viewport.Height));
-                            
+                            confirmB.PushClip(new DL.ClipPush(0, 0, viewport.Width, viewport.Height));
+
                             // Semi-transparent backdrop
-                            confirmB.DrawRect(new DL.Rect(0,0,viewport.Width, viewport.Height, new DL.Rgb24(0,0,0)));
-                            
+                            confirmB.DrawRect(new DL.Rect(0, 0, viewport.Width, viewport.Height, new DL.Rgb24(0, 0, 0)));
+
                             // Dialog box
                             int bw = Math.Min(44, viewport.Width - 4);
                             int bh = 7;
-                            int bx = (viewport.Width - bw)/2; 
-                            int by = (viewport.Height - bh)/2;
-                            
+                            int bx = (viewport.Width - bw) / 2;
+                            int by = (viewport.Height - bh) / 2;
+
                             // Draw dialog background and border
                             confirmB.PushClip(new DL.ClipPush(bx, by, bw, bh));
-                            confirmB.DrawRect(new DL.Rect(bx, by, bw, bh, new DL.Rgb24(30,30,40)));
-                            confirmB.DrawBorder(new DL.Border(bx, by, bw, bh, "double", new DL.Rgb24(200,200,80)));
-                            
+                            confirmB.DrawRect(new DL.Rect(bx, by, bw, bh, new DL.Rgb24(30, 30, 40)));
+                            confirmB.DrawBorder(new DL.Border(bx, by, bw, bh, "double", new DL.Rgb24(200, 200, 80)));
+
                             // Title
                             string title = "Exit Application?";
                             int titleX = bx + (bw - title.Length) / 2;
-                            confirmB.DrawText(new DL.TextRun(titleX, by+2, title, new DL.Rgb24(255,255,255), new DL.Rgb24(30,30,40), DL.CellAttrFlags.Bold));
-                            
+                            confirmB.DrawText(new DL.TextRun(titleX, by + 2, title, new DL.Rgb24(255, 255, 255), new DL.Rgb24(30, 30, 40), DL.CellAttrFlags.Bold));
+
                             // Buttons
                             int buttonY = by + 4;
                             int buttonSpacing = 12;
-                            int noButtonX = bx + (bw/2) - buttonSpacing;
-                            int yesButtonX = bx + (bw/2) + 3;
-                            
+                            int noButtonX = bx + (bw / 2) - buttonSpacing;
+                            int yesButtonX = bx + (bw / 2) + 3;
+
                             // No button (default)
-                            var noBg = !yesSelected ? new DL.Rgb24(60,120,60) : new DL.Rgb24(40,40,50);
-                            var noFg = !yesSelected ? new DL.Rgb24(255,255,255) : new DL.Rgb24(180,180,180);
+                            var noBg = !yesSelected ? new DL.Rgb24(60, 120, 60) : new DL.Rgb24(40, 40, 50);
+                            var noFg = !yesSelected ? new DL.Rgb24(255, 255, 255) : new DL.Rgb24(180, 180, 180);
                             confirmB.DrawRect(new DL.Rect(noButtonX, buttonY, 8, 1, noBg));
-                            confirmB.DrawText(new DL.TextRun(noButtonX+1, buttonY, !yesSelected ? "[ No ]" : "  No  ", noFg, noBg, !yesSelected ? DL.CellAttrFlags.Bold : DL.CellAttrFlags.None));
-                            
+                            confirmB.DrawText(new DL.TextRun(noButtonX + 1, buttonY, !yesSelected ? "[ No ]" : "  No  ", noFg, noBg, !yesSelected ? DL.CellAttrFlags.Bold : DL.CellAttrFlags.None));
+
                             // Yes button
-                            var yesBg = yesSelected ? new DL.Rgb24(120,60,60) : new DL.Rgb24(40,40,50);
-                            var yesFg = yesSelected ? new DL.Rgb24(255,255,255) : new DL.Rgb24(180,180,180);
+                            var yesBg = yesSelected ? new DL.Rgb24(120, 60, 60) : new DL.Rgb24(40, 40, 50);
+                            var yesFg = yesSelected ? new DL.Rgb24(255, 255, 255) : new DL.Rgb24(180, 180, 180);
                             confirmB.DrawRect(new DL.Rect(yesButtonX, buttonY, 8, 1, yesBg));
-                            confirmB.DrawText(new DL.TextRun(yesButtonX+1, buttonY, yesSelected ? "[ Yes ]" : "  Yes  ", yesFg, yesBg, yesSelected ? DL.CellAttrFlags.Bold : DL.CellAttrFlags.None));
-                            
+                            confirmB.DrawText(new DL.TextRun(yesButtonX + 1, buttonY, yesSelected ? "[ Yes ]" : "  Yes  ", yesFg, yesBg, yesSelected ? DL.CellAttrFlags.Bold : DL.CellAttrFlags.None));
+
                             // Hints
                             string hints = "← → Navigate  Enter Select  Esc Cancel";
                             int hintsX = bx + (bw - hints.Length) / 2;
-                            confirmB.DrawText(new DL.TextRun(hintsX, by+bh-1, hints, new DL.Rgb24(120,120,150), new DL.Rgb24(30,30,40), DL.CellAttrFlags.None));
-                            
+                            confirmB.DrawText(new DL.TextRun(hintsX, by + bh - 1, hints, new DL.Rgb24(120, 120, 150), new DL.Rgb24(30, 30, 40), DL.CellAttrFlags.None));
+
                             confirmB.Pop();
                             await scheduler.RenderOnceAsync(confirmB.Build(), viewport, caps, pty, CancellationToken.None);
-                            
+
                             // Handle input
                             ConsoleKeyInfo k2 = Console.ReadKey(true);
                             if (k2.Key == ConsoleKey.LeftArrow || k2.Key == ConsoleKey.RightArrow || k2.Key == ConsoleKey.Tab)
@@ -593,12 +612,12 @@ class Program
                                 dialogOpen = false;
                             }
                         }
-                        
+
                         if (confirmExit) { running = false; }
                         return;
                     }
                     if (k.Key == ConsoleKey.F2) { hud.Enabled = !hud.Enabled; return; }
-                    
+
                     // Handle Ctrl+P / Cmd+P for command palette
                     if (k.Key == ConsoleKey.P && (k.Modifiers & ConsoleModifiers.Control) != 0)
                     {
@@ -612,7 +631,7 @@ class Program
                         }
                         return;
                     }
-                    
+
                     // Handle command palette input when open
                     if (commandPalette.IsOpen)
                     {
@@ -685,7 +704,7 @@ class Program
                         }
                         return;
                     }
-                    
+
                     // Avoid mapping regular alphanumeric keys to actions
                     var submitted = prompt.OnKey(k);
                     if (submitted is string cmd && !string.IsNullOrWhiteSpace(cmd))
@@ -698,11 +717,11 @@ class Program
                             {
                                 var commandName = parts[0].ToLowerInvariant();
                                 var args = parts.Skip(1).ToArray();
-                                
+
                                 if (commandName == "model" || commandName == "m")
                                 {
                                     feed.AddUserMessage(cmd);
-                                    
+
                                     // Check if it's a list command or no args (default to list)
                                     if (args.Length == 0 || args[0] == "list" || args[0] == "ls")
                                     {
@@ -718,13 +737,13 @@ class Program
                                             // Update the LLM client and reset conversation context
                                             llmClient = modelCommand.GetCurrentClient();
                                             conversation.Clear();
-                                            
+
                                             // Rebuild system prompt for the new model
                                             var newModel = modelCommand.GetCurrentModel();
                                             var newProvider = modelCommand.GetCurrentProvider();
                                             systemPrompt = systemPromptService.BuildSystemPrompt(availableTools, newModel, newProvider);
                                             conversation.SystemInstruction = systemPrompt;
-                                            
+
                                             // Update AI service with new client
                                             if (llmClient != null)
                                             {
@@ -739,14 +758,14 @@ class Program
                                                     systemPrompt,
                                                     jsonRepair,
                                                     logger);
-                                                
+
                                                 // Set model info for response interpretation
                                                 aiService.UpdateModelInfo(
                                                     modelCommand.GetCurrentModel(),
                                                     modelCommand.GetCurrentProvider()
                                                 );
                                             }
-                                            
+
                                             feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
                                         }
                                     }
@@ -755,7 +774,7 @@ class Program
                                 else if (commandName == "tools" || commandName == "tool" || commandName == "t")
                                 {
                                     feed.AddUserMessage(cmd);
-                                    
+
                                     // Check if it's a list command or no args (default to list)
                                     if (args.Length == 0 || args[0] == "list" || args[0] == "ls")
                                     {
@@ -819,7 +838,7 @@ class Program
                                 }
                             }
                         }
-                        
+
                         // Regular chat message
                         feed.AddUserMessage(cmd);
                         if (aiService != null)
@@ -827,19 +846,19 @@ class Program
                             try
                             {
                                 statusMessage.SetMessage("Thinking", animated: true);
-                                
+
                                 // Process message with tool support and streaming
                                 var response = await aiService.ProcessMessageAsync(cmd, enableStreaming: true);
-                                
+
                                 // Get context stats for token counting
                                 var stats = aiService.GetContextStats();
                                 tokenCounter.AddTokens(stats.EstimatedTokens / 2, stats.EstimatedTokens / 2);
-                                
+
                                 statusMessage.SetMessage("Ready for next question", animated: false);
                             }
-                            catch (Exception ex) 
-                            { 
-                                feed.AddMarkdownRich(ConsoleColors.ErrorPrefix(ex.Message)); 
+                            catch (Exception ex)
+                            {
+                                feed.AddMarkdownRich(ConsoleColors.ErrorPrefix(ex.Message));
                                 statusMessage.SetMessage("Error occurred", animated: false);
                             }
                         }
@@ -849,16 +868,16 @@ class Program
                             try
                             {
                                 statusMessage.SetMessage("Thinking", animated: true);
-                                
+
                                 // Add user message to conversation context
                                 conversation.AddUserMessage(cmd);
-                                
+
                                 // Create request with conversation context
                                 var request = conversation.CreateRequest();
-                                
+
                                 // Get response from Andy.Llm
                                 var response = await llmClient.CompleteAsync(request);
-                                
+
                                 // Extract token usage if available
                                 int inputTokens = 0;
                                 int outputTokens = 0;
@@ -874,19 +893,19 @@ class Program
                                     inputTokens = cmd.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length * 2;
                                     outputTokens = (response.Content ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries).Length * 2;
                                 }
-                                
+
                                 tokenCounter.AddTokens(inputTokens, outputTokens);
-                                
+
                                 AddReplyToFeed(feed, response.Content ?? string.Empty, inputTokens, outputTokens);
-                                
+
                                 // Add assistant response to conversation context
                                 conversation.AddAssistantMessage(response.Content ?? string.Empty);
-                                
+
                                 statusMessage.SetMessage("Ready for next question", animated: false);
                             }
-                            catch (Exception ex) 
-                            { 
-                                feed.AddMarkdownRich(ConsoleColors.ErrorPrefix(ex.Message)); 
+                            catch (Exception ex)
+                            {
+                                feed.AddMarkdownRich(ConsoleColors.ErrorPrefix(ex.Message));
                                 statusMessage.SetMessage("Error occurred", animated: false);
                             }
                         }
@@ -931,17 +950,17 @@ class Program
                 }
                 // Render placeholder + CLI widgets
                 var b = new DL.DisplayListBuilder();
-                b.PushClip(new DL.ClipPush(0,0,viewport.Width, viewport.Height));
-                b.DrawRect(new DL.Rect(0,0,viewport.Width, viewport.Height, new DL.Rgb24(0,0,0)));
+                b.PushClip(new DL.ClipPush(0, 0, viewport.Width, viewport.Height));
+                b.DrawRect(new DL.Rect(0, 0, viewport.Width, viewport.Height, new DL.Rgb24(0, 0, 0)));
                 var gitInfo = GetGitInfo();
                 var headerText = $"Andy CLI [{gitInfo.branch}@{gitInfo.commit}]";
-                b.DrawText(new DL.TextRun(2,1, headerText, new DL.Rgb24(200,200,50), null, DL.CellAttrFlags.Bold));
+                b.DrawText(new DL.TextRun(2, 1, headerText, new DL.Rgb24(200, 200, 50), null, DL.CellAttrFlags.Bold));
                 var baseDl = b.Build();
                 var wb = new DL.DisplayListBuilder();
                 hints.Render(viewport, baseDl, wb);
                 toast.Tick(); // Advance toast TTL
                 toast.RenderAt(2, viewport.Height - 4, baseDl, wb);
-                
+
                 // Render token counter on same line as hints
                 int tokenCounterWidth = tokenCounter.GetWidth();
                 int tokenCounterX = viewport.Width - tokenCounterWidth - 2;
@@ -949,16 +968,16 @@ class Program
                 {
                     tokenCounter.RenderAt(tokenCounterX, viewport.Height - 1, baseDl, wb);
                 }
-                
+
                 // Render status message above "Idle" line
                 statusMessage.RenderAt(2, viewport.Height - 3, Math.Max(0, viewport.Width - 4), baseDl, wb);
-                
+
                 status.Tick(); status.Render(viewport, baseDl, wb);
                 // Main output area and prompt at bottom
                 // Ensure we have enough space to render
                 if (viewport.Width > 10 && viewport.Height > 8)
                 {
-                    int promptH = Math.Clamp(prompt.GetLineCount(), 1, Math.Max(1, viewport.Height/2));
+                    int promptH = Math.Clamp(prompt.GetLineCount(), 1, Math.Max(1, viewport.Height / 2));
                     int outputH = Math.Max(1, viewport.Height - 5 - 2);
                     // allocate space for variable-height prompt
                     outputH = Math.Max(1, viewport.Height - 5 - (promptH + 1));
@@ -973,10 +992,10 @@ class Program
                     b.DrawText(new DL.TextRun(2, 2, "Window too small", new DL.Rgb24(255, 100, 100), null, DL.CellAttrFlags.Bold));
                     b.DrawText(new DL.TextRun(2, 3, $"Min: {MIN_WIDTH}x{MIN_HEIGHT}", new DL.Rgb24(200, 200, 200), null, DL.CellAttrFlags.None));
                 }
-                
+
                 // Render command palette (if open)
                 commandPalette.Render(new L.Rect(0, 0, viewport.Width, viewport.Height), baseDl, wb);
-                
+
                 var overlay = new DL.DisplayListBuilder();
                 hud.ViewportCols = viewport.Width; hud.ViewportRows = viewport.Height;
                 hud.Contribute(baseDl, overlay);
@@ -997,7 +1016,7 @@ class Program
                     }
                     Console.Write($"\u001b[{row1};{col1}H");
                 }
-                
+
                 static void Append(object op, DL.DisplayListBuilder b)
                 {
                     switch (op)
@@ -1021,8 +1040,28 @@ class Program
 
     private static void AddReplyToFeed(FeedView feed, string reply, int inputTokens, int outputTokens)
     {
-        // Split by fenced code blocks. Support optional language after ```
-        var text = reply.Replace("\r\n","\n").Replace('\r','\n');
+        // Support:
+        // - Triple-backtick fenced code blocks with optional language
+        // - Malformed single-backtick language blocks (`csharp ... \n`)
+        // - Inline single-line JSON objects rendered as json code blocks
+        var text = reply.Replace("\r\n", "\n").Replace('\r', '\n');
+
+        // First, extract and render any malformed single-backtick language blocks using regex
+        var singleBlockRegex = new System.Text.RegularExpressions.Regex(
+            @"(?m)^[ \t]*`([A-Za-z#]+)\s*\r?\n([\s\S]*?)^[ \t]*`\s*$",
+            System.Text.RegularExpressions.RegexOptions.Multiline);
+        while (true)
+        {
+            var m = singleBlockRegex.Match(text);
+            if (!m.Success) break;
+            var langToken = m.Groups[1].Value.Trim().ToLowerInvariant();
+            var codeBody = m.Groups[2].Value;
+            if (!string.IsNullOrEmpty(codeBody)) feed.AddCode(codeBody, langToken);
+            // Remove this occurrence and continue
+            text = text.Remove(m.Index, m.Length);
+        }
+
+        // Render triple-backtick fenced blocks while preserving non-code text
         int i = 0;
         while (i < text.Length)
         {
@@ -1030,34 +1069,66 @@ class Program
             if (fenceStart < 0)
             {
                 var md = text.Substring(i);
-                if (!string.IsNullOrWhiteSpace(md)) feed.AddMarkdownRich(md);
+                RenderMarkdownWithInlineJson(md, feed);
                 break;
             }
             // markdown before code fence
             if (fenceStart > i)
             {
                 var md = text.Substring(i, fenceStart - i);
-                if (!string.IsNullOrWhiteSpace(md)) feed.AddMarkdownRich(md);
+                RenderMarkdownWithInlineJson(md, feed);
             }
-            int langEnd = text.IndexOf('\n', fenceStart + 3);
-            string? lang = null;
-            if (langEnd > fenceStart + 3)
+            int langEnd2 = text.IndexOf('\n', fenceStart + 3);
+            string? lang2 = null;
+            if (langEnd2 > fenceStart + 3)
             {
-                lang = text.Substring(fenceStart + 3, langEnd - (fenceStart + 3)).Trim();
-                i = langEnd + 1;
+                lang2 = text.Substring(fenceStart + 3, langEnd2 - (fenceStart + 3)).Trim();
+                i = langEnd2 + 1;
             }
             else { i = fenceStart + 3; }
             int fenceEnd = text.IndexOf("```", i, StringComparison.Ordinal);
             if (fenceEnd < 0) fenceEnd = text.Length;
-            var code = text.Substring(i, fenceEnd - i);
-            if (!string.IsNullOrEmpty(code)) feed.AddCode(code, lang);
+            var code2 = text.Substring(i, fenceEnd - i);
+            if (!string.IsNullOrEmpty(code2)) feed.AddCode(code2, lang2);
             i = Math.Min(text.Length, fenceEnd + 3);
         }
-        
+
         // Add static response separator with token information
         feed.AddResponseSeparator(inputTokens, outputTokens);
     }
-    
+
+    private static void RenderMarkdownWithInlineJson(string md, FeedView feed)
+    {
+        if (string.IsNullOrEmpty(md)) return;
+        var lines = md.Split('\n');
+        var sb = new StringBuilder();
+        foreach (var line in lines)
+        {
+            var t = line.Trim();
+            if (t.StartsWith("{") && t.EndsWith("}"))
+            {
+                // Flush any buffered markdown before adding code block
+                if (sb.Length > 0)
+                {
+                    feed.AddMarkdownRich(sb.ToString().TrimEnd('\n'));
+                    sb.Clear();
+                }
+                try
+                {
+                    using var _ = System.Text.Json.JsonDocument.Parse(t);
+                    feed.AddCode(t, "json");
+                    continue;
+                }
+                catch { /* fallthrough to markdown */ }
+            }
+            sb.AppendLine(line);
+        }
+        if (sb.Length > 0)
+        {
+            feed.AddMarkdownRich(sb.ToString().TrimEnd('\n'));
+        }
+    }
+
     private static string GetProviderUrl(string provider)
     {
         return provider switch
@@ -1076,28 +1147,28 @@ class Program
         // Initialize services for command-line mode
         var services = new ServiceCollection();
         services.AddLogging();
-        
+
         // Configure LLM services
         services.ConfigureLlmFromEnvironment();
         services.AddLlmServices(options =>
         {
             options.DefaultProvider = "cerebras";
         });
-        
+
         // Register new Qwen parsing components
         services.AddSingleton<IJsonRepairService, JsonRepairService>();
         // JSON repair service for malformed responses
         services.AddSingleton<IJsonRepairService, JsonRepairService>();
-        
+
         // Legacy parsers (kept for backward compatibility)
         services.AddSingleton<StreamingToolCallAccumulator>();
         services.AddSingleton<IQwenResponseParser, SimpleQwenParser>();
         services.AddSingleton<IToolCallValidator, ToolCallValidator>();
-        
+
         // AST-based parser components (new architecture)
         services.AddTransient<Andy.Cli.Parsing.Compiler.LlmResponseCompiler>();
         services.AddTransient<Andy.Cli.Parsing.Rendering.AstRenderer>();
-        
+
         // Configure Tool services - manually register to avoid HostedService requirement
         // Core services from AddAndyTools
         services.AddSingleton<Andy.Tools.Validation.IToolValidator, Andy.Tools.Validation.ToolValidator>();
@@ -1109,7 +1180,7 @@ class Program
         services.AddSingleton<IToolExecutor, ToolExecutor>();
         services.AddSingleton<Andy.Tools.Core.IPermissionProfileService, Andy.Tools.Core.PermissionProfileService>();
         services.AddSingleton<Andy.Tools.Framework.IToolLifecycleManager, Andy.Tools.Framework.ToolLifecycleManager>();
-        
+
         // Framework options
         services.AddSingleton(new Andy.Tools.Framework.ToolFrameworkOptions
         {
@@ -1117,19 +1188,19 @@ class Program
             EnableObservability = false,
             AutoDiscoverTools = false
         });
-        
+
         // Register built-in tools
         services.AddBuiltInTools();
-        
+
         // Register custom tools
-        services.AddSingleton(new ToolRegistrationInfo 
-        { 
+        services.AddSingleton(new ToolRegistrationInfo
+        {
             ToolType = typeof(Andy.Cli.Tools.CreateDirectoryTool),
             Configuration = new Dictionary<string, object?>()
         });
-        
+
         var serviceProvider = services.BuildServiceProvider();
-        
+
         // Initialize tool registry and register tools
         var toolRegistry = serviceProvider.GetRequiredService<IToolRegistry>();
         var toolRegistrations = serviceProvider.GetServices<ToolRegistrationInfo>();
@@ -1137,13 +1208,13 @@ class Program
         {
             toolRegistry.RegisterTool(registration.ToolType, registration.Configuration);
         }
-        
+
         // Route to appropriate command
         var commandName = args[0].ToLowerInvariant();
         var commandArgs = args.Skip(1).ToArray();
-        
+
         ICommand? command = null;
-        
+
         switch (commandName)
         {
             case "model":
@@ -1174,12 +1245,12 @@ class Program
                 Environment.Exit(1);
                 return;
         }
-        
+
         if (command != null)
         {
             var result = await command.ExecuteAsync(commandArgs);
             Console.WriteLine(result.Message);
-            
+
             if (!result.Success)
             {
                 Environment.Exit(1);

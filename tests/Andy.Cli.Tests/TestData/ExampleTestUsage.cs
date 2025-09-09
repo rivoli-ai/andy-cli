@@ -17,7 +17,7 @@ public class ExampleTestUsage
     {
         // Arrange
         var mockLlmClient = new Mock<LlmClient>("test-api-key");
-        
+
         // Use realistic response from our test data
         mockLlmClient
             .Setup(x => x.CompleteAsync(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()))
@@ -41,7 +41,7 @@ public class ExampleTestUsage
         var mockLlmClient = new Mock<LlmClient>("test-api-key");
         var responses = TestResponseHelper.Scenarios.ProjectSetupSequence();
         var responseQueue = new Queue<LlmResponse>(responses);
-        
+
         // Return different responses for each call
         mockLlmClient
             .Setup(x => x.CompleteAsync(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()))
@@ -70,7 +70,7 @@ public class ExampleTestUsage
         var mockLlmClient = new Mock<LlmClient>("test-api-key");
         var fullResponse = SampleLlmResponses.SingleToolCalls.WriteFile;
         var chunks = TestResponseHelper.CreateStreamingChunks(fullResponse, chunkSize: 20);
-        
+
         mockLlmClient
             .Setup(x => x.StreamCompleteAsync(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()))
             .Returns(chunks.ToAsyncEnumerable());
@@ -93,10 +93,10 @@ public class ExampleTestUsage
     {
         // Arrange
         var mockLlmClient = new Mock<LlmClient>("test-api-key");
-        
+
         mockLlmClient
             .Setup(x => x.CompleteAsync(
-                It.Is<LlmRequest>(req => req.Messages.Any(m => m.Role == MessageRole.User && 
+                It.Is<LlmRequest>(req => req.Messages.Any(m => m.Role == MessageRole.User &&
                     m.Parts.OfType<TextPart>().Any(p => p.Text.Contains("hello")))),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(TestResponseHelper.Scenarios.NonToolGreeting());
@@ -123,7 +123,7 @@ public class ExampleTestUsage
         // Arrange
         var mockLlmClient = new Mock<LlmClient>("test-api-key");
         var callCount = 0;
-        
+
         mockLlmClient
             .Setup(x => x.CompleteAsync(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() =>

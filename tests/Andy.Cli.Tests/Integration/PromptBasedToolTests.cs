@@ -42,10 +42,10 @@ public class PromptBasedToolTests : IDisposable
 
         // Set up services
         var services = new ServiceCollection();
-        
+
         // Add logging
         services.AddLogging(builder => builder.AddConsole());
-        
+
         // Add tools framework
         services.AddSingleton<IToolRegistry, ToolRegistry>();
         services.AddSingleton<IToolExecutor, ToolExecutor>();
@@ -54,7 +54,7 @@ public class PromptBasedToolTests : IDisposable
         services.AddSingleton<ISecurityManager, SecurityManager>();
         services.AddSingleton<IToolOutputLimiter, ToolOutputLimiter>();
         services.AddSingleton<IServiceProvider>(sp => sp);
-        
+
         // Register tools
         services.AddTransient<ListDirectoryTool>();
         services.AddTransient<ReadFileTool>();
@@ -64,17 +64,17 @@ public class PromptBasedToolTests : IDisposable
         services.AddTransient<DeleteFileTool>();
         services.AddTransient<Andy.Cli.Tools.CreateDirectoryTool>();
         services.AddTransient<SystemInfoTool>();
-        
+
         _serviceProvider = services.BuildServiceProvider();
-        
+
         // Initialize tools
         _toolRegistry = _serviceProvider.GetRequiredService<IToolRegistry>();
         _toolExecutor = _serviceProvider.GetRequiredService<IToolExecutor>();
         RegisterTools();
-        
+
         // Set up mock LLM client
         _mockLlmClient = new Mock<LlmClient>("test-api-key");
-        
+
         // Set up UI components
         _feed = new FeedView();
     }
@@ -82,7 +82,7 @@ public class PromptBasedToolTests : IDisposable
     private void RegisterTools()
     {
         var emptyConfig = new Dictionary<string, object?>();
-        
+
         // Register tools using Type
         _toolRegistry.RegisterTool(typeof(ListDirectoryTool), emptyConfig);
         _toolRegistry.RegisterTool(typeof(ReadFileTool), emptyConfig);
@@ -111,21 +111,16 @@ public class PromptBasedToolTests : IDisposable
             var systemPromptService = new SystemPromptService();
             systemPrompt = systemPromptService.BuildSystemPrompt(_toolRegistry.GetTools());
         }
-        
-        var parser = new QwenResponseParser(
-            new JsonRepairService(),
-            new StreamingToolCallAccumulator(new JsonRepairService(), null),
-            null);
-        var validator = new ToolCallValidator(_toolRegistry);
-        
+
+        var jsonRepair = new JsonRepairService();
+
         return new AiConversationService(
             _mockLlmClient.Object,
             _toolRegistry,
             _toolExecutor,
             _feed,
             systemPrompt,
-            parser,
-            validator);
+            jsonRepair);
     }
 
     #region Basic Tool Tests
@@ -137,19 +132,19 @@ public class PromptBasedToolTests : IDisposable
         var responses = new Queue<LlmResponse>();
         responses.Enqueue(TestResponseHelper.CreateResponse(SampleLlmResponses.SingleToolCalls.ListDirectory));
         responses.Enqueue(TestResponseHelper.CreateResponse("Here are the files in the current directory."));
-        
+
         _mockLlmClient
             .Setup(x => x.CompleteAsync(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => responses.Count > 0 ? responses.Dequeue() : new LlmResponse { Content = "Done" });
-        
+
         var aiService = CreateAiService();
-        
+
         // Act
         await aiService.ProcessMessageAsync("List the files in the current directory", false);
-        
+
         // Assert
         _mockLlmClient.Verify(x => x.CompleteAsync(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce());
-        
+
         // Verify tools are registered
         var tools = _toolRegistry.GetTools();
         Assert.Contains(tools, t => t.Metadata.Id == "list_directory");
@@ -161,7 +156,7 @@ public class PromptBasedToolTests : IDisposable
         // Verify write_file tool is registered and available
         var tools = _toolRegistry.GetTools();
         Assert.Contains(tools, t => t.Metadata.Id == "write_file");
-        
+
         // Test would need proper mocking to verify actual execution
         await Task.CompletedTask;
     }
@@ -172,14 +167,14 @@ public class PromptBasedToolTests : IDisposable
         // Create a test file
         var testFile = Path.Combine(_testDirectory, "sample.txt");
         File.WriteAllText(testFile, "Sample content");
-        
+
         // Verify read_file tool is registered
         var tools = _toolRegistry.GetTools();
         Assert.Contains(tools, t => t.Metadata.Id == "read_file");
-        
+
         // Verify the test file exists
         Assert.True(File.Exists(testFile));
-        
+
         await Task.CompletedTask;
     }
 
@@ -200,9 +195,9 @@ public class PromptBasedToolTests : IDisposable
         _mockLlmClient
             .Setup(x => x.CompleteAsync(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(TestResponseHelper.CreateResponse("{\"tool\":\"non_existent_tool\",\"parameters\":{}}"));
-        
+
         var aiService = CreateAiService();
-        
+
         // Act & Assert - should not throw
         await aiService.ProcessMessageAsync("do something impossible", false);
         // The service retries on errors, so it may call multiple times
@@ -216,9 +211,9 @@ public class PromptBasedToolTests : IDisposable
         _mockLlmClient
             .Setup(x => x.CompleteAsync(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(TestResponseHelper.CreateResponse("{\"tool\":\"copy_file\",\"parameters\":{}}"));
-        
+
         var aiService = CreateAiService();
-        
+
         // Act & Assert - should handle gracefully
         await aiService.ProcessMessageAsync("copy a file", false);
         // The service retries on errors, so it may call multiple times
@@ -232,12 +227,12 @@ public class PromptBasedToolTests : IDisposable
         _mockLlmClient
             .Setup(x => x.CompleteAsync(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(TestResponseHelper.Scenarios.NonToolClarification());
-        
+
         var aiService = CreateAiService();
-        
+
         // Act
         await aiService.ProcessMessageAsync("do something with the file", false);
-        
+
         // Assert
         _mockLlmClient.Verify(x => x.CompleteAsync(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()), Times.Once());
     }
@@ -267,28 +262,23 @@ public class PromptBasedToolTests : IDisposable
             mockClient
                 .Setup(x => x.CompleteAsync(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(TestResponseHelper.CreateResponse(expectedResponse));
-            
+
             // Use the mock client instead of the field for this test
-            var parser = new QwenResponseParser(
-                new JsonRepairService(),
-                new StreamingToolCallAccumulator(new JsonRepairService(), null),
-                null);
-            var validator = new ToolCallValidator(_toolRegistry);
+            var jsonRepair = new JsonRepairService();
             var systemPromptService = new SystemPromptService();
             var systemPrompt = systemPromptService.BuildSystemPrompt(_toolRegistry.GetTools());
-            
+
             var aiService = new AiConversationService(
                 mockClient.Object,
                 _toolRegistry,
                 _toolExecutor,
                 _feed,
                 systemPrompt,
-                parser,
-                validator);
-            
+                jsonRepair);
+
             // Act
             await aiService.ProcessMessageAsync(prompt, false);
-            
+
             // Assert - The LLM is called multiple times in the tool execution loop:
             // 1. Initial call with user prompt
             // 2. Call(s) with tool results to get final response
@@ -316,13 +306,13 @@ public class PromptBasedToolTests : IDisposable
                     _ => TestResponseHelper.CreateResponse(SampleLlmResponses.NonToolResponses.TaskComplete)
                 };
             });
-        
+
         var aiService = CreateAiService();
-        
+
         // Act - simulate error and recovery flow
         await aiService.ProcessMessageAsync("Try to read a file that doesn't exist", false);
         await aiService.ProcessMessageAsync("Now create the directory", false);
-        
+
         // Assert - verify the recovery happened
         _mockLlmClient.Verify(x => x.CompleteAsync(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()), Times.AtLeast(2));
     }
@@ -333,20 +323,20 @@ public class PromptBasedToolTests : IDisposable
         // Arrange
         var fullResponse = SampleLlmResponses.SingleToolCalls.WriteFile;
         var chunks = TestResponseHelper.CreateStreamingChunks(fullResponse, chunkSize: 20);
-        
+
         _mockLlmClient
             .Setup(x => x.StreamCompleteAsync(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()))
             .Returns(chunks.ToAsyncEnumerable());
-        
+
         var aiService = CreateAiService();
-        
+
         // Act - collect streaming response
         var collectedResponse = "";
         await foreach (var chunk in _mockLlmClient.Object.StreamCompleteAsync(new LlmRequest()))
         {
             collectedResponse += chunk.TextDelta;
         }
-        
+
         // Assert
         Assert.Equal(fullResponse, collectedResponse);
         Assert.Contains("[Tool Request]", collectedResponse);

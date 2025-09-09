@@ -16,7 +16,7 @@ public class LlmLexer
     private readonly ILogger<LlmLexer>? _logger;
     private readonly List<TokenPattern> _patterns;
     private readonly List<LexicalError> _errors = new();
-    
+
     // Pre-compiled regex patterns for efficiency
     private static readonly Dictionary<TokenType, Regex> CompiledPatterns = new()
     {
@@ -53,15 +53,15 @@ public class LlmLexer
         var position = 0;
         var line = 1;
         var column = 1;
-        
+
         _errors.Clear();
-        
+
         while (position < input.Length)
         {
             var matched = false;
             var bestMatch = (Token?)null;
             var bestLength = 0;
-            
+
             // Try to match patterns at current position
             foreach (var pattern in _patterns.OrderByDescending(p => p.Priority))
             {
@@ -73,7 +73,7 @@ public class LlmLexer
                     matched = true;
                 }
             }
-            
+
             if (matched && bestMatch != null)
             {
                 tokens.Add(bestMatch);
@@ -88,9 +88,9 @@ public class LlmLexer
                     Line = line,
                     Column = column
                 };
-                
+
                 tokens.Add(unknownToken);
-                
+
                 _errors.Add(new LexicalError
                 {
                     Position = position,
@@ -99,18 +99,18 @@ public class LlmLexer
                     Message = $"Unexpected character: '{unknownChar}'",
                     Context = GetContext(input, position)
                 });
-                
+
                 UpdatePosition(input, ref position, ref line, ref column, 1);
             }
         }
-        
+
         // Add EOF token
         tokens.Add(new Token(TokenType.Eof, "", position)
         {
             Line = line,
             Column = column
         });
-        
+
         return new LexerResult
         {
             Tokens = tokens,
@@ -127,16 +127,16 @@ public class LlmLexer
         // Similar to how Roslyn handles incremental parsing
         var fullText = state.Buffer + chunk;
         var tokens = new List<Token>();
-        
+
         // Try to tokenize as much as possible
         var result = Tokenize(fullText);
-        
+
         // Determine which tokens are complete
         foreach (var token in result.Tokens)
         {
             if (token.Type == TokenType.Eof)
                 continue;
-            
+
             // Check if token is likely complete
             if (IsTokenComplete(token, fullText))
             {
@@ -149,7 +149,7 @@ public class LlmLexer
                 break;
             }
         }
-        
+
         // Update buffer with remaining text
         state.Buffer = fullText.Substring(state.LastCompletePosition);
     }
@@ -157,7 +157,7 @@ public class LlmLexer
     private (Token?, int) TryMatchPattern(string input, int position, int line, int column, TokenPattern pattern)
     {
         var remaining = input.Substring(position);
-        
+
         if (pattern.CustomTokenizer != null)
         {
             try
@@ -176,7 +176,7 @@ public class LlmLexer
                 _logger?.LogDebug(ex, "Custom tokenizer failed for {Type}", pattern.Type);
             }
         }
-        
+
         if (pattern.IsRegex && CompiledPatterns.TryGetValue(pattern.Type, out var regex))
         {
             var match = regex.Match(remaining);
@@ -187,10 +187,10 @@ public class LlmLexer
                     Line = line,
                     Column = column
                 };
-                
+
                 // Extract metadata for certain token types
                 ExtractTokenMetadata(token, match);
-                
+
                 return (token, match.Length);
             }
         }
@@ -206,7 +206,7 @@ public class LlmLexer
                 return (token, pattern.Pattern.Length);
             }
         }
-        
+
         return (null, 0);
     }
 
@@ -225,7 +225,7 @@ public class LlmLexer
                     }
                 }
                 break;
-                
+
             case TokenType.CodeBlockStart:
                 // Extract language
                 if (match.Groups.Count > 1)
@@ -262,11 +262,11 @@ public class LlmLexer
                 // Need matching end
                 var codeBlockEnd = fullText.IndexOf("```", token.Position + token.Length);
                 return codeBlockEnd != -1;
-                
+
             case TokenType.JsonObjectStart:
                 // Need balanced braces
                 return IsJsonBalanced(fullText, token.Position);
-                
+
             default:
                 return true;
         }
@@ -277,7 +277,7 @@ public class LlmLexer
         var depth = 0;
         var inString = false;
         var escape = false;
-        
+
         for (int i = start; i < text.Length; i++)
         {
             if (escape)
@@ -285,21 +285,21 @@ public class LlmLexer
                 escape = false;
                 continue;
             }
-            
+
             var c = text[i];
-            
+
             if (c == '\\')
             {
                 escape = true;
                 continue;
             }
-            
+
             if (c == '"')
             {
                 inString = !inString;
                 continue;
             }
-            
+
             if (!inString)
             {
                 if (c == '{' || c == '[')
@@ -312,7 +312,7 @@ public class LlmLexer
                 }
             }
         }
-        
+
         return false;
     }
 
@@ -361,15 +361,15 @@ public class LlmLexer
         // Match any text until a special character or pattern
         var sb = new StringBuilder();
         var i = 0;
-        
+
         while (i < input.Length)
         {
             var c = input[i];
-            
+
             // Stop at potential special patterns
             if (c == '`' || c == '{' || c == '[' || c == '*' || c == '#')
                 break;
-            
+
             // Stop at newlines for better incremental processing
             if (c == '\n')
             {
@@ -377,16 +377,16 @@ public class LlmLexer
                     break;
                 return new Token(TokenType.Newline, "\n", 0) { Length = 1 };
             }
-            
+
             sb.Append(c);
             i++;
         }
-        
+
         if (sb.Length > 0)
         {
             return new Token(TokenType.Text, sb.ToString(), 0);
         }
-        
+
         return null;
     }
 }

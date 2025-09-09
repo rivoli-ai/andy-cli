@@ -49,11 +49,11 @@ public class AndyLlmIntegrationTests
         Assert.NotNull(request);
         Assert.NotNull(request.Messages);
         Assert.Equal(3, request.Messages.Count); // 3 conversation messages (system is in SystemPrompt)
-        
+
         // Check system prompt
         Assert.NotNull(request.SystemPrompt);
         Assert.Equal("You are a helpful AI assistant.", request.SystemPrompt);
-        
+
         // Check conversation messages
         var userMessages = request.Messages.Where(m => m.Role == MessageRole.User).ToList();
         Assert.Equal(2, userMessages.Count);
@@ -63,7 +63,7 @@ public class AndyLlmIntegrationTests
         var userTextPart2 = userMessages[1].Parts.OfType<TextPart>().FirstOrDefault();
         Assert.NotNull(userTextPart2);
         Assert.Equal("How are you?", userTextPart2.Text);
-        
+
         var assistantMessage = request.Messages.FirstOrDefault(m => m.Role == MessageRole.Assistant);
         Assert.NotNull(assistantMessage);
         var assistantTextPart = assistantMessage.Parts.OfType<TextPart>().FirstOrDefault();
@@ -93,13 +93,13 @@ public class AndyLlmIntegrationTests
         Assert.Equal("llama3.1-8b", request.Model);
         Assert.Equal(100, request.MaxTokens);
         Assert.Equal(0.7, request.Temperature);
-        
+
         var systemMessage = request.Messages.FirstOrDefault(m => m.Role == MessageRole.System);
         Assert.NotNull(systemMessage);
         var systemTextPart2 = systemMessage.Parts.OfType<TextPart>().FirstOrDefault();
         Assert.NotNull(systemTextPart2);
         Assert.Equal("You are a helpful assistant.", systemTextPart2.Text);
-        
+
         var userMessage = request.Messages.FirstOrDefault(m => m.Role == MessageRole.User);
         Assert.NotNull(userMessage);
         var userTextPart3 = userMessage.Parts.OfType<TextPart>().FirstOrDefault();
@@ -132,7 +132,7 @@ public class AndyLlmIntegrationTests
         // System message + 3 conversation pairs = 7 total, but limited to 3 context messages
         // So we should have system + 3 messages = 4 total
         Assert.True(request.Messages.Count <= 4, $"Expected at most 4 messages, got {request.Messages.Count}");
-        
+
         // The most recent messages should be preserved
         var userMessages = request.Messages.Where(m => m.Role == MessageRole.User).ToList();
         var userTexts = userMessages.Select(m => m.Parts.OfType<TextPart>().FirstOrDefault()?.Text).Where(t => t != null).ToList();

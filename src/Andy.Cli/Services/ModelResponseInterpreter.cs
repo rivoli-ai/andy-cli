@@ -16,17 +16,17 @@ public interface IModelResponseInterpreter
     /// Extract tool calls from the model's response
     /// </summary>
     List<ModelToolCall> ExtractToolCalls(string response, string modelName, string provider);
-    
+
     /// <summary>
     /// Format tool results for sending back to the model
     /// </summary>
     string FormatToolResults(List<ModelToolCall> toolCalls, List<string> results, string modelName, string provider);
-    
+
     /// <summary>
     /// Check if the response contains fake tool results
     /// </summary>
     bool ContainsFakeToolResults(string response, string modelName);
-    
+
     /// <summary>
     /// Clean response text for display
     /// </summary>
@@ -36,7 +36,7 @@ public interface IModelResponseInterpreter
 public class ModelResponseInterpreter : IModelResponseInterpreter
 {
     private readonly Dictionary<string, IModelInterpreter> _interpreters;
-    
+
     public ModelResponseInterpreter()
     {
         _interpreters = new Dictionary<string, IModelInterpreter>(StringComparer.OrdinalIgnoreCase)
@@ -54,35 +54,35 @@ public class ModelResponseInterpreter : IModelResponseInterpreter
             ["phi"] = new PhiInterpreter(),
         };
     }
-    
+
     public List<ModelToolCall> ExtractToolCalls(string response, string modelName, string provider)
     {
         var interpreter = GetInterpreter(modelName);
         return interpreter.ExtractToolCalls(response);
     }
-    
+
     public string FormatToolResults(List<ModelToolCall> toolCalls, List<string> results, string modelName, string provider)
     {
         var interpreter = GetInterpreter(modelName);
         return interpreter.FormatToolResults(toolCalls, results);
     }
-    
+
     public bool ContainsFakeToolResults(string response, string modelName)
     {
         var interpreter = GetInterpreter(modelName);
         return interpreter.ContainsFakeToolResults(response);
     }
-    
+
     public string CleanResponseForDisplay(string response, string modelName)
     {
         var interpreter = GetInterpreter(modelName);
         return interpreter.CleanResponseForDisplay(response);
     }
-    
+
     private IModelInterpreter GetInterpreter(string modelName)
     {
         modelName = modelName?.ToLowerInvariant() ?? "";
-        
+
         // Try to match by prefix
         foreach (var kvp in _interpreters)
         {
@@ -91,7 +91,7 @@ public class ModelResponseInterpreter : IModelResponseInterpreter
                 return kvp.Value;
             }
         }
-        
+
         // Default to GPT interpreter for unknown models
         return _interpreters["gpt"];
     }
@@ -115,18 +115,18 @@ internal abstract class BaseModelInterpreter : IModelInterpreter
 {
     public abstract List<ModelToolCall> ExtractToolCalls(string response);
     public abstract string FormatToolResults(List<ModelToolCall> toolCalls, List<string> results);
-    
+
     public virtual bool ContainsFakeToolResults(string response)
     {
         return response.Contains("[Tool Results]", StringComparison.OrdinalIgnoreCase) ||
                response.Contains("Tool execution result", StringComparison.OrdinalIgnoreCase);
     }
-    
+
     public virtual string CleanResponseForDisplay(string response)
     {
         // Remove special tags used by various models
         response = RemoveSpecialTags(response);
-        
+
         // Remove common internal thoughts
         var patterns = new[]
         {
@@ -136,15 +136,15 @@ internal abstract class BaseModelInterpreter : IModelInterpreter
             @"I'm going to.*?\.",
             @"Now I'll.*?\.",
         };
-        
+
         foreach (var pattern in patterns)
         {
             response = Regex.Replace(response, pattern, "", RegexOptions.IgnoreCase);
         }
-        
+
         return response.Trim();
     }
-    
+
     /// <summary>
     /// Remove special tags like <thinking>, <reflection>, etc.
     /// </summary>
@@ -163,33 +163,33 @@ internal abstract class BaseModelInterpreter : IModelInterpreter
             "thought",      // Thought process
             "analysis"      // Analysis tags
         };
-        
+
         foreach (var tag in tagsToRemove)
         {
             // Remove both self-closing and paired tags
             response = Regex.Replace(response, $@"<{tag}[^>]*?/>", "", RegexOptions.IgnoreCase | RegexOptions.Singleline);
             response = Regex.Replace(response, $@"<{tag}[^>]*?>.*?</{tag}>", "", RegexOptions.IgnoreCase | RegexOptions.Singleline);
         }
-        
+
         return response;
     }
-    
+
     protected ModelToolCall? ParseToolCallJson(string json)
     {
         try
         {
             var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
-            
+
             if (!root.TryGetProperty("tool", out var toolElement))
                 return null;
-                
+
             var toolId = toolElement.GetString();
             if (string.IsNullOrEmpty(toolId))
                 return null;
-                
+
             var parameters = new Dictionary<string, object?>();
-            
+
             if (root.TryGetProperty("parameters", out var paramsElement))
             {
                 foreach (var prop in paramsElement.EnumerateObject())
@@ -197,7 +197,7 @@ internal abstract class BaseModelInterpreter : IModelInterpreter
                     parameters[prop.Name] = ParseJsonValue(prop.Value);
                 }
             }
-            
+
             return new ModelToolCall
             {
                 ToolId = toolId,
@@ -209,7 +209,7 @@ internal abstract class BaseModelInterpreter : IModelInterpreter
             return null;
         }
     }
-    
+
     protected object? ParseJsonValue(JsonElement element)
     {
         return element.ValueKind switch
@@ -234,12 +234,12 @@ internal class LlamaInterpreter : BaseModelInterpreter
     public override List<ModelToolCall> ExtractToolCalls(string response)
     {
         var toolCalls = new List<ModelToolCall>();
-        
+
         // Llama typically uses clean JSON format
         // Look for JSON blocks
         var jsonPattern = @"```json\s*(\{.*?\})\s*```";
         var matches = Regex.Matches(response, jsonPattern, RegexOptions.Singleline);
-        
+
         foreach (Match match in matches)
         {
             var json = match.Groups[1].Value;
@@ -249,13 +249,13 @@ internal class LlamaInterpreter : BaseModelInterpreter
                 toolCalls.Add(toolCall);
             }
         }
-        
+
         // Also try direct JSON if no code blocks found
         if (toolCalls.Count == 0)
         {
             var directJsonPattern = @"\{[^{}]*""tool""\s*:\s*""[^""]+""[^{}]*\}";
             matches = Regex.Matches(response, directJsonPattern);
-            
+
             foreach (Match match in matches)
             {
                 var toolCall = ParseToolCallJson(match.Value);
@@ -265,10 +265,10 @@ internal class LlamaInterpreter : BaseModelInterpreter
                 }
             }
         }
-        
+
         return toolCalls;
     }
-    
+
     public override string FormatToolResults(List<ModelToolCall> toolCalls, List<string> results)
     {
         // Llama expects simple format
@@ -289,21 +289,21 @@ internal class QwenInterpreter : BaseModelInterpreter
     public override List<ModelToolCall> ExtractToolCalls(string response)
     {
         var toolCalls = new List<ModelToolCall>();
-        
+
         // Primary: Qwen SHOULD use <tool_call> tags
         var toolCallPattern = @"<tool_call>\s*(\{.*?\})\s*</tool_call>";
         var matches = Regex.Matches(response, toolCallPattern, RegexOptions.Singleline);
-        
+
         foreach (Match match in matches)
         {
             var json = match.Groups[1].Value;
-            
+
             // Parse the Qwen-specific format: {"name": "function_name", "arguments": {...}}
             try
             {
                 var doc = JsonDocument.Parse(json);
                 var root = doc.RootElement;
-                
+
                 if (root.TryGetProperty("name", out var nameElement) &&
                     root.TryGetProperty("arguments", out var argsElement))
                 {
@@ -312,7 +312,7 @@ internal class QwenInterpreter : BaseModelInterpreter
                         ToolId = nameElement.GetString() ?? "",
                         Parameters = new Dictionary<string, object?>()
                     };
-                    
+
                     // Parse arguments
                     if (argsElement.ValueKind == JsonValueKind.Object)
                     {
@@ -334,7 +334,7 @@ internal class QwenInterpreter : BaseModelInterpreter
                             }
                         }
                     }
-                    
+
                     toolCalls.Add(toolCall);
                 }
             }
@@ -343,7 +343,7 @@ internal class QwenInterpreter : BaseModelInterpreter
                 // Try fallback patterns if primary format fails
             }
         }
-        
+
         // Fallback: Qwen sometimes uses the generic format
         if (toolCalls.Count == 0)
         {
@@ -351,12 +351,12 @@ internal class QwenInterpreter : BaseModelInterpreter
             // This pattern now properly handles empty parameters {}
             var genericPattern = @"\{\s*""tool""\s*:\s*""([^""]+)""\s*,\s*""parameters""\s*:\s*(\{[^}]*\})\s*\}";
             matches = Regex.Matches(response, genericPattern, RegexOptions.Singleline);
-            
+
             foreach (Match match in matches)
             {
                 var toolId = match.Groups[1].Value;
                 var paramsJson = match.Groups[2].Value;
-                
+
                 try
                 {
                     var toolCall = new ModelToolCall
@@ -364,7 +364,7 @@ internal class QwenInterpreter : BaseModelInterpreter
                         ToolId = toolId,
                         Parameters = new Dictionary<string, object?>()
                     };
-                    
+
                     // Parse parameters if not empty
                     if (paramsJson != null && paramsJson.Trim() != "{}")
                     {
@@ -374,7 +374,7 @@ internal class QwenInterpreter : BaseModelInterpreter
                             toolCall.Parameters[prop.Name] = ParseJsonValue(prop.Value);
                         }
                     }
-                    
+
                     toolCalls.Add(toolCall);
                 }
                 catch
@@ -383,7 +383,7 @@ internal class QwenInterpreter : BaseModelInterpreter
                 }
             }
         }
-        
+
         // Final fallback: try other patterns
         if (toolCalls.Count == 0)
         {
@@ -392,7 +392,7 @@ internal class QwenInterpreter : BaseModelInterpreter
                 @"`+json?\s*(\{.*?\})\s*`+",  // Backticks with optional json marker
                 @"```json\s*(\{.*?\})\s*```",  // Triple backticks with json marker
             };
-            
+
             foreach (var pattern in patterns)
             {
                 matches = Regex.Matches(response, pattern, RegexOptions.Singleline);
@@ -406,15 +406,15 @@ internal class QwenInterpreter : BaseModelInterpreter
                         break;
                     }
                 }
-                
+
                 if (toolCalls.Count > 0)
                     break;
             }
         }
-        
+
         return toolCalls;
     }
-    
+
     public override string FormatToolResults(List<ModelToolCall> toolCalls, List<string> results)
     {
         // Qwen needs cleaner tool results without JSON formatting
@@ -423,7 +423,7 @@ internal class QwenInterpreter : BaseModelInterpreter
         for (int i = 0; i < toolCalls.Count && i < results.Count; i++)
         {
             var result = results[i];
-            
+
             // Try to simplify JSON results for Qwen
             if (result.TrimStart().StartsWith("{") || result.TrimStart().StartsWith("["))
             {
@@ -433,7 +433,7 @@ internal class QwenInterpreter : BaseModelInterpreter
                     var doc = System.Text.Json.JsonDocument.Parse(result);
                     var simplified = new System.Text.StringBuilder();
                     simplified.AppendLine($"[{toolCalls[i].ToolId} completed successfully]");
-                    
+
                     // Extract key information if possible
                     if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object)
                     {
@@ -475,7 +475,7 @@ internal class QwenInterpreter : BaseModelInterpreter
         }
         return string.Join("\n\n", formatted);
     }
-    
+
     public override string CleanResponseForDisplay(string response)
     {
         // Remove escaped JSON output that Qwen sometimes produces
@@ -487,62 +487,62 @@ internal class QwenInterpreter : BaseModelInterpreter
             response = Regex.Replace(response, @"\\u[0-9a-fA-F]{4}", "", RegexOptions.Singleline);
             response = Regex.Replace(response, @"\\n", "\n", RegexOptions.Singleline);
             response = Regex.Replace(response, @"\\""", "\"", RegexOptions.Singleline);
-            
+
             // If the entire response is escaped JSON, clear it
             if (response.Trim().StartsWith("\"") && response.Trim().EndsWith("\""))
             {
                 response = "";
             }
         }
-        
+
         // Remove [Tool Results] and any JSON that follows it - Qwen sometimes outputs fake results
         if (response.Contains("[Tool Results]", StringComparison.OrdinalIgnoreCase))
         {
-            response = Regex.Replace(response, @"\[Tool Results\][\s\S]*?(?=\n\n[A-Za-z]|\z)", "", 
+            response = Regex.Replace(response, @"\[Tool Results\][\s\S]*?(?=\n\n[A-Za-z]|\z)", "",
                 RegexOptions.IgnoreCase);
         }
-        
+
         // Remove tool_call tags and their content
         response = Regex.Replace(response, @"<tool_call>.*?</tool_call>", "", RegexOptions.Singleline);
-        
+
         // Remove the generic tool format that Qwen sometimes outputs directly
         // This is the format: {"tool":"...","parameters":{...}}
-        response = Regex.Replace(response, @"\{\s*""tool""\s*:\s*""[^""]+""\s*,\s*""parameters""\s*:\s*\{[^}]*\}\s*\}", "", 
+        response = Regex.Replace(response, @"\{\s*""tool""\s*:\s*""[^""]+""\s*,\s*""parameters""\s*:\s*\{[^}]*\}\s*\}", "",
             RegexOptions.Singleline);
-        
+
         // Remove the duplicated JSON that Qwen sometimes outputs
         response = Regex.Replace(response, @"`+json?\s*\{.*?\}\s*`+", "", RegexOptions.Singleline);
         response = Regex.Replace(response, @"```json\s*\{.*?\}\s*```", "", RegexOptions.Singleline);
-        
+
         // Remove instructional reminders that Qwen sometimes includes
         // Remove "Please remember to use..." paragraphs
-        response = Regex.Replace(response, @"Please remember to use.*?(?=\n\n|\z)", "", 
+        response = Regex.Replace(response, @"Please remember to use.*?(?=\n\n|\z)", "",
             RegexOptions.Singleline | RegexOptions.IgnoreCase);
-        
+
         // Remove tool format examples that start with backticks
-        response = Regex.Replace(response, @"`\s*\{[^`]*""tool""\s*:[^`]*\}\s*`", "", 
+        response = Regex.Replace(response, @"`\s*\{[^`]*""tool""\s*:[^`]*\}\s*`", "",
             RegexOptions.Singleline);
-        
+
         // Remove "Go ahead and get started" type phrases
-        response = Regex.Replace(response, @"Go ahead and get started[!.]?", "", 
+        response = Regex.Replace(response, @"Go ahead and get started[!.]?", "",
             RegexOptions.IgnoreCase);
-        
+
         // Remove "For example, if you want to..." instructional sentences
-        response = Regex.Replace(response, @"For example,? if you want to.*?(?:\.|$)", "", 
+        response = Regex.Replace(response, @"For example,? if you want to.*?(?:\.|$)", "",
             RegexOptions.Singleline | RegexOptions.IgnoreCase);
-        
+
         // Remove "Please wait for the results..." that Qwen adds after tool calls
-        response = Regex.Replace(response, @"Please wait for the results\.{3,}", "", 
+        response = Regex.Replace(response, @"Please wait for the results\.{3,}", "",
             RegexOptions.IgnoreCase);
-        
+
         // Clean up any double line breaks left behind
         response = Regex.Replace(response, @"\n{3,}", "\n\n");
-        
+
         // IMPORTANT: Remove duplicate paragraphs that Qwen sometimes outputs
         response = RemoveDuplicateParagraphs(response);
-        
+
         var cleaned = base.CleanResponseForDisplay(response).Trim();
-        
+
         // If the response is ONLY a tool call (no other text), return a default message
         if (string.IsNullOrWhiteSpace(cleaned))
         {
@@ -554,10 +554,10 @@ internal class QwenInterpreter : BaseModelInterpreter
                 return "";
             }
         }
-        
+
         return cleaned;
     }
-    
+
     private string RemoveDuplicateParagraphs(string text)
     {
         // First, handle the specific pattern where Qwen duplicates partial lines
@@ -565,7 +565,7 @@ internal class QwenInterpreter : BaseModelInterpreter
         var lines = text.Split('\n');
         var cleanedLines = new List<string>();
         string previousLine = "";
-        
+
         foreach (var line in lines)
         {
             // Skip if this line is identical to the previous one
@@ -573,43 +573,43 @@ internal class QwenInterpreter : BaseModelInterpreter
             {
                 continue;
             }
-            
+
             // Skip if this line starts with the same content as the previous line
             // (handles the case where text is duplicated mid-word)
-            if (!string.IsNullOrWhiteSpace(previousLine) && 
+            if (!string.IsNullOrWhiteSpace(previousLine) &&
                 !string.IsNullOrWhiteSpace(line) &&
-                line.Length > 50 && 
+                line.Length > 50 &&
                 previousLine.Length > 50 &&
                 line.StartsWith(previousLine.Substring(0, Math.Min(50, previousLine.Length))))
             {
                 // This might be a duplicate
                 continue;
             }
-            
+
             cleanedLines.Add(line);
             previousLine = line;
         }
-        
+
         text = string.Join("\n", cleanedLines);
-        
+
         // Now handle paragraph-level duplicates
         var paragraphs = text.Split(new[] { "\n\n" }, StringSplitOptions.RemoveEmptyEntries);
         var uniqueParagraphs = new List<string>();
         var seenParagraphs = new HashSet<string>(StringComparer.Ordinal);
-        
+
         foreach (var paragraph in paragraphs)
         {
             var trimmed = paragraph.Trim();
             // Normalize internal line breaks for comparison
             var normalized = Regex.Replace(trimmed, @"\s+", " ");
-            
+
             if (!string.IsNullOrWhiteSpace(trimmed) && !seenParagraphs.Contains(normalized))
             {
                 uniqueParagraphs.Add(trimmed);
                 seenParagraphs.Add(normalized);
             }
         }
-        
+
         return string.Join("\n\n", uniqueParagraphs);
     }
 }
@@ -622,11 +622,11 @@ internal class GptInterpreter : BaseModelInterpreter
     public override List<ModelToolCall> ExtractToolCalls(string response)
     {
         var toolCalls = new List<ModelToolCall>();
-        
+
         // GPT uses clean JSON in code blocks
         var jsonPattern = @"```json\s*(\{.*?\})\s*```";
         var matches = Regex.Matches(response, jsonPattern, RegexOptions.Singleline);
-        
+
         foreach (Match match in matches)
         {
             var json = match.Groups[1].Value;
@@ -636,10 +636,10 @@ internal class GptInterpreter : BaseModelInterpreter
                 toolCalls.Add(toolCall);
             }
         }
-        
+
         return toolCalls;
     }
-    
+
     public override string FormatToolResults(List<ModelToolCall> toolCalls, List<string> results)
     {
         // GPT expects structured format
@@ -660,11 +660,11 @@ internal class ClaudeInterpreter : BaseModelInterpreter
     public override List<ModelToolCall> ExtractToolCalls(string response)
     {
         var toolCalls = new List<ModelToolCall>();
-        
+
         // Claude uses <tool_use> tags or JSON blocks
         var toolUsePattern = @"<tool_use>\s*(\{.*?\})\s*</tool_use>";
         var matches = Regex.Matches(response, toolUsePattern, RegexOptions.Singleline);
-        
+
         foreach (Match match in matches)
         {
             var json = match.Groups[1].Value;
@@ -674,13 +674,13 @@ internal class ClaudeInterpreter : BaseModelInterpreter
                 toolCalls.Add(toolCall);
             }
         }
-        
+
         // Fallback to JSON blocks
         if (toolCalls.Count == 0)
         {
             var jsonPattern = @"```json\s*(\{.*?\})\s*```";
             matches = Regex.Matches(response, jsonPattern, RegexOptions.Singleline);
-            
+
             foreach (Match match in matches)
             {
                 var json = match.Groups[1].Value;
@@ -691,10 +691,10 @@ internal class ClaudeInterpreter : BaseModelInterpreter
                 }
             }
         }
-        
+
         return toolCalls;
     }
-    
+
     public override string FormatToolResults(List<ModelToolCall> toolCalls, List<string> results)
     {
         // Claude expects tool_result format
@@ -717,7 +717,7 @@ internal class GeminiInterpreter : BaseModelInterpreter
         // Similar to GPT
         return new GptInterpreter().ExtractToolCalls(response);
     }
-    
+
     public override string FormatToolResults(List<ModelToolCall> toolCalls, List<string> results)
     {
         // Similar to GPT
@@ -735,7 +735,7 @@ internal class MistralInterpreter : BaseModelInterpreter
         // Similar to Llama
         return new LlamaInterpreter().ExtractToolCalls(response);
     }
-    
+
     public override string FormatToolResults(List<ModelToolCall> toolCalls, List<string> results)
     {
         // Similar to Llama
@@ -753,7 +753,7 @@ internal class DeepseekInterpreter : BaseModelInterpreter
         // Similar to Qwen for code models
         return new QwenInterpreter().ExtractToolCalls(response);
     }
-    
+
     public override string FormatToolResults(List<ModelToolCall> toolCalls, List<string> results)
     {
         // Similar to Qwen
@@ -771,7 +771,7 @@ internal class GemmaInterpreter : BaseModelInterpreter
         // Similar to Llama
         return new LlamaInterpreter().ExtractToolCalls(response);
     }
-    
+
     public override string FormatToolResults(List<ModelToolCall> toolCalls, List<string> results)
     {
         // Similar to Llama
@@ -789,7 +789,7 @@ internal class O1Interpreter : GptInterpreter
         // o1 models use <thinking> tags extensively
         // First remove thinking tags specifically
         response = Regex.Replace(response, @"<thinking>.*?</thinking>", "", RegexOptions.IgnoreCase | RegexOptions.Singleline);
-        
+
         // Then apply base tag removal
         return base.RemoveSpecialTags(response);
     }
@@ -805,7 +805,7 @@ internal class PhiInterpreter : BaseModelInterpreter
         // Phi models typically use clean JSON similar to GPT
         return new GptInterpreter().ExtractToolCalls(response);
     }
-    
+
     public override string FormatToolResults(List<ModelToolCall> toolCalls, List<string> results)
     {
         return new GptInterpreter().FormatToolResults(toolCalls, results);

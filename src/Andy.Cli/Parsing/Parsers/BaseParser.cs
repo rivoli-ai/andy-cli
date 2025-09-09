@@ -16,20 +16,20 @@ public abstract class BaseParser : ILlmResponseParser
 {
     protected readonly ILogger? _logger;
     protected readonly IJsonRepairService _jsonRepair;
-    
+
     // Common patterns for semantic extraction
     protected static readonly Regex FilePathPattern = new(
         @"(?:^|\s|[""\'\(])(?<path>(?:[a-zA-Z]:)?(?:[/\\][\w\-\.]+)+(?:\.\w+)?(?::\d+(?:-\d+)?)?)",
         RegexOptions.Compiled | RegexOptions.Multiline);
-    
+
     protected static readonly Regex CodeBlockPattern = new(
         @"```(?<lang>\w+)?\s*\n(?<code>.*?)\n```",
         RegexOptions.Compiled | RegexOptions.Singleline);
-    
+
     protected static readonly Regex QuestionPattern = new(
         @"(?:^|\n)(?<question>(?:What|How|Why|When|Where|Who|Which|Would|Should|Can|Could|Do|Does|Is|Are)[^.!?]*\?)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Multiline);
-    
+
     protected static readonly Regex CommandPattern = new(
         @"(?:^|\n)\s*(?:\$|>|#)\s*(?<command>[\w\-]+(?:\s+[^\n]+)?)",
         RegexOptions.Compiled | RegexOptions.Multiline);
@@ -41,7 +41,7 @@ public abstract class BaseParser : ILlmResponseParser
     }
 
     public abstract ResponseNode Parse(string response, ParserContext? context = null);
-    
+
     public virtual async Task<ResponseNode> ParseStreamingAsync(
         IAsyncEnumerable<string> chunks,
         ParserContext? context = null,
@@ -55,11 +55,11 @@ public abstract class BaseParser : ILlmResponseParser
         }
         return Parse(fullResponse, context);
     }
-    
+
     public virtual ValidationResult Validate(ResponseNode ast)
     {
         var issues = new List<ValidationIssue>();
-        
+
         // Validate tool calls have required fields
         var toolCalls = FindNodes<ToolCallNode>(ast);
         foreach (var toolCall in toolCalls)
@@ -73,7 +73,7 @@ public abstract class BaseParser : ILlmResponseParser
                     Node = toolCall
                 });
             }
-            
+
             if (string.IsNullOrEmpty(toolCall.CallId))
             {
                 issues.Add(new ValidationIssue
@@ -84,7 +84,7 @@ public abstract class BaseParser : ILlmResponseParser
                 });
             }
         }
-        
+
         // Validate code blocks have language specified
         var codeBlocks = FindNodes<CodeNode>(ast);
         foreach (var code in codeBlocks)
@@ -99,14 +99,14 @@ public abstract class BaseParser : ILlmResponseParser
                 });
             }
         }
-        
+
         return issues.Any(i => i.Severity == ValidationSeverity.Error)
             ? ValidationResult.Failure(issues.ToArray())
             : ValidationResult.Success();
     }
-    
+
     public abstract ParserCapabilities GetCapabilities();
-    
+
     /// <summary>
     /// Extract semantic elements from text
     /// </summary>
@@ -114,7 +114,7 @@ public abstract class BaseParser : ILlmResponseParser
     {
         if (context?.ExtractSemantics != true)
             return;
-        
+
         // Extract file references
         var fileMatches = FilePathPattern.Matches(text);
         foreach (Match match in fileMatches)
@@ -128,7 +128,7 @@ public abstract class BaseParser : ILlmResponseParser
                 StartPosition = match.Index,
                 EndPosition = match.Index + match.Length
             };
-            
+
             // Check for line number reference
             if (path.Contains(':'))
             {
@@ -139,10 +139,10 @@ public abstract class BaseParser : ILlmResponseParser
                     fileRef.LineReference = ":" + parts[^1];
                 }
             }
-            
+
             root.Children.Add(fileRef);
         }
-        
+
         // Extract questions
         var questionMatches = QuestionPattern.Matches(text);
         foreach (Match match in questionMatches)
@@ -156,7 +156,7 @@ public abstract class BaseParser : ILlmResponseParser
             };
             root.Children.Add(question);
         }
-        
+
         // Extract commands
         var commandMatches = CommandPattern.Matches(text);
         foreach (Match match in commandMatches)
@@ -170,7 +170,7 @@ public abstract class BaseParser : ILlmResponseParser
             root.Children.Add(command);
         }
     }
-    
+
     /// <summary>
     /// Extract code blocks from text
     /// </summary>
@@ -178,7 +178,7 @@ public abstract class BaseParser : ILlmResponseParser
     {
         var codeBlocks = new List<CodeNode>();
         var matches = CodeBlockPattern.Matches(text);
-        
+
         foreach (Match match in matches)
         {
             var codeBlock = new CodeNode
@@ -189,7 +189,7 @@ public abstract class BaseParser : ILlmResponseParser
                 StartPosition = match.Index,
                 EndPosition = match.Index + match.Length
             };
-            
+
             // Try to extract filename from comment
             var firstLine = codeBlock.Code.Split('\n').FirstOrDefault() ?? "";
             if (firstLine.StartsWith("//") || firstLine.StartsWith("#"))
@@ -200,13 +200,13 @@ public abstract class BaseParser : ILlmResponseParser
                     codeBlock.FileName = fileMatch.Groups[1].Value;
                 }
             }
-            
+
             codeBlocks.Add(codeBlock);
         }
-        
+
         return codeBlocks;
     }
-    
+
     /// <summary>
     /// Find all nodes of a specific type in the AST
     /// </summary>
@@ -220,7 +220,7 @@ public abstract class BaseParser : ILlmResponseParser
         });
         return results;
     }
-    
+
     /// <summary>
     /// Traverse all nodes in the AST
     /// </summary>
@@ -232,13 +232,13 @@ public abstract class BaseParser : ILlmResponseParser
             TraverseNodes(child, action);
         }
     }
-    
+
     private FileReferenceType DetermineFileReferenceType(string text, int position)
     {
         // Look at surrounding context to determine reference type
         var start = Math.Max(0, position - 50);
         var context = text.Substring(start, Math.Min(100, text.Length - start)).ToLower();
-        
+
         if (context.Contains("create") || context.Contains("new file"))
             return FileReferenceType.Create;
         if (context.Contains("write") || context.Contains("save"))
@@ -251,33 +251,33 @@ public abstract class BaseParser : ILlmResponseParser
             return FileReferenceType.Modify;
         if (context.Contains("navigate") || context.Contains("go to"))
             return FileReferenceType.Navigate;
-        
+
         return FileReferenceType.Mention;
     }
-    
+
     private QuestionType DetermineQuestionType(string question)
     {
         var lower = question.ToLower();
-        
-        if (lower.Contains("yes") || lower.Contains("no") || 
+
+        if (lower.Contains("yes") || lower.Contains("no") ||
             lower.StartsWith("is ") || lower.StartsWith("are ") ||
             lower.StartsWith("do ") || lower.StartsWith("does ") ||
             lower.StartsWith("can ") || lower.StartsWith("could ") ||
             lower.StartsWith("should ") || lower.StartsWith("would "))
             return QuestionType.YesNo;
-        
+
         if (lower.Contains("which") || lower.Contains("choose") || lower.Contains("option"))
             return QuestionType.MultipleChoice;
-        
+
         if (lower.Contains("confirm") || lower.Contains("sure") || lower.Contains("ok"))
             return QuestionType.Confirmation;
-        
+
         if (lower.Contains("clarify") || lower.Contains("mean") || lower.Contains("specifically"))
             return QuestionType.Clarification;
-        
+
         return QuestionType.OpenEnded;
     }
-    
+
     private bool IsExecutableLanguage(string language)
     {
         var lang = language.ToLower();

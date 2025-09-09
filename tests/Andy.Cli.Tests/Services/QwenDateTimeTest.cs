@@ -24,7 +24,7 @@ public class QwenDateTimeTest
 
         var toolCalls = _interpreter.ExtractToolCalls(response, "qwen-3-coder-480b", "cerebras");
         _output.WriteLine($"Tool calls found: {toolCalls.Count}");
-        
+
         if (toolCalls.Any())
         {
             foreach (var tc in toolCalls)
@@ -36,13 +36,13 @@ public class QwenDateTimeTest
                 }
             }
         }
-        
+
         Assert.Single(toolCalls);
         Assert.Equal("datetime_tool", toolCalls[0].ToolId);
         Assert.Single(toolCalls[0].Parameters);
         Assert.Equal("get_current_time", toolCalls[0].Parameters["operation"]);
     }
-    
+
     [Fact]
     public void QwenModel_HelloWithDateTime_ShouldExtractAndClean()
     {
@@ -53,14 +53,14 @@ public class QwenDateTimeTest
 
         var toolCalls = _interpreter.ExtractToolCalls(response, "qwen-3-coder-480b", "cerebras");
         _output.WriteLine($"Tool calls found: {toolCalls.Count}");
-        
+
         Assert.Single(toolCalls);
         Assert.Equal("datetime_tool", toolCalls[0].ToolId);
         Assert.Equal("get_current_time", toolCalls[0].Parameters["operation"]);
-        
+
         var cleaned = _interpreter.CleanResponseForDisplay(response, "qwen-3-coder-480b");
         _output.WriteLine($"Cleaned: '{cleaned}'");
-        
+
         Assert.DoesNotContain("{\"tool\"", cleaned);
         Assert.Contains("Hello", cleaned);
     }

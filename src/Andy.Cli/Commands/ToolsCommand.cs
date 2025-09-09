@@ -35,7 +35,7 @@ public class ToolsCommand : ICommand
         }
 
         var subcommand = args[0].ToLowerInvariant();
-        
+
         return subcommand switch
         {
             "list" or "ls" => await ListToolsAsync(args.Skip(1).ToArray(), cancellationToken),
@@ -50,7 +50,7 @@ public class ToolsCommand : ICommand
     {
         return Task.FromResult(ListTools(args));
     }
-    
+
     private CommandResult ListTools(string[] args)
     {
         var registry = GetToolRegistry();
@@ -73,7 +73,7 @@ public class ToolsCommand : ICommand
         // Filter by category if specified
         if (!string.IsNullOrEmpty(categoryFilter))
         {
-            groupedTools = groupedTools.Where(g => 
+            groupedTools = groupedTools.Where(g =>
                 g.Key.ToString().Contains(categoryFilter, StringComparison.OrdinalIgnoreCase))
                 .ToList();
 
@@ -90,30 +90,30 @@ public class ToolsCommand : ICommand
         foreach (var group in groupedTools)
         {
             result.AppendLine($"{group.Key} Tools ({group.Count()}):");
-            
+
             foreach (var tool in group.OrderBy(t => t.Metadata.Name))
             {
                 var status = tool.IsEnabled ? "[OK]" : "[X]";
                 result.AppendLine($"  {status} {tool.Metadata.Name} (ID: {tool.Metadata.Id})");
                 result.AppendLine($"      {tool.Metadata.Description}");
-                
+
                 if (tool.Metadata.Parameters.Any())
                 {
                     var requiredParams = tool.Metadata.Parameters.Where(p => p.Required).Select(p => p.Name);
                     var optionalParams = tool.Metadata.Parameters.Where(p => !p.Required).Select(p => p.Name);
-                    
+
                     if (requiredParams.Any())
                     {
                         result.AppendLine($"      Required: {string.Join(", ", requiredParams)}");
                     }
-                    
+
                     if (optionalParams.Any())
                     {
                         result.AppendLine($"      Optional: {string.Join(", ", optionalParams)}");
                     }
                 }
             }
-            
+
             result.AppendLine();
         }
 
@@ -128,7 +128,7 @@ public class ToolsCommand : ICommand
     {
         return Task.FromResult(ShowToolInfo(args));
     }
-    
+
     private CommandResult ShowToolInfo(string[] args)
     {
         if (args.Length == 0)
@@ -139,7 +139,7 @@ public class ToolsCommand : ICommand
         // Join all args in case the tool name has spaces (e.g., "Copy File")
         var toolName = string.Join(" ", args).Trim('"', ' ');
         var registry = GetToolRegistry();
-        
+
         if (registry == null)
         {
             return CommandResult.Failure("Tool registry is not available.");
@@ -149,11 +149,11 @@ public class ToolsCommand : ICommand
         if (tool == null)
         {
             // Try to find by name instead of ID (more flexible matching)
-            tool = registry.Tools.FirstOrDefault(t => 
+            tool = registry.Tools.FirstOrDefault(t =>
                 t.Metadata.Name.Equals(toolName, StringComparison.OrdinalIgnoreCase) ||
                 t.Metadata.Name.Replace(" ", "").Equals(toolName.Replace(" ", ""), StringComparison.OrdinalIgnoreCase) ||
                 t.Metadata.Id.Replace("_", "").Equals(toolName.Replace(" ", "").Replace("_", ""), StringComparison.OrdinalIgnoreCase));
-            
+
             if (tool == null)
             {
                 // Suggest similar tools
@@ -162,7 +162,7 @@ public class ToolsCommand : ICommand
                                t.Metadata.Id.Contains(toolName, StringComparison.OrdinalIgnoreCase))
                     .Take(3)
                     .ToList();
-                
+
                 var message = $"Tool '{toolName}' not found.";
                 if (similarTools.Any())
                 {
@@ -179,11 +179,11 @@ public class ToolsCommand : ICommand
 
         var result = new StringBuilder();
         var metadata = tool.Metadata;
-        
+
         // Title
         result.AppendLine($"# Tool: {metadata.Name}");
         result.AppendLine();
-        
+
         // Basic info section
         result.AppendLine("## Information");
         result.AppendLine($"  **ID:**          `{metadata.Id}`");
@@ -191,25 +191,25 @@ public class ToolsCommand : ICommand
         result.AppendLine($"  **Version:**     {metadata.Version}");
         result.AppendLine($"  **Category:**    {metadata.Category}");
         result.AppendLine($"  **Status:**      {(tool.IsEnabled ? "ENABLED" : "DISABLED")}");
-        
+
         if (metadata.RequiredPermissions != ToolPermissionFlags.None)
         {
             result.AppendLine($"  **Permissions:** {metadata.RequiredPermissions}");
         }
-        
+
         result.AppendLine();
         result.AppendLine($"**Description:** {metadata.Description}");
         result.AppendLine();
-        
+
         if (metadata.Parameters.Any())
         {
             result.AppendLine("## Parameters");
             result.AppendLine();
-            
+
             // Group parameters by required/optional
             var requiredParams = metadata.Parameters.Where(p => p.Required).ToList();
             var optionalParams = metadata.Parameters.Where(p => !p.Required).ToList();
-            
+
             if (requiredParams.Any())
             {
                 result.AppendLine("### Required Parameters");
@@ -220,7 +220,7 @@ public class ToolsCommand : ICommand
                     result.AppendLine();
                 }
             }
-            
+
             if (optionalParams.Any())
             {
                 result.AppendLine("### Optional Parameters");
@@ -228,27 +228,27 @@ public class ToolsCommand : ICommand
                 {
                     result.AppendLine($"  **`{param.Name}`** (*{param.Type}*)");
                     result.AppendLine($"    {param.Description}");
-                    
+
                     if (param.DefaultValue != null)
                     {
                         result.AppendLine($"    Default: `{param.DefaultValue}`");
                     }
-                    
+
                     if (param.AllowedValues != null && param.AllowedValues.Any())
                     {
                         result.AppendLine($"    Allowed values: `{string.Join("`, `", param.AllowedValues)}`");
                     }
-                    
+
                     if (!string.IsNullOrEmpty(param.Pattern))
                     {
                         result.AppendLine($"    Pattern: `{param.Pattern}`");
                     }
-                    
+
                     result.AppendLine();
                 }
             }
         }
-        
+
         if (metadata.Examples.Any())
         {
             result.AppendLine("## Examples");
@@ -258,7 +258,7 @@ public class ToolsCommand : ICommand
             {
                 result.AppendLine($"**Example {exampleNum}: {example.Name}**");
                 result.AppendLine($"  {example.Description}");
-                
+
                 if (example.Parameters.Any())
                 {
                     result.AppendLine();
@@ -268,7 +268,7 @@ public class ToolsCommand : ICommand
                         result.AppendLine($"    {param.Key} = {param.Value?.ToString() ?? "null"}");
                     }
                 }
-                
+
                 if (example.ExpectedOutput != null)
                 {
                     result.AppendLine($"  Expected output: {example.ExpectedOutput}");
@@ -277,7 +277,7 @@ public class ToolsCommand : ICommand
                 exampleNum++;
             }
         }
-        
+
         if (metadata.Tags.Any())
         {
             result.AppendLine("---");
@@ -296,7 +296,7 @@ public class ToolsCommand : ICommand
 
         var toolName = args[0];
         var registry = GetToolRegistry();
-        
+
         if (registry == null)
         {
             return CommandResult.Failure("Tool registry is not available.");
@@ -306,9 +306,9 @@ public class ToolsCommand : ICommand
         if (toolReg == null)
         {
             // Try to find by name instead of ID
-            toolReg = registry.Tools.FirstOrDefault(t => 
+            toolReg = registry.Tools.FirstOrDefault(t =>
                 t.Metadata.Name.Equals(toolName, StringComparison.OrdinalIgnoreCase));
-            
+
             if (toolReg == null)
             {
                 return CommandResult.Failure($"Tool '{toolName}' not found.");
@@ -326,7 +326,7 @@ public class ToolsCommand : ICommand
         {
             var arg = args[i];
             var parts = arg.Split('=', 2);
-            
+
             if (parts.Length == 2)
             {
                 parameters[parts[0]] = parts[1];
@@ -357,7 +357,7 @@ public class ToolsCommand : ICommand
                     CancellationToken = cancellationToken
                 };
                 var result = await tool.ExecuteAsync(parameters, context);
-                
+
                 if (result.IsSuccessful)
                 {
                     return CommandResult.CreateSuccess($"Tool executed successfully:\n{result.Output}");
@@ -373,9 +373,9 @@ public class ToolsCommand : ICommand
                 {
                     CancellationToken = cancellationToken
                 };
-                
+
                 var result = await executor.ExecuteAsync(toolReg.Metadata.Id, parameters, context);
-                
+
                 if (result.IsSuccessful)
                 {
                     return CommandResult.CreateSuccess($"Tool executed successfully:\n{result.Output}");
@@ -409,7 +409,7 @@ public class ToolsCommand : ICommand
         help.AppendLine("  tools list FileSystem         - List only FileSystem tools");
         help.AppendLine("  tools info read_file          - Show info about the read_file tool");
         help.AppendLine("  tools execute read_file path=/etc/hosts - Execute read_file tool");
-        
+
         return CommandResult.CreateSuccess(help.ToString());
     }
 
@@ -426,17 +426,17 @@ public class ToolsCommand : ICommand
     {
         var item = new ToolListItem("Available Tools");
         var registry = GetToolRegistry();
-        
+
         if (registry != null)
         {
             var groupedTools = registry.Tools
                 .GroupBy(t => t.Metadata.Category)
                 .OrderBy(g => g.Key);
-            
+
             foreach (var group in groupedTools)
             {
                 item.AddCategory(group.Key.ToString());
-                
+
                 foreach (var tool in group.OrderBy(t => t.Metadata.Name))
                 {
                     item.AddTool(
@@ -449,7 +449,7 @@ public class ToolsCommand : ICommand
                 }
             }
         }
-        
+
         return item;
     }
 }

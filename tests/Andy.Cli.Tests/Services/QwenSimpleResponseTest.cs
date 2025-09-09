@@ -31,7 +31,7 @@ Please wait for the results...";
         // Check if this is detected as fake tool results
         var isFake = _interpreter.ContainsFakeToolResults(response, "qwen-3-coder-480b");
         _output.WriteLine($"Contains fake results: {isFake}");
-        
+
         // Check if any tool calls are extracted
         var toolCalls = _interpreter.ExtractToolCalls(response, "qwen-3-coder-480b", "cerebras");
         _output.WriteLine($"Tool calls found: {toolCalls.Count}");
@@ -46,7 +46,7 @@ Please wait for the results...";
         // Check what the cleaned response looks like
         var cleaned = _interpreter.CleanResponseForDisplay(response, "qwen-3-coder-480b");
         _output.WriteLine($"Cleaned response: {cleaned}");
-        
+
         // The response should not contain the raw JSON
         Assert.DoesNotContain("{\"tool\"", cleaned);
         Assert.DoesNotContain("Please wait for the results", cleaned);
@@ -64,13 +64,13 @@ Please wait for the results...";
 
         var toolCalls = _interpreter.ExtractToolCalls(response, "qwen-3-coder-480b", "cerebras");
         Assert.Single(toolCalls);
-        
+
         var cleaned = _interpreter.CleanResponseForDisplay(response, "qwen-3-coder-480b");
         Assert.Contains("I'll help you explore", cleaned);
         Assert.DoesNotContain("<tool_call>", cleaned);
         Assert.DoesNotContain("{\"name\"", cleaned);
     }
-    
+
     [Fact]
     public void QwenModel_SystemInfoToolCall_ShouldExtractCorrectly()
     {
@@ -81,11 +81,11 @@ Please wait for the results...";
 
         var toolCalls = _interpreter.ExtractToolCalls(response, "qwen-3-coder-480b", "cerebras");
         _output.WriteLine($"Tool calls found: {toolCalls.Count}");
-        
+
         Assert.Single(toolCalls);
         Assert.Equal("system_info", toolCalls[0].ToolId);
         Assert.Empty(toolCalls[0].Parameters);
-        
+
         var cleaned = _interpreter.CleanResponseForDisplay(response, "qwen-3-coder-480b");
         _output.WriteLine($"Cleaned response: {cleaned}");
         Assert.DoesNotContain("{\"tool\"", cleaned);

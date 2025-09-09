@@ -12,8 +12,8 @@ namespace Andy.Cli.Widgets
     {
         private readonly List<string> _lines = new();
         private int _scroll; // number of lines from bottom (0 = follow tail)
-        private DL.Rgb24 _bg = new DL.Rgb24(0,0,0);
-        private DL.Rgb24 _fg = new DL.Rgb24(200,200,200);
+        private DL.Rgb24 _bg = new DL.Rgb24(0, 0, 0);
+        private DL.Rgb24 _fg = new DL.Rgb24(200, 200, 200);
 
         /// <summary>Adds a line to the view.</summary>
         public void Append(string line)
@@ -37,11 +37,11 @@ namespace Andy.Cli.Widgets
         /// <summary>Render within the given rectangle.</summary>
         public void Render(in L.Rect rect, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
-            int x=(int)rect.X, y=(int)rect.Y, w=(int)rect.Width, h=(int)rect.Height;
-            b.PushClip(new DL.ClipPush(x,y,w,h));
-            b.DrawRect(new DL.Rect(x,y,w,h,_bg));
+            int x = (int)rect.X, y = (int)rect.Y, w = (int)rect.Width, h = (int)rect.Height;
+            b.PushClip(new DL.ClipPush(x, y, w, h));
+            b.DrawRect(new DL.Rect(x, y, w, h, _bg));
             int start = Math.Max(0, _lines.Count - h - _scroll);
-            for (int i=0;i<h;i++)
+            for (int i = 0; i < h; i++)
             {
                 int idx = start + i; if (idx >= _lines.Count) break;
                 string line = _lines[idx];

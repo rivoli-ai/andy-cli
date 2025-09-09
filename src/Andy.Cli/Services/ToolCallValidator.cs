@@ -15,7 +15,7 @@ public class ValidationResult
     public List<ValidationError> Errors { get; set; } = new();
     public List<ValidationWarning> Warnings { get; set; } = new();
     public ModelToolCall? RepairedCall { get; set; }
-    
+
     public bool HasErrors => Errors.Any();
     public bool HasWarnings => Warnings.Any();
 }
@@ -66,12 +66,12 @@ public interface IToolCallValidator
     /// Validate a tool call against its metadata
     /// </summary>
     ValidationResult Validate(ModelToolCall call, ToolMetadata metadata);
-    
+
     /// <summary>
     /// Attempt to repair a tool call's parameters
     /// </summary>
     ModelToolCall RepairParameters(ModelToolCall call, ToolMetadata metadata);
-    
+
     /// <summary>
     /// Check if a tool exists in the registry
     /// </summary>
@@ -82,7 +82,7 @@ public class ToolCallValidator : IToolCallValidator
 {
     private readonly IToolRegistry _toolRegistry;
     private readonly ILogger<ToolCallValidator>? _logger;
-    
+
     public ToolCallValidator(
         IToolRegistry toolRegistry,
         ILogger<ToolCallValidator>? logger = null)
@@ -90,11 +90,11 @@ public class ToolCallValidator : IToolCallValidator
         _toolRegistry = toolRegistry;
         _logger = logger;
     }
-    
+
     public ValidationResult Validate(ModelToolCall call, ToolMetadata metadata)
     {
         var result = new ValidationResult { IsValid = true };
-        
+
         if (call == null || metadata == null)
         {
             result.IsValid = false;
@@ -105,11 +105,11 @@ public class ToolCallValidator : IToolCallValidator
             });
             return result;
         }
-        
+
         // Validate required parameters
         foreach (var param in metadata.Parameters.Where(p => p.Required))
         {
-            if (!call.Parameters.ContainsKey(param.Name) || 
+            if (!call.Parameters.ContainsKey(param.Name) ||
                 call.Parameters[param.Name] == null)
             {
                 result.IsValid = false;
@@ -121,20 +121,20 @@ public class ToolCallValidator : IToolCallValidator
                 });
             }
         }
-        
+
         // Validate parameter types and values
         foreach (var kvp in call.Parameters)
         {
             var paramName = kvp.Key;
             var paramValue = kvp.Value;
-            
+
             // Skip internal parameters (like _callId)
             if (paramName.StartsWith("_"))
                 continue;
-            
-            var paramMetadata = metadata.Parameters.FirstOrDefault(p => 
+
+            var paramMetadata = metadata.Parameters.FirstOrDefault(p =>
                 p.Name.Equals(paramName, StringComparison.OrdinalIgnoreCase));
-            
+
             if (paramMetadata == null)
             {
                 // Check for similar parameter names (typos)
@@ -160,7 +160,7 @@ public class ToolCallValidator : IToolCallValidator
                 }
                 continue;
             }
-            
+
             // Validate type
             if (!IsValidType(paramValue, paramMetadata.Type))
             {
@@ -186,7 +186,7 @@ public class ToolCallValidator : IToolCallValidator
                     result.IsValid = false;
                 }
             }
-            
+
             // Validate constraints using ToolParameter properties
             var constraintErrors = ValidateToolParameter(paramValue, paramMetadata, paramName);
             if (constraintErrors.Any())
@@ -195,19 +195,19 @@ public class ToolCallValidator : IToolCallValidator
                 result.IsValid = false;
             }
         }
-        
+
         // If validation failed but we can repair, create repaired version
         if (!result.IsValid)
         {
             result.RepairedCall = RepairParameters(call, metadata);
         }
-        
+
         _logger?.LogDebug("Validation result for {ToolId}: Valid={IsValid}, Errors={ErrorCount}, Warnings={WarningCount}",
             call.ToolId, result.IsValid, result.Errors.Count, result.Warnings.Count);
-        
+
         return result;
     }
-    
+
     public ModelToolCall RepairParameters(ModelToolCall call, ToolMetadata metadata)
     {
         var repaired = new ModelToolCall
@@ -215,26 +215,26 @@ public class ToolCallValidator : IToolCallValidator
             ToolId = call.ToolId,
             Parameters = new Dictionary<string, object?>()
         };
-        
+
         // Copy internal parameters
         foreach (var kvp in call.Parameters.Where(p => p.Key.StartsWith("_")))
         {
             repaired.Parameters[kvp.Key] = kvp.Value;
         }
-        
+
         // Process each parameter in metadata
         foreach (var paramMeta in metadata.Parameters)
         {
             object? value = null;
-            
+
             // Try to find parameter (case-insensitive)
-            var matchingKey = call.Parameters.Keys.FirstOrDefault(k => 
+            var matchingKey = call.Parameters.Keys.FirstOrDefault(k =>
                 k.Equals(paramMeta.Name, StringComparison.OrdinalIgnoreCase));
-            
+
             if (matchingKey != null)
             {
                 value = call.Parameters[matchingKey];
-                
+
                 // Try type coercion if needed
                 if (!IsValidType(value, paramMeta.Type))
                 {
@@ -247,13 +247,13 @@ public class ToolCallValidator : IToolCallValidator
                 value = paramMeta.DefaultValue ?? GetDefaultValue(paramMeta.Type);
                 _logger?.LogDebug("Using default value for missing required parameter '{Name}'", paramMeta.Name);
             }
-            
+
             if (value != null || paramMeta.Required)
             {
                 repaired.Parameters[paramMeta.Name] = value;
             }
         }
-        
+
         // Add any remaining parameters that might be valid but not in metadata
         foreach (var kvp in call.Parameters)
         {
@@ -270,25 +270,25 @@ public class ToolCallValidator : IToolCallValidator
                         value = TryCoerceType(value, similarParam.Type);
                     }
                     repaired.Parameters[similarParam.Name] = value;
-                    _logger?.LogDebug("Corrected parameter name from '{Old}' to '{New}'", 
+                    _logger?.LogDebug("Corrected parameter name from '{Old}' to '{New}'",
                         kvp.Key, similarParam.Name);
                 }
             }
         }
-        
+
         return repaired;
     }
-    
+
     public bool ToolExists(string toolId)
     {
         return _toolRegistry.GetTool(toolId) != null;
     }
-    
+
     private bool IsValidType(object? value, string expectedType)
     {
         if (value == null)
             return !expectedType.Equals("required", StringComparison.OrdinalIgnoreCase);
-        
+
         return expectedType.ToLowerInvariant() switch
         {
             "string" => value is string,
@@ -301,12 +301,12 @@ public class ToolCallValidator : IToolCallValidator
             _ => true // Unknown type, assume valid
         };
     }
-    
+
     private object? TryCoerceType(object? value, string targetType)
     {
         if (value == null)
             return null;
-        
+
         try
         {
             return targetType.ToLowerInvariant() switch
@@ -327,16 +327,16 @@ public class ToolCallValidator : IToolCallValidator
             return null;
         }
     }
-    
+
     private bool ParseBoolean(object value)
     {
         if (value is bool b)
             return b;
-        
+
         var str = value.ToString()?.ToLowerInvariant();
         return str == "true" || str == "yes" || str == "1" || str == "on";
     }
-    
+
     private object? GetDefaultValue(string type)
     {
         return type.ToLowerInvariant() switch
@@ -350,25 +350,25 @@ public class ToolCallValidator : IToolCallValidator
             _ => null
         };
     }
-    
+
     private ToolParameter? FindSimilarParameter(string name, IList<ToolParameter> parameters)
     {
         // Simple similarity check - could be enhanced with Levenshtein distance
-        return parameters.FirstOrDefault(p => 
+        return parameters.FirstOrDefault(p =>
             p.Name.StartsWith(name, StringComparison.OrdinalIgnoreCase) ||
             name.StartsWith(p.Name, StringComparison.OrdinalIgnoreCase) ||
             p.Name.Replace("_", "").Equals(name.Replace("_", ""), StringComparison.OrdinalIgnoreCase));
     }
-    
+
     private List<ValidationError> ValidateToolParameter(
-        object? value, 
-        ToolParameter parameter, 
+        object? value,
+        ToolParameter parameter,
         string paramName)
     {
         var errors = new List<ValidationError>();
-        
+
         // Validate numeric constraints
-        if (parameter.MinValue.HasValue && value is IComparable minComparable && 
+        if (parameter.MinValue.HasValue && value is IComparable minComparable &&
             minComparable.CompareTo(parameter.MinValue.Value) < 0)
         {
             errors.Add(new ValidationError
@@ -378,8 +378,8 @@ public class ToolCallValidator : IToolCallValidator
                 Type = ValidationErrorType.InvalidValue
             });
         }
-        
-        if (parameter.MaxValue.HasValue && value is IComparable maxComparable && 
+
+        if (parameter.MaxValue.HasValue && value is IComparable maxComparable &&
             maxComparable.CompareTo(parameter.MaxValue.Value) > 0)
         {
             errors.Add(new ValidationError
@@ -389,7 +389,7 @@ public class ToolCallValidator : IToolCallValidator
                 Type = ValidationErrorType.InvalidValue
             });
         }
-        
+
         // Validate string length constraints
         if (value is string str)
         {
@@ -402,7 +402,7 @@ public class ToolCallValidator : IToolCallValidator
                     Type = ValidationErrorType.InvalidValue
                 });
             }
-            
+
             if (parameter.MaxLength.HasValue && str.Length > parameter.MaxLength.Value)
             {
                 errors.Add(new ValidationError
@@ -412,7 +412,7 @@ public class ToolCallValidator : IToolCallValidator
                     Type = ValidationErrorType.InvalidValue
                 });
             }
-            
+
             // Validate pattern
             if (!string.IsNullOrEmpty(parameter.Pattern))
             {
@@ -428,7 +428,7 @@ public class ToolCallValidator : IToolCallValidator
                 }
             }
         }
-        
+
         // Validate allowed values
         if (parameter.AllowedValues?.Any() == true && value != null && !parameter.AllowedValues.Contains(value))
         {
@@ -439,7 +439,7 @@ public class ToolCallValidator : IToolCallValidator
                 Type = ValidationErrorType.InvalidValue
             });
         }
-        
+
         return errors;
     }
 }

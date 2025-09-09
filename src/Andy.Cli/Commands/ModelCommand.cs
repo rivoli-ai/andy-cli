@@ -26,22 +26,22 @@ public class ModelCommand : ICommand
     private readonly Dictionary<string, List<ModelInfo>> _modelCache = new();
     private readonly Dictionary<string, DateTime> _cacheTimestamps = new();
     private readonly TimeSpan _cacheExpiry = TimeSpan.FromMinutes(10);
-    
+
     private LlmClient? _currentClient;
     private string _currentProvider = "cerebras";
     private string _currentModel = "";
     private IServiceProvider? _currentServiceProvider;
-    
+
     public string Name => "model";
     public string Description => "Manage AI models and providers";
     public string[] Aliases => new[] { "m", "/model", "/m" };
-    
+
     public ModelCommand(IServiceProvider serviceProvider)
     {
         _serviceProvider = serviceProvider;
         _currentClient = serviceProvider.GetService<LlmClient>();
         _modelMemory = new ModelMemoryService();
-        
+
         // Load last used provider and model
         var current = _modelMemory.GetCurrent();
         if (current.HasValue)
@@ -54,17 +54,17 @@ public class ModelCommand : ICommand
             _currentModel = GetDefaultModel(_currentProvider);
         }
     }
-    
+
     public async Task<CommandResult> ExecuteAsync(string[] args, CancellationToken cancellationToken = default)
     {
         if (args.Length == 0)
         {
             return await ListModelsAsync(cancellationToken);
         }
-        
+
         var subcommand = args[0].ToLowerInvariant();
         var subArgs = args.Skip(1).ToArray();
-        
+
         return subcommand switch
         {
             "list" or "ls" => await ListModelsAsync(cancellationToken),
@@ -76,17 +76,17 @@ public class ModelCommand : ICommand
             _ => CommandResult.Failure($"Unknown subcommand: {subcommand}")
         };
     }
-    
+
     private async Task<CommandResult> ListModelsAsync(CancellationToken cancellationToken)
     {
         var result = new StringBuilder();
         result.AppendLine("Available Models and Providers");
         result.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         result.AppendLine();
-        
+
         var providers = new[] { "cerebras", "openai", "anthropic", "gemini", "ollama" };
         var rememberedModels = _modelMemory.GetAllModels();
-        
+
         foreach (var provider in providers)
         {
             var hasApiKey = HasApiKey(provider);
@@ -94,7 +94,7 @@ public class ModelCommand : ICommand
             var url = GetProviderUrl(provider);
             var rememberedModel = rememberedModels.TryGetValue(provider, out var m) ? m : null;
             var currentModel = isCurrentProvider ? _currentModel : rememberedModel;
-            
+
             // Provider header with URL
             if (isCurrentProvider)
             {
@@ -104,7 +104,7 @@ public class ModelCommand : ICommand
             {
                 result.AppendLine($"  {provider.ToUpper()} [{url}]");
             }
-            
+
             // API key status
             if (!hasApiKey && provider != "ollama")
             {
@@ -114,18 +114,18 @@ public class ModelCommand : ICommand
             {
                 // Try to get models for current provider or ollama (which doesn't need API key)
                 var models = await GetProviderModelsAsync(provider, cancellationToken);
-                
+
                 if (models.Any())
                 {
                     result.AppendLine($"  Models ({models.Count}):");
-                    
+
                     // Show first 10 models and indicate if there are more
                     var displayModels = models.Take(15).ToList();
                     foreach (var model in displayModels)
                     {
                         var isCurrentModel = isCurrentProvider && model.Id == currentModel;
                         var isRemembered = model.Id == rememberedModel;
-                        
+
                         if (isCurrentModel)
                         {
                             result.AppendLine($"    ▸ {model.Id} ← active");
@@ -138,13 +138,13 @@ public class ModelCommand : ICommand
                         {
                             result.AppendLine($"    • {model.Id}");
                         }
-                        
+
                         if (!string.IsNullOrEmpty(model.Description))
                         {
                             result.AppendLine($"      {model.Description}");
                         }
                     }
-                    
+
                     if (models.Count > 15)
                     {
                         result.AppendLine($"    ... and {models.Count - 15} more models");
@@ -168,10 +168,10 @@ public class ModelCommand : ICommand
                     result.AppendLine($"  Last used: {rememberedModel}");
                 }
             }
-            
+
             result.AppendLine();
         }
-        
+
         result.AppendLine("Commands:");
         result.AppendLine("  /model switch <model>     - Switch to a different model (same provider)");
         result.AppendLine("  /model provider <name>    - Switch to a different provider");
@@ -180,10 +180,10 @@ public class ModelCommand : ICommand
         result.AppendLine();
         result.AppendLine("Example: /model switch gpt-4o-mini");
         result.AppendLine("Example: /model provider anthropic");
-        
+
         return CommandResult.CreateSuccess(result.ToString());
     }
-    
+
     private async Task<List<ModelInfo>> GetProviderModelsAsync(string providerName, CancellationToken cancellationToken)
     {
         // Check cache first
@@ -193,7 +193,7 @@ public class ModelCommand : ICommand
         {
             return cachedModels;
         }
-        
+
         try
         {
             // Create a temporary service provider for the specific provider
@@ -204,10 +204,10 @@ public class ModelCommand : ICommand
             {
                 options.DefaultProvider = providerName;
             });
-            
+
             var tempProvider = services.BuildServiceProvider();
             var factory = tempProvider.GetService<ILlmProviderFactory>();
-            
+
             if (factory != null)
             {
                 var provider = factory.CreateProvider(providerName);
@@ -215,11 +215,11 @@ public class ModelCommand : ICommand
                 {
                     var models = await provider.ListModelsAsync(cancellationToken);
                     var modelList = models?.ToList() ?? new List<ModelInfo>();
-                    
+
                     // Update cache
                     _modelCache[providerName] = modelList;
                     _cacheTimestamps[providerName] = DateTime.UtcNow;
-                    
+
                     return modelList;
                 }
             }
@@ -229,23 +229,23 @@ public class ModelCommand : ICommand
             // Log error but don't fail completely
             Console.Error.WriteLine($"Failed to fetch models for {providerName}: {ex.Message}");
         }
-        
+
         // Return empty list if we can't fetch models
         return new List<ModelInfo>();
     }
-    
+
     private async Task<CommandResult> RefreshModelsAsync(CancellationToken cancellationToken)
     {
         // Clear cache to force refresh
         _modelCache.Clear();
         _cacheTimestamps.Clear();
-        
+
         var result = new StringBuilder();
         result.AppendLine("Refreshing model lists from API...");
         result.AppendLine();
-        
+
         var providers = new[] { "cerebras", "openai", "anthropic", "gemini", "ollama" };
-        
+
         foreach (var provider in providers)
         {
             if (HasApiKey(provider) || provider == "ollama")
@@ -258,33 +258,33 @@ public class ModelCommand : ICommand
                 result.AppendLine($"{provider}: Skipped (no API key)");
             }
         }
-        
+
         return CommandResult.CreateSuccess(result.ToString());
     }
-    
+
     private Task<CommandResult> SwitchModelAsync(string[] args, CancellationToken cancellationToken)
     {
         if (args.Length < 1)
         {
             return Task.FromResult(CommandResult.Failure("Usage: /model switch <model-name>"));
         }
-        
+
         var modelName = string.Join(" ", args).Trim();
-        
+
         try
         {
             // Update the model for the current provider
             _currentModel = modelName;
             _modelMemory.SetCurrent(_currentProvider, modelName);
-            
+
             // Recreate services with new model
             var services = new ServiceCollection();
             services.AddLogging();
             services.ConfigureLlmFromEnvironment();
-            
+
             // Override the model in environment
             Environment.SetEnvironmentVariable($"{_currentProvider.ToUpper()}_MODEL", modelName);
-            
+
             services.AddLlmServices(options =>
             {
                 options.DefaultProvider = _currentProvider;
@@ -293,15 +293,15 @@ public class ModelCommand : ICommand
                     config.Model = modelName;
                 }
             });
-            
+
             var newProvider = services.BuildServiceProvider();
             _currentServiceProvider = newProvider;
             _currentClient = newProvider.GetService<LlmClient>();
-            
+
             var message = new StringBuilder();
             message.AppendLine(ConsoleColors.SuccessPrefix($"Switched to model: {modelName}"));
             message.AppendLine($"Provider: {_currentProvider} [{GetProviderUrl(_currentProvider)}]");
-            
+
             return Task.FromResult(CommandResult.CreateSuccess(message.ToString()));
         }
         catch (Exception ex)
@@ -309,16 +309,16 @@ public class ModelCommand : ICommand
             return Task.FromResult(CommandResult.Failure(ConsoleColors.ErrorPrefix($"Failed to switch model: {ex.Message}")));
         }
     }
-    
+
     private Task<CommandResult> SwitchProviderAsync(string[] args, CancellationToken cancellationToken)
     {
         if (args.Length < 1)
         {
             return Task.FromResult(CommandResult.Failure("Usage: /model provider <provider-name>"));
         }
-        
+
         var provider = args[0].ToLowerInvariant();
-        
+
         // Check if this is a known provider
         if (!IsKnownProvider(provider))
         {
@@ -337,22 +337,22 @@ public class ModelCommand : ICommand
             message.AppendLine("  OLLAMA_API_BASE=<your-endpoint>");
             return Task.FromResult(CommandResult.Failure(message.ToString()));
         }
-        
+
         if (!HasApiKey(provider))
         {
             return Task.FromResult(CommandResult.Failure(ConsoleColors.ErrorPrefix($"No API key found for {provider}. Set {GetApiKeyName(provider)} environment variable.")));
         }
-        
+
         try
         {
             // Get the last used model for this provider or default
             var modelName = _modelMemory.GetLastModel(provider) ?? GetDefaultModel(provider);
-            
+
             // Update current provider and model
             _currentProvider = provider;
             _currentModel = modelName;
             _modelMemory.SetCurrent(provider, modelName);
-            
+
             // Recreate services with new provider
             var services = new ServiceCollection();
             services.AddLogging();
@@ -361,16 +361,16 @@ public class ModelCommand : ICommand
             {
                 options.DefaultProvider = provider;
             });
-            
+
             var newProvider = services.BuildServiceProvider();
             _currentServiceProvider = newProvider;
             _currentClient = newProvider.GetService<LlmClient>();
-            
+
             var message = new StringBuilder();
             message.AppendLine(ConsoleColors.SuccessPrefix($"Switched to provider: {provider}"));
             message.AppendLine($"URL: {GetProviderUrl(provider)}");
             message.AppendLine($"Model: {modelName}");
-            
+
             return Task.FromResult(CommandResult.CreateSuccess(message.ToString()));
         }
         catch (Exception ex)
@@ -378,20 +378,20 @@ public class ModelCommand : ICommand
             return Task.FromResult(CommandResult.Failure(ConsoleColors.ErrorPrefix($"Failed to switch provider: {ex.Message}")));
         }
     }
-    
+
     private async Task<CommandResult> ShowModelInfoAsync(CancellationToken cancellationToken)
     {
         var info = new StringBuilder();
         info.AppendLine("Current Model Information");
         info.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         info.AppendLine();
-        
+
         info.AppendLine($"Provider: {_currentProvider}");
         info.AppendLine($"URL: {GetProviderUrl(_currentProvider)}");
         info.AppendLine($"Model: {_currentModel}");
         info.AppendLine($"Status: {(_currentClient != null ? "Connected" : "Not connected")}");
         info.AppendLine();
-        
+
         // Try to get current model info
         var models = await GetProviderModelsAsync(_currentProvider, cancellationToken);
         var currentModelInfo = models.FirstOrDefault(m => m.Id == _currentModel);
@@ -405,7 +405,7 @@ public class ModelCommand : ICommand
             }
             info.AppendLine();
         }
-        
+
         // Show remembered models
         var remembered = _modelMemory.GetAllModels();
         if (remembered.Any())
@@ -419,21 +419,21 @@ public class ModelCommand : ICommand
                 }
             }
         }
-        
+
         return CommandResult.CreateSuccess(info.ToString());
     }
-    
+
     private async Task<CommandResult> TestModelAsync(string[] args, CancellationToken cancellationToken)
     {
         if (_currentClient == null)
         {
             return CommandResult.Failure(ConsoleColors.ErrorPrefix("No model client available. Please switch to a valid model first."));
         }
-        
-        var prompt = args.Length > 0 
-            ? string.Join(" ", args) 
+
+        var prompt = args.Length > 0
+            ? string.Join(" ", args)
             : "Hello! Please respond with a brief greeting.";
-        
+
         try
         {
             var startTime = DateTime.UtcNow;
@@ -446,10 +446,10 @@ public class ModelCommand : ICommand
             testConversation.AddUserMessage(prompt);
             var request = testConversation.CreateRequest();
             request.MaxTokens = 100;
-            
+
             var response = await _currentClient.CompleteAsync(request, cancellationToken);
             var elapsed = DateTime.UtcNow - startTime;
-            
+
             var result = new StringBuilder();
             result.AppendLine("Model Test Results:");
             result.AppendLine();
@@ -458,12 +458,12 @@ public class ModelCommand : ICommand
             result.AppendLine($"Prompt: {prompt}");
             result.AppendLine($"Response: {response.Content}");
             result.AppendLine($"Response Time: {elapsed.TotalMilliseconds:F0}ms");
-            
+
             if (response.TokensUsed.HasValue)
             {
                 result.AppendLine($"Tokens Used: {response.TokensUsed.Value}");
             }
-            
+
             return CommandResult.CreateSuccess(result.ToString());
         }
         catch (Exception ex)
@@ -471,7 +471,7 @@ public class ModelCommand : ICommand
             return CommandResult.Failure(ConsoleColors.ErrorPrefix($"Model test failed: {ex.Message}"));
         }
     }
-    
+
     private bool IsKnownProvider(string provider)
     {
         return provider switch
@@ -480,7 +480,7 @@ public class ModelCommand : ICommand
             _ => false
         };
     }
-    
+
     private bool HasApiKey(string provider)
     {
         return provider switch
@@ -493,7 +493,7 @@ public class ModelCommand : ICommand
             _ => false
         };
     }
-    
+
     private string GetApiKeyName(string provider)
     {
         return provider switch
@@ -505,7 +505,7 @@ public class ModelCommand : ICommand
             _ => $"{provider.ToUpper()}_API_KEY"
         };
     }
-    
+
     private string GetProviderUrl(string provider)
     {
         return provider switch
@@ -518,7 +518,7 @@ public class ModelCommand : ICommand
             _ => "unknown"
         };
     }
-    
+
     private string GetDefaultModel(string provider)
     {
         // Check environment variables first
@@ -527,7 +527,7 @@ public class ModelCommand : ICommand
         {
             return envModel;
         }
-        
+
         return provider switch
         {
             "cerebras" => "llama-3.3-70b",
@@ -538,33 +538,33 @@ public class ModelCommand : ICommand
             _ => "unknown"
         };
     }
-    
+
     public LlmClient? GetCurrentClient() => _currentClient;
     public string GetCurrentProvider() => _currentProvider;
     public string GetCurrentModel() => _currentModel;
-    
+
     public async Task<ModelListItem> CreateModelListItemAsync(CancellationToken cancellationToken = default)
     {
         var item = new ModelListItem($"Models - {_currentProvider}: {_currentModel}");
-        
+
         // Get all available providers
         var providerNames = new[] { "cerebras", "openai", "anthropic", "gemini", "ollama" };
-        
+
         foreach (var provider in providerNames)
         {
             var hasApiKey = HasApiKey(provider);
             var isCurrentProvider = provider == _currentProvider;
             var url = GetProviderUrl(provider);
             var status = !hasApiKey && provider != "ollama" ? " (no key)" : isCurrentProvider ? " ← current" : "";
-            
+
             // Add provider with URL in description
             item.AddProvider($"{provider} [{url}]{status}");
-            
+
             if (isCurrentProvider)
             {
                 // Get actual models from API
                 var models = await GetProviderModelsAsync(provider, cancellationToken);
-                
+
                 if (models.Any())
                 {
                     // Show first 10 models
@@ -574,7 +574,7 @@ public class ModelCommand : ICommand
                         var description = isCurrentModel ? "active" : "";
                         item.AddModel(model.Id, description, true, isCurrentModel);
                     }
-                    
+
                     if (models.Count > 10)
                     {
                         item.AddModel($"... and {models.Count - 10} more", "Use /model list to see all", false, false);
@@ -587,7 +587,7 @@ public class ModelCommand : ICommand
                 }
             }
         }
-        
+
         return item;
     }
 }

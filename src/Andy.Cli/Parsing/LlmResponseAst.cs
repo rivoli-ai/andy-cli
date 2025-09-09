@@ -16,12 +16,12 @@ public abstract class AstNode
     public AstNode? Parent { get; set; }
     public int StartPosition { get; set; }
     public int EndPosition { get; set; }
-    
+
     protected AstNode(string nodeType)
     {
         NodeType = nodeType;
     }
-    
+
     public abstract T Accept<T>(IAstVisitor<T> visitor);
 }
 
@@ -34,9 +34,9 @@ public class ResponseNode : AstNode
     public string ModelName { get; set; } = "";
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
     public ResponseMetadata ResponseMetadata { get; set; } = new();
-    
+
     public ResponseNode() : base("Response") { }
-    
+
     public override T Accept<T>(IAstVisitor<T> visitor) => visitor.VisitResponse(this);
 }
 
@@ -48,9 +48,9 @@ public class TextNode : AstNode
     public string Content { get; set; } = "";
     public TextFormat Format { get; set; } = TextFormat.Plain;
     public string? Language { get; set; } // For code blocks
-    
+
     public TextNode() : base("Text") { }
-    
+
     public override T Accept<T>(IAstVisitor<T> visitor) => visitor.VisitText(this);
 }
 
@@ -63,10 +63,28 @@ public class ToolCallNode : AstNode
     public string ToolName { get; set; } = "";
     public Dictionary<string, object?> Arguments { get; set; } = new();
     public bool IsComplete { get; set; } = true;
-    
+    public Exception? ParseError { get; set; } // Captures argument parsing errors
+
     public ToolCallNode() : base("ToolCall") { }
-    
+
     public override T Accept<T>(IAstVisitor<T> visitor) => visitor.VisitToolCall(this);
+}
+
+/// <summary>
+/// Result of a tool call execution
+/// </summary>
+public class ToolResultNode : AstNode
+{
+    public string CallId { get; set; } = "";
+    public string ToolName { get; set; } = "";
+    public object? Result { get; set; }
+    public bool IsSuccess { get; set; }
+    public string? ErrorMessage { get; set; }
+    public Exception? ExecutionError { get; set; }
+
+    public ToolResultNode() : base("ToolResult") { }
+
+    public override T Accept<T>(IAstVisitor<T> visitor) => visitor.VisitToolResult(this);
 }
 
 /// <summary>
@@ -79,9 +97,9 @@ public class CodeNode : AstNode
     public bool IsExecutable { get; set; }
     public string? FileName { get; set; }
     public int? LineNumber { get; set; }
-    
+
     public CodeNode() : base("Code") { }
-    
+
     public override T Accept<T>(IAstVisitor<T> visitor) => visitor.VisitCode(this);
 }
 
@@ -94,9 +112,9 @@ public class FileReferenceNode : AstNode
     public FileReferenceType ReferenceType { get; set; }
     public bool IsAbsolute { get; set; }
     public string? LineReference { get; set; } // e.g., ":42" or ":10-20"
-    
+
     public FileReferenceNode() : base("FileReference") { }
-    
+
     public override T Accept<T>(IAstVisitor<T> visitor) => visitor.VisitFileReference(this);
 }
 
@@ -108,9 +126,9 @@ public class QuestionNode : AstNode
     public string Question { get; set; } = "";
     public QuestionType Type { get; set; }
     public List<string>? SuggestedOptions { get; set; }
-    
+
     public QuestionNode() : base("Question") { }
-    
+
     public override T Accept<T>(IAstVisitor<T> visitor) => visitor.VisitQuestion(this);
 }
 
@@ -121,9 +139,9 @@ public class ThoughtNode : AstNode
 {
     public string Content { get; set; } = "";
     public bool ShouldHide { get; set; } = true;
-    
+
     public ThoughtNode() : base("Thought") { }
-    
+
     public override T Accept<T>(IAstVisitor<T> visitor) => visitor.VisitThought(this);
 }
 
@@ -135,9 +153,9 @@ public class MarkdownNode : AstNode
     public MarkdownElement Element { get; set; }
     public int Level { get; set; } // For headers
     public string? ListMarker { get; set; } // For lists
-    
+
     public MarkdownNode() : base("Markdown") { }
-    
+
     public override T Accept<T>(IAstVisitor<T> visitor) => visitor.VisitMarkdown(this);
 }
 
@@ -149,9 +167,9 @@ public class ErrorNode : AstNode
     public string Message { get; set; } = "";
     public ErrorSeverity Severity { get; set; }
     public string? ErrorCode { get; set; }
-    
+
     public ErrorNode() : base("Error") { }
-    
+
     public override T Accept<T>(IAstVisitor<T> visitor) => visitor.VisitError(this);
 }
 
@@ -163,9 +181,9 @@ public class CommandNode : AstNode
     public string Command { get; set; } = "";
     public string? WorkingDirectory { get; set; }
     public Dictionary<string, string>? Environment { get; set; }
-    
+
     public CommandNode() : base("Command") { }
-    
+
     public override T Accept<T>(IAstVisitor<T> visitor) => visitor.VisitCommand(this);
 }
 
@@ -231,6 +249,7 @@ public interface IAstVisitor<T>
     T VisitResponse(ResponseNode node);
     T VisitText(TextNode node);
     T VisitToolCall(ToolCallNode node);
+    T VisitToolResult(ToolResultNode node);
     T VisitCode(CodeNode node);
     T VisitFileReference(FileReferenceNode node);
     T VisitQuestion(QuestionNode node);

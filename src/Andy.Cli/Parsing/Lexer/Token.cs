@@ -14,7 +14,7 @@ public class Token
     public int Column { get; set; }
     public int Length { get; set; }
     public object? Metadata { get; set; }
-    
+
     public Token(TokenType type, string value, int position)
     {
         Type = type;
@@ -22,7 +22,7 @@ public class Token
         Position = position;
         Length = value.Length;
     }
-    
+
     public override string ToString() => $"{Type}({Value})@{Position}";
 }
 
@@ -35,19 +35,19 @@ public enum TokenType
     Text,
     Whitespace,
     Newline,
-    
+
     // Code and markup
     CodeBlockStart,
     CodeBlockEnd,
     CodeBlockLanguage,
     InlineCode,
-    
+
     // Tool calls
     ToolCallStart,
     ToolCallEnd,
     ToolName,
     ToolArgument,
-    
+
     // JSON tokens
     JsonObjectStart,
     JsonObjectEnd,
@@ -59,7 +59,7 @@ public enum TokenType
     JsonNumber,
     JsonBoolean,
     JsonNull,
-    
+
     // Markdown tokens
     MarkdownHeader,
     MarkdownBold,
@@ -68,7 +68,7 @@ public enum TokenType
     MarkdownLink,
     MarkdownImage,
     MarkdownBlockquote,
-    
+
     // Semantic tokens
     FilePath,
     FileName,
@@ -77,13 +77,13 @@ public enum TokenType
     EmailAddress,
     Question,
     Command,
-    
+
     // Special markers
     ThoughtStart,
     ThoughtEnd,
     ErrorMarker,
     WarningMarker,
-    
+
     // Punctuation
     Period,
     Comma,
@@ -99,7 +99,7 @@ public enum TokenType
     CloseBrace,
     Quote,
     DoubleQuote,
-    
+
     // Control tokens
     Eof,
     Unknown

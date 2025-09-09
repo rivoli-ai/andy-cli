@@ -13,7 +13,7 @@ public class SemanticAnalyzer
 {
     private readonly ILogger<SemanticAnalyzer>? _logger;
     private readonly Dictionary<string, ToolDefinition> _knownTools;
-    
+
     public SemanticAnalyzer(ILogger<SemanticAnalyzer>? logger = null)
     {
         _logger = logger;
@@ -27,36 +27,36 @@ public class SemanticAnalyzer
     {
         var result = new SemanticAnalysisResult();
         var context = new AnalysisContext();
-        
+
         try
         {
             // Check for duplicate tool calls
             CheckDuplicateToolCalls(ast, result, context);
-            
+
             // Validate tool call arguments
             ValidateToolCallArguments(ast, result, context);
-            
+
             // Check for orphaned tool responses
             CheckOrphanedToolResponses(ast, result, context);
-            
+
             // Validate file references
             ValidateFileReferences(ast, result, context);
-            
+
             // Check for conflicting operations
             CheckConflictingOperations(ast, result, context);
-            
+
             // Analyze control flow
             AnalyzeControlFlow(ast, result, context);
-            
+
             // Check for incomplete code blocks
             CheckIncompleteCodeBlocks(ast, result, context);
-            
+
             // Validate questions and expected responses
             ValidateQuestions(ast, result, context);
-            
+
             // Extract semantic information
             ExtractSemanticInfo(ast, result, context);
-            
+
             result.Success = !result.Diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error);
         }
         catch (Exception ex)
@@ -70,7 +70,7 @@ public class SemanticAnalyzer
                 Phase = CompilationPhase.Semantic
             });
         }
-        
+
         return result;
     }
 
@@ -78,11 +78,11 @@ public class SemanticAnalyzer
     {
         var toolCalls = ast.Children.OfType<ToolCallNode>().ToList();
         var seenCalls = new Dictionary<string, ToolCallNode>();
-        
+
         foreach (var toolCall in toolCalls)
         {
             var signature = GetToolCallSignature(toolCall);
-            
+
             if (seenCalls.TryGetValue(signature, out var previousCall))
             {
                 result.Diagnostics.Add(new Diagnostic
@@ -92,7 +92,7 @@ public class SemanticAnalyzer
                     Node = toolCall,
                     Phase = CompilationPhase.Semantic
                 });
-                
+
                 context.DuplicateToolCalls.Add((previousCall, toolCall));
             }
             else
@@ -105,7 +105,7 @@ public class SemanticAnalyzer
     private void ValidateToolCallArguments(ResponseNode ast, SemanticAnalysisResult result, AnalysisContext context)
     {
         var toolCalls = ast.Children.OfType<ToolCallNode>();
-        
+
         foreach (var toolCall in toolCalls)
         {
             if (_knownTools.TryGetValue(toolCall.ToolName.ToLower(), out var toolDef))
@@ -124,7 +124,7 @@ public class SemanticAnalyzer
                         });
                     }
                 }
-                
+
                 // Check parameter types
                 foreach (var arg in toolCall.Arguments)
                 {
@@ -167,7 +167,7 @@ public class SemanticAnalyzer
     {
         var fileRefs = ast.Children.OfType<FileReferenceNode>().ToList();
         var fileOperations = new Dictionary<string, List<FileReferenceNode>>();
-        
+
         foreach (var fileRef in fileRefs)
         {
             if (!fileOperations.ContainsKey(fileRef.Path))
@@ -176,14 +176,14 @@ public class SemanticAnalyzer
             }
             fileOperations[fileRef.Path].Add(fileRef);
         }
-        
+
         // Check for conflicting operations on same file
         foreach (var (path, refs) in fileOperations)
         {
             var hasDelete = refs.Any(r => r.ReferenceType == FileReferenceType.Delete);
-            var hasWrite = refs.Any(r => r.ReferenceType == FileReferenceType.Write || 
+            var hasWrite = refs.Any(r => r.ReferenceType == FileReferenceType.Write ||
                                         r.ReferenceType == FileReferenceType.Create);
-            
+
             if (hasDelete && hasWrite)
             {
                 result.Diagnostics.Add(new Diagnostic
@@ -193,7 +193,7 @@ public class SemanticAnalyzer
                     Phase = CompilationPhase.Semantic
                 });
             }
-            
+
             // Check for multiple creates
             var creates = refs.Where(r => r.ReferenceType == FileReferenceType.Create).ToList();
             if (creates.Count > 1)
@@ -207,7 +207,7 @@ public class SemanticAnalyzer
                 });
             }
         }
-        
+
         context.FileOperations = fileOperations;
     }
 
@@ -215,7 +215,7 @@ public class SemanticAnalyzer
     {
         // Check for logically conflicting operations
         var commands = ast.Children.OfType<CommandNode>().ToList();
-        
+
         // Check for cd commands followed by relative path operations
         for (int i = 0; i < commands.Count - 1; i++)
         {
@@ -239,7 +239,7 @@ public class SemanticAnalyzer
     {
         // Analyze the logical flow of operations
         var operations = new List<(AstNode node, string type)>();
-        
+
         foreach (var child in ast.Children)
         {
             operations.Add(child switch
@@ -251,7 +251,7 @@ public class SemanticAnalyzer
                 _ => (child, "other")
             });
         }
-        
+
         // Check for questions after operations (might not get answered)
         for (int i = 0; i < operations.Count - 1; i++)
         {
@@ -269,14 +269,14 @@ public class SemanticAnalyzer
                 }
             }
         }
-        
+
         context.OperationFlow = operations;
     }
 
     private void CheckIncompleteCodeBlocks(ResponseNode ast, SemanticAnalysisResult result, AnalysisContext context)
     {
         var codeBlocks = ast.Children.OfType<CodeNode>();
-        
+
         foreach (var code in codeBlocks)
         {
             // Check for common indicators of incomplete code
@@ -290,7 +290,7 @@ public class SemanticAnalyzer
                     Phase = CompilationPhase.Semantic
                 });
             }
-            
+
             // Check for unbalanced braces/brackets
             if (!IsBalanced(code.Code))
             {
@@ -308,7 +308,7 @@ public class SemanticAnalyzer
     private void ValidateQuestions(ResponseNode ast, SemanticAnalysisResult result, AnalysisContext context)
     {
         var questions = ast.Children.OfType<QuestionNode>().ToList();
-        
+
         foreach (var question in questions)
         {
             // Check if question expects specific format
@@ -316,10 +316,10 @@ public class SemanticAnalyzer
             {
                 question.SuggestedOptions = new List<string> { "Yes", "No" };
             }
-            
+
             context.Questions.Add(question);
         }
-        
+
         if (questions.Count > 3)
         {
             result.Diagnostics.Add(new Diagnostic
@@ -375,11 +375,11 @@ public class SemanticAnalyzer
             { '[', ']' },
             { '{', '}' }
         };
-        
+
         var inString = false;
         var inChar = false;
         var escape = false;
-        
+
         foreach (var c in code)
         {
             if (escape)
@@ -387,18 +387,18 @@ public class SemanticAnalyzer
                 escape = false;
                 continue;
             }
-            
+
             if (c == '\\')
             {
                 escape = true;
                 continue;
             }
-            
+
             if (c == '"' && !inChar)
                 inString = !inString;
             else if (c == '\'' && !inString)
                 inChar = !inChar;
-            
+
             if (!inString && !inChar)
             {
                 if (pairs.ContainsKey(c))
@@ -410,7 +410,7 @@ public class SemanticAnalyzer
                 }
             }
         }
-        
+
         return stack.Count == 0;
     }
 
@@ -427,7 +427,7 @@ public class SemanticAnalyzer
     private string DeterminePrimaryIntent(ResponseNode ast)
     {
         var typeCounts = new Dictionary<string, int>();
-        
+
         foreach (var child in ast.Children)
         {
             var type = child switch
@@ -440,12 +440,12 @@ public class SemanticAnalyzer
                 TextNode => "Explanation",
                 _ => "Other"
             };
-            
+
             typeCounts[type] = typeCounts.GetValueOrDefault(type, 0) + 1;
         }
-        
-        return typeCounts.Any() 
-            ? typeCounts.OrderByDescending(kvp => kvp.Value).First().Key 
+
+        return typeCounts.Any()
+            ? typeCounts.OrderByDescending(kvp => kvp.Value).First().Key
             : "Unknown";
     }
 

@@ -24,7 +24,7 @@ public class StreamingToolCallAccumulatorTests
             ToolCallName = "test_tool",
             ToolCallArguments = """{"param": "value"}"""
         };
-        
+
         var chunk2 = new StreamChunk
         {
             IsFinished = true
@@ -100,7 +100,7 @@ public class StreamingToolCallAccumulatorTests
             ToolCallName = "test_tool",
             ToolCallArguments = """{param: "value", extra: 123,}""" // Missing quotes, trailing comma
         };
-        
+
         var chunk2 = new StreamChunk
         {
             IsFinished = true
@@ -130,9 +130,9 @@ public class StreamingToolCallAccumulatorTests
     public void Clear_RemovesAllAccumulatedCalls()
     {
         // Arrange
-        _accumulator.AccumulateChunk(new StreamChunk 
-        { 
-            ToolCallIndex = 0, 
+        _accumulator.AccumulateChunk(new StreamChunk
+        {
+            ToolCallIndex = 0,
             ToolCallName = "test_tool",
             ToolCallArguments = """{"param": "value"}"""
         });
@@ -149,15 +149,15 @@ public class StreamingToolCallAccumulatorTests
     public void GetStats_ReturnsCorrectStatistics()
     {
         // Arrange
-        _accumulator.AccumulateChunk(new StreamChunk 
-        { 
-            ToolCallIndex = 0, 
+        _accumulator.AccumulateChunk(new StreamChunk
+        {
+            ToolCallIndex = 0,
             ToolCallName = "tool1",
             ToolCallArguments = """{"a": 1}"""
         });
-        _accumulator.AccumulateChunk(new StreamChunk 
-        { 
-            ToolCallIndex = 1, 
+        _accumulator.AccumulateChunk(new StreamChunk
+        {
+            ToolCallIndex = 1,
             ToolCallName = "tool2"
         });
         _accumulator.AccumulateChunk(new StreamChunk { IsFinished = true });
@@ -176,15 +176,15 @@ public class StreamingToolCallAccumulatorTests
     public void GetAllCalls_IncludeIncomplete_ReturnsAllCalls()
     {
         // Arrange
-        _accumulator.AccumulateChunk(new StreamChunk 
-        { 
-            ToolCallIndex = 0, 
+        _accumulator.AccumulateChunk(new StreamChunk
+        {
+            ToolCallIndex = 0,
             ToolCallName = "complete_tool",
             ToolCallArguments = """{"param": "value"}"""
         });
-        _accumulator.AccumulateChunk(new StreamChunk 
-        { 
-            ToolCallIndex = 1, 
+        _accumulator.AccumulateChunk(new StreamChunk
+        {
+            ToolCallIndex = 1,
             ToolCallName = "incomplete_tool"
             // No arguments yet - this is incomplete
         });

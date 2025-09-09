@@ -62,46 +62,46 @@ public class ToolExecutionDisplay : IFeedItem
     {
         // Calculate lines needed
         int lines = 3; // Header + separator + status
-        
+
         // Parameters
         if (_parameters.Any())
         {
             lines += 1 + _parameters.Count; // "Parameters:" + each param
         }
-        
+
         // Output
         if (_outputLines.Any())
         {
             lines += 2; // "Output:" header + separator
             lines += Math.Min(_outputLines.Count, _maxDisplayLines);
-            
+
             if (_outputLines.Count > _maxDisplayLines)
             {
                 lines++; // Truncation message
             }
         }
-        
+
         // Error
         if (!string.IsNullOrEmpty(_error))
         {
             lines += 2; // Error header + message
         }
-        
+
         return lines;
     }
 
     public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
     {
         if (width <= 0 || maxLines <= 0) return;
-        
+
         var currentY = y;
         var linesDrawn = 0;
-        
+
         // Draw border
-        var borderColor = _isComplete 
+        var borderColor = _isComplete
             ? (_isSuccessful ? new DL.Rgb24(60, 120, 60) : new DL.Rgb24(120, 60, 60))
             : new DL.Rgb24(100, 100, 40);
-        
+
         // Header
         if (linesDrawn < maxLines && startLine <= 0)
         {
@@ -111,7 +111,7 @@ public class ToolExecutionDisplay : IFeedItem
             currentY++;
             linesDrawn++;
         }
-        
+
         // Tool ID
         if (linesDrawn < maxLines && startLine <= 1)
         {
@@ -119,7 +119,7 @@ public class ToolExecutionDisplay : IFeedItem
             currentY++;
             linesDrawn++;
         }
-        
+
         // Parameters
         if (_parameters.Any() && linesDrawn < maxLines)
         {
@@ -131,7 +131,7 @@ public class ToolExecutionDisplay : IFeedItem
                 linesDrawn++;
                 paramLine++;
             }
-            
+
             foreach (var param in _parameters)
             {
                 if (linesDrawn >= maxLines) break;
@@ -149,19 +149,19 @@ public class ToolExecutionDisplay : IFeedItem
                 paramLine++;
             }
         }
-        
+
         // Output
         if (_outputLines.Any() && linesDrawn < maxLines)
         {
             var outputStartLine = 3 + _parameters.Count;
-            
+
             if (startLine <= outputStartLine)
             {
                 b.DrawText(new DL.TextRun(x + 2, currentY, "Output:", new DL.Rgb24(100, 200, 100), null, DL.CellAttrFlags.None));
                 currentY++;
                 linesDrawn++;
             }
-            
+
             // Draw output lines
             var linesToShow = Math.Min(_outputLines.Count, _maxDisplayLines);
             for (int i = 0; i < linesToShow && linesDrawn < maxLines; i++)
@@ -179,7 +179,7 @@ public class ToolExecutionDisplay : IFeedItem
                     linesDrawn++;
                 }
             }
-            
+
             // Truncation message
             if (_outputLines.Count > _maxDisplayLines && linesDrawn < maxLines)
             {
@@ -193,14 +193,14 @@ public class ToolExecutionDisplay : IFeedItem
                 }
             }
         }
-        
+
         // Error
         if (!string.IsNullOrEmpty(_error) && linesDrawn < maxLines)
         {
             b.DrawText(new DL.TextRun(x + 2, currentY, "Error:", new DL.Rgb24(255, 100, 100), null, DL.CellAttrFlags.Bold));
             currentY++;
             linesDrawn++;
-            
+
             if (linesDrawn < maxLines)
             {
                 var errorMsg = _error;

@@ -26,61 +26,56 @@ public class StreamingRepetitionTest
         var mockToolRegistry = new Mock<IToolRegistry>();
         var mockToolExecutor = new Mock<IToolExecutor>();
         var feed = new FeedView();
-        
+
         // Mock tool registry to return empty list
         mockToolRegistry.Setup(x => x.GetTools(
                 It.IsAny<ToolCategory?>(),
-                It.IsAny<ToolCapability?>(), 
+                It.IsAny<ToolCapability?>(),
                 It.IsAny<IEnumerable<string>?>(),
                 It.IsAny<bool>()))
             .Returns(new List<ToolRegistration>());
-        var parser = new QwenResponseParser(
-            new JsonRepairService(), 
-            new StreamingToolCallAccumulator(new JsonRepairService(), NullLogger<StreamingToolCallAccumulator>.Instance),
-            NullLogger<QwenResponseParser>.Instance);
-        var validator = new ToolCallValidator(mockToolRegistry.Object);
-        
+        var jsonRepair = new JsonRepairService();
+
         var service = new AiConversationService(
             mockLlmClient.Object,
             mockToolRegistry.Object,
             mockToolExecutor.Object,
             feed,
             "Test system prompt",
-            parser,
-            validator);
+            jsonRepair);
 
         // Simulate streaming response with repeated content
         var testContent = "I'm ready to help. I see we are in /Users/samibengrine/Devel/rivoli-ai/andy-cli/ directory.";
         var chunks = SimulateStreamingChunks(testContent);
-        
+
         // Setup mock to return streaming chunks
         mockLlmClient.Setup(x => x.StreamCompleteAsync(
-                It.IsAny<LlmRequest>(), 
+                It.IsAny<LlmRequest>(),
                 It.IsAny<CancellationToken>()))
             .Returns(chunks);
 
         // Setup mock for non-streaming fallback
         mockLlmClient.Setup(x => x.CompleteAsync(
-                It.IsAny<LlmRequest>(), 
+                It.IsAny<LlmRequest>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new LlmResponse { Content = testContent });
 
         // Act
         await service.ProcessMessageAsync("test message", enableStreaming: true);
-        
+
         // Get the feed content
         var feedContent = GetFeedContent(feed);
-        
+
         // Assert - Check for repetition
         Assert.NotNull(feedContent);
-        
+
         // Count occurrences of the test phrase
         var occurrences = CountOccurrences(feedContent, "I'm ready to help");
-        
+
         // Log for debugging
         Console.WriteLine($"Feed content: {feedContent}");
         Console.WriteLine($"Occurrences of 'I'm ready to help': {occurrences}");
-        
+
         // Should appear only once
         Assert.Equal(1, occurrences);
     }
@@ -93,36 +88,31 @@ public class StreamingRepetitionTest
         var mockToolRegistry = new Mock<IToolRegistry>();
         var mockToolExecutor = new Mock<IToolExecutor>();
         var feed = new FeedView();
-        
+
         // Mock tool registry to return empty list
         mockToolRegistry.Setup(x => x.GetTools(
                 It.IsAny<ToolCategory?>(),
-                It.IsAny<ToolCapability?>(), 
+                It.IsAny<ToolCapability?>(),
                 It.IsAny<IEnumerable<string>?>(),
                 It.IsAny<bool>()))
             .Returns(new List<ToolRegistration>());
-        var parser = new QwenResponseParser(
-            new JsonRepairService(), 
-            new StreamingToolCallAccumulator(new JsonRepairService(), NullLogger<StreamingToolCallAccumulator>.Instance),
-            NullLogger<QwenResponseParser>.Instance);
-        var validator = new ToolCallValidator(mockToolRegistry.Object);
-        
+        var jsonRepair = new JsonRepairService();
+
         var service = new AiConversationService(
             mockLlmClient.Object,
             mockToolRegistry.Object,
             mockToolExecutor.Object,
             feed,
             "Test system prompt",
-            parser,
-            validator);
+            jsonRepair);
 
         // Content with tool call
         var testContent = "Let me check that. {\"tool\":\"list_directory\",\"parameters\":{\"path\":\"./src/\"}}";
         var chunks = SimulateStreamingChunks(testContent);
-        
+
         // Setup mock
         mockLlmClient.Setup(x => x.StreamCompleteAsync(
-                It.IsAny<LlmRequest>(), 
+                It.IsAny<LlmRequest>(),
                 It.IsAny<CancellationToken>()))
             .Returns(chunks);
 
@@ -131,23 +121,23 @@ public class StreamingRepetitionTest
                 It.IsAny<string>(),
                 It.IsAny<Dictionary<string, object?>>(),
                 It.IsAny<ToolExecutionContext>()))
-            .Returns(Task.FromResult(new Andy.Tools.Core.ToolExecutionResult 
-            { 
+            .Returns(Task.FromResult(new Andy.Tools.Core.ToolExecutionResult
+            {
                 IsSuccessful = true,
                 Data = "Directory contents..."
             }));
 
         // Act
         await service.ProcessMessageAsync("test message", enableStreaming: true);
-        
+
         // Get the feed content
         var feedContent = GetFeedContent(feed);
-        
+
         // Assert
         var occurrences = CountOccurrences(feedContent, "Let me check that");
         Console.WriteLine($"Feed content: {feedContent}");
         Console.WriteLine($"Occurrences of 'Let me check that': {occurrences}");
-        
+
         Assert.Equal(1, occurrences);
     }
 
@@ -158,8 +148,8 @@ public class StreamingRepetitionTest
         for (int i = 0; i < content.Length; i += chunkSize)
         {
             var chunk = content.Substring(i, Math.Min(chunkSize, content.Length - i));
-            yield return new LlmStreamResponse 
-            { 
+            yield return new LlmStreamResponse
+            {
                 TextDelta = chunk
             };
             await Task.Delay(10); // Simulate network delay
@@ -171,11 +161,11 @@ public class StreamingRepetitionTest
         // This is a simplified version - in reality we'd need to access the feed's internal content
         // For testing, we might need to expose a method or property to get the accumulated content
         var sb = new StringBuilder();
-        
+
         // Use reflection or make feed content accessible for testing
-        var fieldInfo = typeof(FeedView).GetField("_messages", 
+        var fieldInfo = typeof(FeedView).GetField("_messages",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        
+
         if (fieldInfo != null)
         {
             var messages = fieldInfo.GetValue(feed) as List<object>;
@@ -187,7 +177,7 @@ public class StreamingRepetitionTest
                 }
             }
         }
-        
+
         return sb.ToString();
     }
 
@@ -214,33 +204,33 @@ public class LlmClientStreamingTest
     {
         // This test would check if andy-llm is sending duplicate chunks
         var receivedChunks = new List<string>();
-        
+
         // Simulate receiving chunks
         await foreach (var chunk in SimulateRawStreamingFromLlm())
         {
             receivedChunks.Add(chunk.TextDelta);
         }
-        
+
         // Combine all chunks
         var combined = string.Join("", receivedChunks);
-        
+
         // Check for duplication
         Assert.DoesNotContain("I'm ready to helpI'm ready to help", combined);
-        
+
         Console.WriteLine($"Combined chunks: {combined}");
         Console.WriteLine($"Total chunks: {receivedChunks.Count}");
     }
-    
+
     private async IAsyncEnumerable<LlmStreamResponse> SimulateRawStreamingFromLlm()
     {
         // Simulate what andy-llm might be sending
         var fullText = "I'm ready to help. I see we are in /Users/samibengrine/Devel/rivoli-ai/andy-cli/ directory.";
-        
+
         // Simulate potential duplication bug - sending same content twice
         // Uncomment to test duplication scenario:
         // yield return new LlmStreamResponse { TextDelta = fullText };
         // yield return new LlmStreamResponse { TextDelta = fullText };
-        
+
         // Normal streaming
         var chunks = new[] {
             "I'm ready to help.",
@@ -249,7 +239,7 @@ public class LlmClientStreamingTest
             "Devel/rivoli-ai/",
             "andy-cli/ directory."
         };
-        
+
         foreach (var chunk in chunks)
         {
             yield return new LlmStreamResponse { TextDelta = chunk ?? "" };

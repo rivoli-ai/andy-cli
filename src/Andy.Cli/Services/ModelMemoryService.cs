@@ -12,7 +12,7 @@ public class ModelMemoryService
 {
     private readonly string _configPath;
     private Dictionary<string, ModelMemory> _memory;
-    
+
     public ModelMemoryService()
     {
         var configDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".andy");
@@ -20,7 +20,7 @@ public class ModelMemoryService
         _configPath = Path.Combine(configDir, "model-memory.json");
         _memory = LoadMemory();
     }
-    
+
     /// <summary>
     /// Remember the model for a provider
     /// </summary>
@@ -34,7 +34,7 @@ public class ModelMemoryService
         };
         SaveMemory();
     }
-    
+
     /// <summary>
     /// Get the last used model for a provider
     /// </summary>
@@ -42,7 +42,7 @@ public class ModelMemoryService
     {
         return _memory.TryGetValue(provider, out var memory) ? memory.Model : null;
     }
-    
+
     /// <summary>
     /// Get the current provider and model
     /// </summary>
@@ -54,7 +54,7 @@ public class ModelMemoryService
         }
         return null;
     }
-    
+
     /// <summary>
     /// Set the current provider and model
     /// </summary>
@@ -68,7 +68,7 @@ public class ModelMemoryService
         };
         RememberModel(provider, model);
     }
-    
+
     /// <summary>
     /// Get all remembered models
     /// </summary>
@@ -84,7 +84,7 @@ public class ModelMemoryService
         }
         return result;
     }
-    
+
     private Dictionary<string, ModelMemory> LoadMemory()
     {
         try
@@ -92,7 +92,7 @@ public class ModelMemoryService
             if (File.Exists(_configPath))
             {
                 var json = File.ReadAllText(_configPath);
-                return JsonSerializer.Deserialize<Dictionary<string, ModelMemory>>(json) 
+                return JsonSerializer.Deserialize<Dictionary<string, ModelMemory>>(json)
                     ?? new Dictionary<string, ModelMemory>();
             }
         }
@@ -102,7 +102,7 @@ public class ModelMemoryService
         }
         return new Dictionary<string, ModelMemory>();
     }
-    
+
     private void SaveMemory()
     {
         try
@@ -118,7 +118,7 @@ public class ModelMemoryService
             // Silently fail if we can't save
         }
     }
-    
+
     private class ModelMemory
     {
         public string Provider { get; set; } = "";

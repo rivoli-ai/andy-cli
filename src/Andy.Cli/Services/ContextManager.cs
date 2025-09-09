@@ -19,8 +19,8 @@ public class ContextManager
 
     public ContextManager(
         string systemPrompt,
-        int maxTokens = 8000,
-        int compressionThreshold = 6000)
+        int maxTokens = 6000,
+        int compressionThreshold = 4500)
     {
         _systemPrompt = systemPrompt;
         _maxTokens = maxTokens;
@@ -44,32 +44,40 @@ public class ContextManager
     /// <summary>
     /// Add an assistant message to the context
     /// </summary>
-    public void AddAssistantMessage(string message)
+    public void AddAssistantMessage(string message, List<ContextToolCall>? toolCalls = null)
     {
         _history.Add(new ContextEntry
         {
             Role = MessageRole.Assistant,
             Content = message,
             Timestamp = DateTime.UtcNow,
-            TokenEstimate = EstimateTokens(message)
+            TokenEstimate = EstimateTokens(message),
+            ToolCalls = toolCalls
         });
     }
 
     /// <summary>
     /// Add a tool execution to the context
     /// </summary>
-    public void AddToolExecution(string toolId, Dictionary<string, object?> parameters, string result)
+    public void AddToolExecution(string toolId, string callId, Dictionary<string, object?> parameters, string result)
     {
-        var toolMessage = FormatToolExecution(toolId, parameters, result);
-        
+        // Cap tool result size to avoid exceeding provider limits
+        const int maxToolResultChars = 4000;
+        var cappedResult = result;
+        if (!string.IsNullOrEmpty(result) && result.Length > maxToolResultChars)
+        {
+            cappedResult = result.Substring(0, maxToolResultChars) + "\n...[truncated]";
+        }
         _history.Add(new ContextEntry
         {
             Role = MessageRole.Tool,
-            Content = toolMessage,
+            // Per grounding policy: add RAW tool result content (prefer JSON) with proper call reference (capped)
+            Content = cappedResult,
             Timestamp = DateTime.UtcNow,
-            TokenEstimate = EstimateTokens(toolMessage),
+            TokenEstimate = EstimateTokens(cappedResult),
             ToolId = toolId,
-            ToolResult = result
+            ToolCallId = callId,
+            ToolResult = cappedResult
         });
     }
 
@@ -106,12 +114,29 @@ public class ContextManager
                 }
                 else if (entry.Role == MessageRole.Assistant)
                 {
-                    context.AddAssistantMessage(entry.Content);
+                    // If the assistant message includes tool calls, add them
+                    if (entry.ToolCalls != null && entry.ToolCalls.Any())
+                    {
+                        // Convert to FunctionCall format
+                        var functionCalls = entry.ToolCalls.Select(tc => new FunctionCall
+                        {
+                            Id = tc.CallId,
+                            Name = tc.ToolId,
+                            Arguments = tc.Parameters
+                        }).ToList();
+
+                        context.AddAssistantMessageWithToolCalls(entry.Content, functionCalls);
+                    }
+                    else
+                    {
+                        context.AddAssistantMessage(entry.Content);
+                    }
                 }
                 else if (entry.Role == MessageRole.Tool)
                 {
                     // Tool messages need to be added as tool responses
-                    context.AddToolResponse(entry.ToolId ?? "tool", "call_" + Guid.NewGuid().ToString("N"), entry.Content);
+                    // They must reference a previous tool call
+                    context.AddToolResponse(entry.ToolId ?? "tool", entry.ToolCallId ?? "call_" + Guid.NewGuid().ToString("N"), entry.Content);
                 }
             }
         }
@@ -149,14 +174,31 @@ public class ContextManager
             }
             else if (entry.Role == MessageRole.Assistant)
             {
-                context.AddAssistantMessage(entry.Content);
+                // If the assistant message includes tool calls, add them
+                if (entry.ToolCalls != null && entry.ToolCalls.Any())
+                {
+                    // Convert to FunctionCall format
+                    var functionCalls = entry.ToolCalls.Select(tc => new FunctionCall
+                    {
+                        Id = tc.CallId,
+                        Name = tc.ToolId,
+                        Arguments = tc.Parameters
+                    }).ToList();
+
+                    context.AddAssistantMessageWithToolCalls(entry.Content, functionCalls);
+                }
+                else
+                {
+                    context.AddAssistantMessage(entry.Content);
+                }
             }
             else if (entry.Role == MessageRole.Tool)
             {
+                // Use already-capped content to avoid overflowing provider limits
                 context.AddToolResponse(
                     entry.ToolId ?? "tool",
-                    "call_" + Guid.NewGuid().ToString("N"),
-                    entry.ToolResult ?? entry.Content
+                    entry.ToolCallId ?? "call_" + Guid.NewGuid().ToString("N"),
+                    entry.Content
                 );
             }
         }
@@ -171,7 +213,7 @@ public class ContextManager
     {
         var summary = new StringBuilder();
         summary.AppendLine($"Discussed {messages.Count} messages:");
-        
+
         // Group by topic/tool usage
         var toolCalls = messages.Where(m => m.Role == MessageRole.Tool).ToList();
         if (toolCalls.Any())
@@ -195,32 +237,8 @@ public class ContextManager
     /// </summary>
     private string FormatToolExecution(string toolId, Dictionary<string, object?> parameters, string result)
     {
-        var sb = new StringBuilder();
-        sb.AppendLine($"[Tool Execution: {toolId}]");
-        
-        if (parameters.Any())
-        {
-            sb.AppendLine("Parameters:");
-            foreach (var param in parameters)
-            {
-                sb.AppendLine($"  {param.Key}: {param.Value}");
-            }
-        }
-        
-        sb.AppendLine("Result:");
-        
-        // Limit result size for context
-        if (result.Length > 500)
-        {
-            sb.AppendLine(result.Substring(0, 497) + "...");
-            sb.AppendLine($"[Truncated - full result was {result.Length} characters]");
-        }
-        else
-        {
-            sb.AppendLine(result);
-        }
-        
-        return sb.ToString();
+        // Deprecated wrapper retained for compatibility; now we return raw result per grounding policy
+        return result;
     }
 
     /// <summary>
@@ -274,7 +292,9 @@ public class ContextEntry
     public DateTime Timestamp { get; set; }
     public int TokenEstimate { get; set; }
     public string? ToolId { get; set; }
+    public string? ToolCallId { get; set; }
     public string? ToolResult { get; set; }
+    public List<ContextToolCall>? ToolCalls { get; set; }
 }
 
 /// <summary>
@@ -298,4 +318,14 @@ public class ContextStats
     public int ToolCallCount { get; set; }
     public DateTime? OldestMessage { get; set; }
     public DateTime? NewestMessage { get; set; }
+}
+
+/// <summary>
+/// Represents a tool call in the conversation
+/// </summary>
+public class ContextToolCall
+{
+    public string CallId { get; set; } = Guid.NewGuid().ToString("N");
+    public string ToolId { get; set; } = "";
+    public Dictionary<string, object?> Parameters { get; set; } = new();
 }

@@ -68,15 +68,15 @@ public class CreateDirectoryTool : ToolBase
     {
         // Get parameters
         var path = parameters["path"]?.ToString() ?? string.Empty;
-        var createParents = parameters.ContainsKey("create_parents") 
-            ? Convert.ToBoolean(parameters["create_parents"]) 
+        var createParents = parameters.ContainsKey("create_parents")
+            ? Convert.ToBoolean(parameters["create_parents"])
             : true;
 
         try
         {
             // Resolve path
-            var fullPath = Path.IsPathRooted(path) 
-                ? path 
+            var fullPath = Path.IsPathRooted(path)
+                ? path
                 : Path.Combine(Directory.GetCurrentDirectory(), path);
 
             // Normalize path
@@ -101,7 +101,7 @@ public class CreateDirectoryTool : ToolBase
                 {
                     return ToolResult.Failure($"Parent directory does not exist: {parent}");
                 }
-                
+
                 Directory.CreateDirectory(fullPath);
             }
 
@@ -109,7 +109,7 @@ public class CreateDirectoryTool : ToolBase
             if (Directory.Exists(fullPath))
             {
                 var info = new DirectoryInfo(fullPath);
-                
+
                 var result = new Dictionary<string, object?>
                 {
                     ["path"] = fullPath,
@@ -156,7 +156,7 @@ public class CreateDirectoryTool : ToolBase
     public override IList<string> ValidateParameters(Dictionary<string, object?> parameters)
     {
         var errors = new List<string>();
-        
+
         // Call base validation first
         var baseErrors = base.ValidateParameters(parameters);
         errors.AddRange(baseErrors);
@@ -165,7 +165,7 @@ public class CreateDirectoryTool : ToolBase
         if (parameters.TryGetValue("path", out var pathValue))
         {
             var path = pathValue?.ToString();
-            
+
             if (string.IsNullOrWhiteSpace(path))
             {
                 errors.Add("Path parameter cannot be empty");

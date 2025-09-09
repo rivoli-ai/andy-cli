@@ -34,7 +34,7 @@ public class QwenLargeResponseTest
                 ""sizeFormatted"": ""{15 + i * 0.1:F2} KB""
             }}");
         }
-        
+
         var largeResult = $@"{{
             ""items"": [
                 {string.Join(",\n                ", items)}
@@ -55,13 +55,13 @@ public class QwenLargeResponseTest
 
         // Format the results - this should simplify them for Qwen
         var formatted = _interpreter.FormatToolResults(toolCalls, results, "qwen-3-coder-480b", "cerebras");
-        
+
         _output.WriteLine($"Formatted size: {formatted.Length} characters");
         _output.WriteLine($"First 500 chars: {formatted.Substring(0, Math.Min(500, formatted.Length))}");
-        
+
         // The formatted result should be much smaller than the original
         Assert.True(formatted.Length < largeResult.Length, "Formatted result should be smaller than raw JSON");
-        
+
         // Should contain summary information
         Assert.Contains("[list_directory completed", formatted);
         Assert.Contains("Found items:", formatted);
@@ -73,25 +73,25 @@ public class QwenLargeResponseTest
         // Create a response that would exceed typical token limits
         var hugeResponse = new StringBuilder();
         hugeResponse.AppendLine("Here are the directory contents:");
-        
+
         // Add many repeated lines (simulating what Qwen might output)
         for (int i = 0; i < 500; i++)
         {
             hugeResponse.AppendLine($"   ├─ System.Xml.XPath.{i}.dll ({15 + i * 0.1:F2} KB)");
         }
-        
+
         var response = hugeResponse.ToString();
         _output.WriteLine($"Response length: {response.Length} characters");
-        
+
         // Clean the response
         var cleaned = _interpreter.CleanResponseForDisplay(response, "qwen-3-coder-480b");
-        
+
         // Should not have duplicates (deduplication should work)
         var lines = cleaned.Split('\n').Where(l => !string.IsNullOrWhiteSpace(l)).ToList();
         var uniqueLines = lines.Distinct().Count();
-        
+
         _output.WriteLine($"Total lines: {lines.Count}, Unique lines: {uniqueLines}");
-        
+
         // Most lines should be unique after deduplication
         Assert.True(uniqueLines > lines.Count * 0.9, "Should have mostly unique lines");
     }
@@ -133,9 +133,9 @@ public class QwenLargeResponseTest
 
         // Format should simplify nested structure
         var formatted = _interpreter.FormatToolResults(toolCalls, results, "qwen-3-coder-480b", "cerebras");
-        
+
         _output.WriteLine($"Formatted result:\n{formatted}");
-        
+
         // Should be simplified
         Assert.DoesNotContain("\"items\":", formatted);
         Assert.Contains("[list_directory completed", formatted);
@@ -150,9 +150,9 @@ Status: 400 (Bad Request)";
 
         // This should not crash or throw
         var cleaned = _interpreter.CleanResponseForDisplay(errorResponse, "qwen-3-coder-480b");
-        
+
         _output.WriteLine($"Cleaned error: {cleaned}");
-        
+
         // Should preserve error message
         Assert.Contains("Error", cleaned);
         Assert.Contains("400", cleaned);

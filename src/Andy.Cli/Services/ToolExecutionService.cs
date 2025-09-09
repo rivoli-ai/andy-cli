@@ -53,7 +53,7 @@ public class ToolExecutionService
                 TruncatedForDisplay = false
             };
         }
-        
+
         // Map parameter names to what the tool expects
         var mappedParameters = ParameterMapper.MapParameters(toolId, parameters, toolReg.Metadata);
 
@@ -71,18 +71,18 @@ public class ToolExecutionService
         {
             // Execute the tool with mapped parameters
             var result = await _toolExecutor.ExecuteAsync(toolId, mappedParameters, context);
-            
+
             // Prepare the output for display
             string output = "";
-            
+
             if (result.IsSuccessful)
             {
                 // Handle different output types
                 if (result.Data != null)
                 {
                     // If Data is populated, serialize it as JSON
-                    output = JsonSerializer.Serialize(result.Data, new JsonSerializerOptions 
-                    { 
+                    output = JsonSerializer.Serialize(result.Data, new JsonSerializerOptions
+                    {
                         WriteIndented = true,
                         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
                     });
@@ -96,7 +96,7 @@ public class ToolExecutionService
                 {
                     output = result.Message;
                 }
-                
+
                 fullOutput.Append(output);
             }
             else
@@ -104,13 +104,25 @@ public class ToolExecutionService
                 output = $"Error: {result.Error ?? result.ErrorMessage ?? "Unknown error"}";
                 fullOutput.Append(output);
             }
-            
-            // Check if output is truncated (more than 10 lines or 1000 chars)
-            var lines = output.Split('\n');
-            truncated = lines.Length > 10 || output.Length > 1000;
-            
-            // Display the tool execution with the new styled item
-            _feed.AddToolExecution(toolId, mappedParameters, output, result.IsSuccessful);
+
+            // Prepare display-friendly output: cap to 10 lines and ~1000 chars
+            var lines = output.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+            var displayOutput = output;
+            if (lines.Length > 10 || output.Length > 1000)
+            {
+                var headLines = string.Join('\n', lines.Take(10));
+                if (headLines.Length > 1000)
+                {
+                    headLines = headLines.Substring(0, 1000);
+                }
+                int remainingLines = Math.Max(0, lines.Length - 10);
+                int remainingChars = Math.Max(0, output.Length - headLines.Length);
+                displayOutput = headLines + $"\n... [truncated: {remainingLines} more lines, {remainingChars} more chars]";
+                truncated = true;
+            }
+
+            // Display the tool execution with capped output to prevent UI overflow
+            _feed.AddToolExecution(toolId, mappedParameters, displayOutput, result.IsSuccessful);
 
             // Create extended result with properly serialized output
             var extendedResult = new ToolExecutionResult
@@ -124,13 +136,13 @@ public class ToolExecutionService
                 FullOutput = fullOutput.Length > 0 ? fullOutput.ToString() : (result.Message ?? ""),
                 TruncatedForDisplay = truncated
             };
-            
+
             return extendedResult;
         }
         catch (Exception ex)
         {
             _feed.AddMarkdownRich($"**Tool execution error:** {ex.Message}");
-            
+
             return new ToolExecutionResult
             {
                 IsSuccessful = false,
@@ -142,6 +154,29 @@ public class ToolExecutionService
     }
 
     /// <summary>
+    /// Execute a tool without parameter mapping or feed display. Used for tests/fallback paths.
+    /// </summary>
+    public async Task<ToolExecutionResult> ExecuteRawAsync(
+        string toolId,
+        Dictionary<string, object?> parameters,
+        CancellationToken cancellationToken = default)
+    {
+        var context = new ToolExecutionContext { CancellationToken = cancellationToken };
+        var result = await _toolExecutor.ExecuteAsync(toolId, parameters, context);
+
+        return new ToolExecutionResult
+        {
+            IsSuccessful = result.IsSuccessful,
+            Data = result.Data,
+            ErrorMessage = result.ErrorMessage,
+            Message = result.Message,
+            DurationMs = result.DurationMs,
+            FullOutput = result.Output?.ToString(),
+            TruncatedForDisplay = false
+        };
+    }
+
+    /// <summary>
     /// Parse tool call from LLM response
     /// </summary>
     public static ToolCall? ParseToolCall(string llmResponse)
@@ -149,7 +184,7 @@ public class ToolExecutionService
         // This is a simplified parser - in production you'd want more robust parsing
         // Look for patterns like: <tool>toolname</tool> <params>...</params>
         // Or JSON format: {"tool": "toolname", "params": {...}}
-        
+
         // For now, return null - we'll implement proper parsing later
         return null;
     }

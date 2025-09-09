@@ -16,7 +16,7 @@ namespace Andy.Cli.Tests.Services;
 public class StreamingDiagnosticTest
 {
     private readonly ITestOutputHelper _output;
-    
+
     public StreamingDiagnosticTest(ITestOutputHelper output)
     {
         _output = output;
@@ -27,11 +27,11 @@ public class StreamingDiagnosticTest
     {
         // This test traces the flow of text through the streaming pipeline
         var testText = "I'm ready to help. I see we are in /Users/samibengrine/Devel/rivoli-ai/andy-cli/ directory.";
-        
+
         _output.WriteLine("=== STREAMING PIPELINE TRACE ===");
         _output.WriteLine($"Original text: {testText}");
         _output.WriteLine($"Length: {testText.Length}");
-        
+
         // Step 1: Simulate chunking
         var chunks = SimulateChunking(testText, 30);
         _output.WriteLine($"\nStep 1: Chunking ({chunks.Count} chunks):");
@@ -39,7 +39,7 @@ public class StreamingDiagnosticTest
         {
             _output.WriteLine($"  Chunk {i}: [{chunks[i]}]");
         }
-        
+
         // Step 2: Simulate accumulation
         var accumulated = new StringBuilder();
         _output.WriteLine("\nStep 2: Accumulation:");
@@ -49,14 +49,14 @@ public class StreamingDiagnosticTest
             _output.WriteLine($"  After chunk: Length={accumulated.Length}");
         }
         _output.WriteLine($"  Final accumulated: [{accumulated}]");
-        
+
         // Step 3: Check for duplication
         var finalText = accumulated.ToString();
         _output.WriteLine($"\nStep 3: Duplication Check:");
         _output.WriteLine($"  Final length: {finalText.Length}");
         _output.WriteLine($"  Original length: {testText.Length}");
         _output.WriteLine($"  Match: {finalText == testText}");
-        
+
         // Check for specific duplication patterns
         CheckForDuplication(finalText);
     }
@@ -67,24 +67,24 @@ public class StreamingDiagnosticTest
         // Test with the actual duplicated output from the user
         var duplicatedText = @"I'm ready to help.  I see we are in /Users/samibengrine/Devel/rivoli-ai/andy-cli/ directory.
 I'm ready to help. I see we are in /Users/samibengrine/Devel/rivoli-ai/andy-cli/ directory.";
-        
+
         _output.WriteLine("=== DUPLICATION PATTERN ANALYSIS ===");
-        
+
         // Split by newlines
         var lines = duplicatedText.Split('\n');
         _output.WriteLine($"Lines found: {lines.Length}");
-        
+
         for (int i = 0; i < lines.Length; i++)
         {
             _output.WriteLine($"Line {i}: [{lines[i]}]");
         }
-        
+
         // Check for exact duplicates
         if (lines.Length >= 2)
         {
             var similarity = CalculateSimilarity(lines[0], lines[1]);
             _output.WriteLine($"\nSimilarity between line 0 and 1: {similarity:P}");
-            
+
             // Check character differences
             _output.WriteLine("\nCharacter differences:");
             var minLen = Math.Min(lines[0].Length, lines[1].Length);
@@ -96,17 +96,17 @@ I'm ready to help. I see we are in /Users/samibengrine/Devel/rivoli-ai/andy-cli/
                 }
             }
         }
-        
+
         // Look for patterns
         _output.WriteLine("\nPattern Analysis:");
         var firstSentence = "I'm ready to help.";
         var occurrences = CountOccurrences(duplicatedText, firstSentence);
         _output.WriteLine($"  Occurrences of '{firstSentence}': {occurrences}");
-        
+
         // Analyze positions
         var positions = FindAllOccurrences(duplicatedText, firstSentence);
         _output.WriteLine($"  Positions: {string.Join(", ", positions)}");
-        
+
         if (positions.Count >= 2)
         {
             _output.WriteLine($"  Distance between occurrences: {positions[1] - positions[0]} characters");
@@ -121,7 +121,7 @@ I'm ready to help. I see we are in /Users/samibengrine/Devel/rivoli-ai/andy-cli/
             new JsonRepairService(),
             new StreamingToolCallAccumulator(new JsonRepairService(), null),
             null);
-        
+
         var testCases = new[]
         {
             "I'm ready to help. I see we are in the directory.",
@@ -129,9 +129,9 @@ I'm ready to help. I see we are in /Users/samibengrine/Devel/rivoli-ai/andy-cli/
             "Let me check that. I'm ready to help.",
             "I'm ready to help.\nI'm ready to help." // Already duplicated
         };
-        
+
         _output.WriteLine("=== CLEAN RESPONSE TEXT EFFECT ===");
-        
+
         foreach (var test in testCases)
         {
             var cleaned = parser.CleanResponseText(test);
@@ -159,11 +159,11 @@ I'm ready to help. I see we are in /Users/samibengrine/Devel/rivoli-ai/andy-cli/
         {
             var firstHalf = text.Substring(0, halfLength);
             var secondHalf = text.Substring(halfLength);
-            
+
             _output.WriteLine($"\nDuplication analysis:");
             _output.WriteLine($"  First half:  [{firstHalf}]");
             _output.WriteLine($"  Second half: [{secondHalf}]");
-            
+
             var similarity = CalculateSimilarity(firstHalf, secondHalf);
             _output.WriteLine($"  Similarity: {similarity:P}");
         }
@@ -173,13 +173,13 @@ I'm ready to help. I see we are in /Users/samibengrine/Devel/rivoli-ai/andy-cli/
     {
         if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b))
             return 0;
-        
+
         var longer = a.Length > b.Length ? a : b;
         var shorter = a.Length > b.Length ? b : a;
-        
+
         if (longer.Length == 0)
             return 1.0;
-        
+
         var editDistance = ComputeLevenshteinDistance(a, b);
         return (longer.Length - editDistance) / (double)longer.Length;
     }

@@ -14,17 +14,17 @@ public class SimpleQwenParser : IQwenResponseParser
 {
     private readonly IJsonRepairService _jsonRepair;
     private readonly ILogger<SimpleQwenParser>? _logger;
-    
+
     // Simple pattern for Qwen's tool_call format: {"tool_call": {"name": "...", "arguments": {...}}}
     private static readonly Regex QwenToolCallPattern = new(
         @"\{[^{}]*""tool_call""\s*:\s*\{[^{}]*""name""\s*:\s*""([^""]+)""[^{}]*\}[^{}]*\}",
         RegexOptions.Singleline | RegexOptions.Compiled);
-    
+
     // Pattern to remove garbage text with invisible characters
     private static readonly Regex GarbageYouPattern = new(
         @"Y[\u200B-\u200F\uFEFF]*ou\b",
         RegexOptions.Compiled);
-    
+
     // Pattern to remove raw JSON output that looks like tool results
     private static readonly Regex RawJsonResultPattern = new(
         @"""[^""]+"":\s*(?:\[[^\]]*\]|""[^""]*""|true|false|null|\d+)",
@@ -42,7 +42,7 @@ public class SimpleQwenParser : IQwenResponseParser
     public ParsedResponse Parse(string response)
     {
         var result = new ParsedResponse();
-        
+
         if (string.IsNullOrWhiteSpace(response))
         {
             _logger?.LogDebug("Empty response received");
@@ -50,45 +50,45 @@ public class SimpleQwenParser : IQwenResponseParser
         }
 
         _logger?.LogDebug("Parsing response of length {Length}", response.Length);
-        
+
         // Extract tool calls
         result.ToolCalls = ExtractToolCalls(response);
         _logger?.LogDebug("Found {Count} tool calls", result.ToolCalls.Count);
-        
+
         // Clean the text
         result.TextContent = CleanResponseText(response);
         _logger?.LogDebug("Cleaned text length: {Length}", result.TextContent.Length);
-        
+
         result.Metadata = new ResponseMetadata
         {
             IsComplete = true,
             FinishReason = "complete"
         };
-        
+
         return result;
     }
 
     public List<ModelToolCall> ExtractToolCalls(string response)
     {
         var toolCalls = new List<ModelToolCall>();
-        
+
         if (string.IsNullOrWhiteSpace(response))
             return toolCalls;
-        
+
         // Look for Qwen's specific tool_call format
         var matches = QwenToolCallPattern.Matches(response);
         var seenCalls = new HashSet<string>(); // Prevent duplicates
-        
+
         foreach (Match match in matches)
         {
             try
             {
                 var json = match.Value;
                 _logger?.LogDebug("Attempting to parse tool call JSON: {Json}", json);
-                
+
                 // Use JSON repair to handle malformed JSON
                 var parsed = _jsonRepair.SafeParse<Dictionary<string, object?>>(json);
-                
+
                 if (parsed?.TryGetValue("tool_call", out var toolCallObj) == true)
                 {
                     var toolCall = ExtractToolCallFromObject(toolCallObj);
@@ -109,7 +109,7 @@ public class SimpleQwenParser : IQwenResponseParser
                 _logger?.LogWarning(ex, "Failed to parse tool call from match: {Match}", match.Value);
             }
         }
-        
+
         return toolCalls;
     }
 
@@ -117,11 +117,11 @@ public class SimpleQwenParser : IQwenResponseParser
     {
         if (toolCallObj == null)
             return null;
-        
+
         try
         {
             Dictionary<string, object?>? toolCallDict = null;
-            
+
             // Handle JsonElement
             if (toolCallObj is JsonElement je && je.ValueKind == JsonValueKind.Object)
             {
@@ -136,28 +136,28 @@ public class SimpleQwenParser : IQwenResponseParser
             {
                 toolCallDict = dict;
             }
-            
+
             if (toolCallDict == null)
                 return null;
-            
+
             // Extract tool name
             string? toolName = null;
             if (toolCallDict.TryGetValue("name", out var nameObj))
                 toolName = nameObj?.ToString();
-            
+
             if (string.IsNullOrWhiteSpace(toolName))
             {
                 _logger?.LogDebug("No tool name found in tool call object");
                 return null;
             }
-            
+
             // Extract arguments
             var parameters = new Dictionary<string, object?>();
             if (toolCallDict.TryGetValue("arguments", out var argsObj))
             {
                 parameters = ExtractParameters(argsObj);
             }
-            
+
             return new ModelToolCall
             {
                 ToolId = toolName,
@@ -174,10 +174,10 @@ public class SimpleQwenParser : IQwenResponseParser
     private Dictionary<string, object?> ExtractParameters(object? argsObj)
     {
         var parameters = new Dictionary<string, object?>();
-        
+
         if (argsObj == null)
             return parameters;
-        
+
         // Handle JsonElement
         if (argsObj is JsonElement je && je.ValueKind == JsonValueKind.Object)
         {
@@ -200,7 +200,7 @@ public class SimpleQwenParser : IQwenResponseParser
                 parameters = parsed;
             }
         }
-        
+
         return parameters;
     }
 
@@ -208,34 +208,34 @@ public class SimpleQwenParser : IQwenResponseParser
     {
         if (string.IsNullOrWhiteSpace(response))
             return "";
-        
+
         var cleaned = response;
-        
+
         // Remove tool call JSON
         cleaned = QwenToolCallPattern.Replace(cleaned, "");
-        
+
         // Remove garbage "You" with invisible characters
         cleaned = GarbageYouPattern.Replace(cleaned, "");
-        
+
         // Remove stray braces
         cleaned = Regex.Replace(cleaned, @"^\s*[{}]\s*$", "", RegexOptions.Multiline);
-        
+
         // Remove raw JSON that looks like tool results
-        if (cleaned.Contains("\"contents\"") || cleaned.Contains("\"recursive\"") || 
+        if (cleaned.Contains("\"contents\"") || cleaned.Contains("\"recursive\"") ||
             cleaned.Contains("\"include_hidden\"") || cleaned.Contains("\"sort_by\""))
         {
             // This looks like raw tool result output - remove it
             cleaned = RawJsonResultPattern.Replace(cleaned, "");
         }
-        
+
         // Remove common AI fluff phrases
         cleaned = Regex.Replace(cleaned, @"(?i)^\s*(?:Let me|I'll|I need to|Now I'll|Try this:)[^.!?]*[.!?:]*", "", RegexOptions.Multiline);
-        
+
         // Clean up whitespace
         cleaned = Regex.Replace(cleaned, @"[ \t]+", " ");
         cleaned = Regex.Replace(cleaned, @"\n{3,}", "\n\n");
         cleaned = cleaned.Trim();
-        
+
         return cleaned;
     }
 

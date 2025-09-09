@@ -27,15 +27,15 @@ public class QwenFullFlowTest
         // 1. Verify tool extraction works
         var toolCalls = _interpreter.ExtractToolCalls(response, "qwen-3-coder-480b", "cerebras");
         _output.WriteLine($"Tool calls found: {toolCalls.Count}");
-        
+
         Assert.Single(toolCalls);
         Assert.Equal("system_info", toolCalls[0].ToolId);
         Assert.Empty(toolCalls[0].Parameters);
-        
+
         // 2. Verify response cleaning removes the JSON
         var cleaned = _interpreter.CleanResponseForDisplay(response, "qwen-3-coder-480b");
         _output.WriteLine($"Cleaned response: '{cleaned}'");
-        
+
         Assert.DoesNotContain("{\"tool\"", cleaned);
         Assert.DoesNotContain("system_info", cleaned);
         Assert.Contains("Hello!", cleaned);
@@ -55,16 +55,16 @@ This will show all files and folders.";
         // 1. Verify tool extraction works
         var toolCalls = _interpreter.ExtractToolCalls(response, "qwen-3-coder-480b", "cerebras");
         _output.WriteLine($"Tool calls found: {toolCalls.Count}");
-        
+
         Assert.Single(toolCalls);
         Assert.Equal("list_directory", toolCalls[0].ToolId);
         Assert.Single(toolCalls[0].Parameters);
         Assert.Equal(".", toolCalls[0].Parameters["path"]);
-        
+
         // 2. Verify response cleaning removes the JSON
         var cleaned = _interpreter.CleanResponseForDisplay(response, "qwen-3-coder-480b");
         _output.WriteLine($"Cleaned response: '{cleaned}'");
-        
+
         Assert.DoesNotContain("{\"tool\"", cleaned);
         Assert.DoesNotContain("list_directory", cleaned);
         Assert.Contains("I'll list", cleaned);
@@ -86,18 +86,18 @@ I'll search for TODO items in your code.";
         // 1. Verify tool extraction works
         var toolCalls = _interpreter.ExtractToolCalls(response, "qwen-3-coder-480b", "cerebras");
         _output.WriteLine($"Tool calls found: {toolCalls.Count}");
-        
+
         Assert.Single(toolCalls);
         Assert.Equal("search_text", toolCalls[0].ToolId);
         Assert.Equal(3, toolCalls[0].Parameters.Count);
         Assert.Equal("TODO", toolCalls[0].Parameters["pattern"]);
         Assert.Equal(".", toolCalls[0].Parameters["path"]);
         Assert.Equal("regex", toolCalls[0].Parameters["method"]);
-        
+
         // 2. Verify response cleaning removes the tool_call tags
         var cleaned = _interpreter.CleanResponseForDisplay(response, "qwen-3-coder-480b");
         _output.WriteLine($"Cleaned response: '{cleaned}'");
-        
+
         Assert.DoesNotContain("<tool_call>", cleaned);
         Assert.DoesNotContain("</tool_call>", cleaned);
         Assert.DoesNotContain("{\"name\"", cleaned);
@@ -121,14 +121,14 @@ That should give us what we need.";
 
         var toolCalls = _interpreter.ExtractToolCalls(response, "qwen-3-coder-480b", "cerebras");
         _output.WriteLine($"Tool calls found: {toolCalls.Count}");
-        
+
         Assert.Equal(2, toolCalls.Count);
         Assert.Equal("system_info", toolCalls[0].ToolId);
         Assert.Equal("list_directory", toolCalls[1].ToolId);
-        
+
         var cleaned = _interpreter.CleanResponseForDisplay(response, "qwen-3-coder-480b");
         _output.WriteLine($"Cleaned response: '{cleaned}'");
-        
+
         Assert.DoesNotContain("{\"tool\"", cleaned);
         Assert.Contains("multiple tasks", cleaned);
         Assert.Contains("That should give us", cleaned);

@@ -51,7 +51,7 @@ It looks like the src directory contains only one other directory called Andy.Cl
         // Check what the cleaned response looks like
         var cleaned = _interpreter.CleanResponseForDisplay(response, "qwen-3-coder-480b");
         _output.WriteLine($"Cleaned response: {cleaned}");
-        
+
         // The cleaned response should not contain [Tool Results]
         Assert.DoesNotContain("[Tool Results]", cleaned);
     }
@@ -73,7 +73,7 @@ It looks like the src directory contains only one other directory called Andy.Cl
         // Should extract the tool call
         var toolCalls = _interpreter.ExtractToolCalls(correctResponse, "qwen-3-coder-480b", "cerebras");
         Assert.Single(toolCalls);
-        
+
         var toolCall = toolCalls.First();
         Assert.Equal("list_directory", toolCall.ToolId);
         Assert.Equal("src", toolCall.Parameters["path"]);

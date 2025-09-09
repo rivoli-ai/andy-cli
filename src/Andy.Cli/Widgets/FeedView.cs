@@ -42,7 +42,7 @@ namespace Andy.Cli.Widgets
         }
         /// <summary>Append a response separator with token information.</summary>
         public void AddResponseSeparator(int inputTokens = 0, int outputTokens = 0, string pattern = "━━ ◆ ━━") => AddItem(new ResponseSeparatorItem(inputTokens, outputTokens, pattern));
-        
+
         /// <summary>Add a streaming message that can be updated progressively.</summary>
         public StreamingMessageItem AddStreamingMessage()
         {
@@ -50,13 +50,19 @@ namespace Andy.Cli.Widgets
             AddItem(item);
             return item;
         }
-        
+
         /// <summary>Add a tool execution display with dotted yellow line.</summary>
         public void AddToolExecution(string toolId, Dictionary<string, object?> parameters, string? result = null, bool isSuccess = true)
         {
             AddItem(new ToolExecutionItem(toolId, parameters, result, isSuccess));
             // Add a blank line after tool output for better readability
             AddItem(new SpacerItem(1));
+        }
+
+        /// <summary>Expose a snapshot of items for verification in tests.</summary>
+        internal IReadOnlyList<IFeedItem> GetItemsForTesting()
+        {
+            return _items.ToList();
         }
 
         /// <summary>Clear all items from the feed.</summary>
@@ -93,25 +99,25 @@ namespace Andy.Cli.Widgets
         /// <summary>Render feed items inside rect, stacking vertically with bottom alignment when following tail.</summary>
         public void Render(in L.Rect rect, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
-            int x=(int)rect.X, y=(int)rect.Y, w=(int)rect.Width, h=(int)rect.Height;
-            
+            int x = (int)rect.X, y = (int)rect.Y, w = (int)rect.Width, h = (int)rect.Height;
+
             // Guard against invalid dimensions to prevent crashes
             if (w <= 0 || h <= 0) return;
-            
-            b.PushClip(new DL.ClipPush(x,y,w,h));
-            var bg = new DL.Rgb24(0,0,0);
-            b.DrawRect(new DL.Rect(x,y,w,h,bg));
+
+            b.PushClip(new DL.ClipPush(x, y, w, h));
+            var bg = new DL.Rgb24(0, 0, 0);
+            b.DrawRect(new DL.Rect(x, y, w, h, bg));
             // Focus indicator on left margin
             if (_focused)
             {
-                var bar = new DL.Rgb24(60,60,30);
+                var bar = new DL.Rgb24(60, 60, 30);
                 b.DrawRect(new DL.Rect(x, y, 1, h, bar));
             }
 
             // Measure all items at current width
             var lineCounts = new int[_items.Count];
             int total = 0;
-            for (int i = 0; i < _items.Count; i++) { int lc = _items[i].MeasureLineCount(w-2); lineCounts[i] = lc; total += lc; }
+            for (int i = 0; i < _items.Count; i++) { int lc = _items[i].MeasureLineCount(w - 2); lineCounts[i] = lc; total += lc; }
 
             // Update animation on growth
             if (_followTail && _scrollOffset == 0 && total > _prevTotalLines)
@@ -146,18 +152,19 @@ namespace Andy.Cli.Widgets
                 if (itemStart >= startLine + h) break; // after viewport
                 int sliceStart = Math.Max(0, startLine - itemStart);
                 int maxLines = Math.Min(itemLines - sliceStart, (startLine + h) - Math.Max(startLine, itemStart));
-                
+
                 // Critical fix: Ensure we never render beyond the allocated height
                 maxLines = Math.Min(maxLines, h - drawn);
                 if (maxLines <= 0) continue;
-                
+
                 // Additional safety: ensure cy is within the allocated region
-                if (cy + maxLines > y + h) {
+                if (cy + maxLines > y + h)
+                {
                     maxLines = Math.Max(0, (y + h) - cy);
                     if (maxLines <= 0) break;
                 }
-                
-                _items[i].RenderSlice(x+1, cy, w-2, sliceStart, maxLines, baseDl, b);
+
+                _items[i].RenderSlice(x + 1, cy, w - 2, sliceStart, maxLines, baseDl, b);
                 cy += maxLines;
                 drawn += maxLines;
             }
@@ -184,7 +191,7 @@ namespace Andy.Cli.Widgets
         /// <summary>Create a markdown item from raw markdown text.</summary>
         public MarkdownItem(string markdown)
         {
-            _lines = (markdown ?? string.Empty).Replace("\r\n","\n").Replace('\r','\n').Split('\n');
+            _lines = (markdown ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
         }
         /// <inheritdoc />
         public int MeasureLineCount(int width)
@@ -195,21 +202,21 @@ namespace Andy.Cli.Widgets
         /// <inheritdoc />
         public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
-            bool inCode=false;
+            bool inCode = false;
             int printed = 0;
             for (int i = startLine; i < _lines.Length && printed < maxLines; i++)
             {
                 var line = _lines[i];
-                if (line.StartsWith("```")) { inCode=!inCode; continue; }
+                if (line.StartsWith("```")) { inCode = !inCode; continue; }
                 DL.Rgb24 fg;
                 DL.CellAttrFlags attr = DL.CellAttrFlags.None;
-                if (!inCode && line.StartsWith("# ")) { line = line.Substring(2); fg = new DL.Rgb24(100,200,255); attr = DL.CellAttrFlags.Bold; }
-                else if (!inCode && line.StartsWith("## ")) { line = line.Substring(3); fg = new DL.Rgb24(150,220,150); attr = DL.CellAttrFlags.Bold; }
-                else if (!inCode && line.StartsWith("### ")) { line = line.Substring(4); fg = new DL.Rgb24(255,180,100); attr = DL.CellAttrFlags.Bold; }
-                else if (inCode) { fg = new DL.Rgb24(180,180,180); }
-                else { fg = new DL.Rgb24(220,220,220); }
+                if (!inCode && line.StartsWith("# ")) { line = line.Substring(2); fg = new DL.Rgb24(100, 200, 255); attr = DL.CellAttrFlags.Bold; }
+                else if (!inCode && line.StartsWith("## ")) { line = line.Substring(3); fg = new DL.Rgb24(150, 220, 150); attr = DL.CellAttrFlags.Bold; }
+                else if (!inCode && line.StartsWith("### ")) { line = line.Substring(4); fg = new DL.Rgb24(255, 180, 100); attr = DL.CellAttrFlags.Bold; }
+                else if (inCode) { fg = new DL.Rgb24(180, 180, 180); }
+                else { fg = new DL.Rgb24(220, 220, 220); }
                 string t = line.Length > width ? line.Substring(0, width) : line;
-                b.DrawText(new DL.TextRun(x, y + printed, t, fg, new DL.Rgb24(0,0,0), attr));
+                b.DrawText(new DL.TextRun(x, y + printed, t, fg, new DL.Rgb24(0, 0, 0), attr));
                 printed++;
             }
         }
@@ -220,8 +227,8 @@ namespace Andy.Cli.Widgets
     {
         private readonly string _md;
         private readonly string _originalMd;
-        public MarkdownRendererItem(string markdown) 
-        { 
+        public MarkdownRendererItem(string markdown)
+        {
             _originalMd = markdown ?? string.Empty;
             // Preprocess markdown to prevent "You" from being highlighted
             // The Andy.Tui markdown renderer seems to treat "You" as a special keyword
@@ -234,10 +241,10 @@ namespace Andy.Cli.Widgets
         {
             // Calculate actual line count considering word wrapping
             if (width <= 0) return 1;
-            
-            var lines = _md.Replace("\r\n","\n").Replace('\r','\n').Split('\n');
+
+            var lines = _md.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
             int totalLines = 0;
-            
+
             foreach (var line in lines)
             {
                 if (string.IsNullOrEmpty(line))
@@ -253,20 +260,20 @@ namespace Andy.Cli.Widgets
                     totalLines += Math.Max(1, wrappedLines);
                 }
             }
-            
+
             return Math.Max(1, totalLines);
         }
         public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
             // Guard against invalid dimensions
             if (width <= 0 || maxLines <= 0) return;
-            
+
             // Render only the requested slice by extracting those lines
-            var lines = _md.Replace("\r\n","\n").Replace('\r','\n').Split('\n');
-            
+            var lines = _md.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+
             // Guard against invalid startLine
             if (startLine >= lines.Length || startLine < 0) return;
-            
+
             int end = Math.Min(lines.Length, startLine + maxLines);
             var slice = string.Join("\n", lines[startLine..end]);
             // Detect simple HTML links <a href="...">text</a> and render with Link widget
@@ -300,14 +307,15 @@ namespace Andy.Cli.Widgets
         private readonly string? _lang;
         /// <summary>Create a code block item from source text and optional language tag.</summary>
         public CodeBlockItem(string code, string? language = null)
-        { _lines = (code ?? string.Empty).Replace("\r\n","\n").Replace('\r','\n').Split('\n'); _lang = language; }
+        { _lines = (code ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'); _lang = language; }
+        internal string? GetLanguageForTesting() => _lang;
         /// <inheritdoc />
-        public int MeasureLineCount(int width) 
+        public int MeasureLineCount(int width)
         {
             const int lineNumWidth = 4; // "999 " (3 digits + space)
             int contentWidth = Math.Max(1, width - lineNumWidth);
             int totalVisualLines = 0;
-            
+
             foreach (var line in _lines)
             {
                 if (string.IsNullOrEmpty(line))
@@ -321,36 +329,36 @@ namespace Andy.Cli.Widgets
                     totalVisualLines += wrappedLines;
                 }
             }
-            
+
             return totalVisualLines;
         }
         /// <inheritdoc />
         public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
-            var bg = new DL.Rgb24(20,20,30);
-            var fg = new DL.Rgb24(200,200,220);
-            var lineNumColor = new DL.Rgb24(120,140,160); // Subtle blue-gray for line numbers
-            var lineNumSeparatorColor = new DL.Rgb24(80,90,100); // Darker separator
-            
+            var bg = new DL.Rgb24(20, 20, 30);
+            var fg = new DL.Rgb24(200, 200, 220);
+            var lineNumColor = new DL.Rgb24(120, 140, 160); // Subtle blue-gray for line numbers
+            var lineNumSeparatorColor = new DL.Rgb24(80, 90, 100); // Darker separator
+
             const int lineNumWidth = 4; // "999 " (3 digits + space)
             int contentX = x + lineNumWidth;
             int contentWidth = Math.Max(1, width - lineNumWidth);
-            
+
             // background block (includes line number area)
-            b.PushClip(new DL.ClipPush(x-1, y, width+2, maxLines));
-            b.DrawRect(new DL.Rect(x-1, y, width+2, maxLines, bg));
-            
+            b.PushClip(new DL.ClipPush(x - 1, y, width + 2, maxLines));
+            b.DrawRect(new DL.Rect(x - 1, y, width + 2, maxLines, bg));
+
             int currentVisualLine = 0;
-            
+
             // Find which logical line corresponds to startLine
             int logicalLineIndex = 0;
             int visualLineOffset = 0;
-            
+
             for (int logLine = 0; logLine < _lines.Length && currentVisualLine < startLine; logLine++)
             {
                 string line = _lines[logLine];
                 int wrappedLines = string.IsNullOrEmpty(line) ? 1 : Math.Max(1, (int)Math.Ceiling((double)line.Length / contentWidth));
-                
+
                 if (currentVisualLine + wrappedLines > startLine)
                 {
                     logicalLineIndex = logLine;
@@ -360,19 +368,19 @@ namespace Andy.Cli.Widgets
                 currentVisualLine += wrappedLines;
                 logicalLineIndex = logLine + 1;
             }
-            
+
             // Render the visible portion
             int renderedLines = 0;
             for (int logLine = logicalLineIndex; logLine < _lines.Length && renderedLines < maxLines; logLine++)
             {
                 string line = _lines[logLine];
                 int lineNumber = logLine + 1;
-                
+
                 if (string.IsNullOrEmpty(line))
                 {
                     // Empty line
                     if (logLine == logicalLineIndex && visualLineOffset > 0) continue;
-                    
+
                     string lineNumText = lineNumber.ToString().PadLeft(3);
                     b.DrawText(new DL.TextRun(x, y + renderedLines, lineNumText, lineNumColor, bg, DL.CellAttrFlags.None));
                     b.DrawText(new DL.TextRun(x + 3, y + renderedLines, " ", lineNumSeparatorColor, bg, DL.CellAttrFlags.None));
@@ -382,14 +390,14 @@ namespace Andy.Cli.Widgets
                 {
                     // Handle wrapped lines
                     int startOffset = (logLine == logicalLineIndex) ? visualLineOffset * contentWidth : 0;
-                    
-                    for (int wrapIndex = (logLine == logicalLineIndex ? visualLineOffset : 0); 
-                         startOffset < line.Length && renderedLines < maxLines; 
+
+                    for (int wrapIndex = (logLine == logicalLineIndex ? visualLineOffset : 0);
+                         startOffset < line.Length && renderedLines < maxLines;
                          wrapIndex++)
                     {
                         int segmentLength = Math.Min(contentWidth, line.Length - startOffset);
                         string lineSegment = line.Substring(startOffset, segmentLength);
-                        
+
                         // Show line number only for the first visual line of each logical line
                         if (wrapIndex == 0)
                         {
@@ -401,9 +409,9 @@ namespace Andy.Cli.Widgets
                             // Blank space for continuation lines
                             b.DrawText(new DL.TextRun(x, y + renderedLines, "   ", lineNumColor, bg, DL.CellAttrFlags.None));
                         }
-                        
+
                         b.DrawText(new DL.TextRun(x + 3, y + renderedLines, " ", lineNumSeparatorColor, bg, DL.CellAttrFlags.None));
-                        
+
                         // Render code content with syntax highlighting
                         int cx = contentX;
                         foreach (var (seg, color, attr) in Highlight(lineSegment, _lang))
@@ -417,7 +425,7 @@ namespace Andy.Cli.Widgets
                                 cx += t.Length;
                             }
                         }
-                        
+
                         startOffset += segmentLength;
                         renderedLines++;
                     }
@@ -428,11 +436,11 @@ namespace Andy.Cli.Widgets
 
         private static IEnumerable<(string Text, DL.Rgb24 Color, DL.CellAttrFlags Attr)> Highlight(string line, string? lang)
         {
-            var normal = new DL.Rgb24(200,200,220);
-            var keyword = new DL.Rgb24(180,220,180);
-            var typecol = new DL.Rgb24(180,200,240);
-            var str = new DL.Rgb24(220,200,160);
-            var com = new DL.Rgb24(120,140,120);
+            var normal = new DL.Rgb24(200, 200, 220);
+            var keyword = new DL.Rgb24(180, 220, 180);
+            var typecol = new DL.Rgb24(180, 200, 240);
+            var str = new DL.Rgb24(220, 200, 160);
+            var com = new DL.Rgb24(120, 140, 120);
             // Comments
             if (lang != null && lang.StartsWith("py"))
             {
@@ -453,26 +461,26 @@ namespace Andy.Cli.Widgets
 
             static IEnumerable<(string, DL.Rgb24, DL.CellAttrFlags)> TokenizeCSharp(string code)
             {
-                var keywords = new HashSet<string>(new[]{"using","namespace","class","public","private","protected","internal","static","void","int","string","var","new","return","async","await","if","else","for","foreach","while","switch","case","break","true","false"});
-                int i=0; while (i < code.Length)
+                var keywords = new HashSet<string>(new[] { "using", "namespace", "class", "public", "private", "protected", "internal", "static", "void", "int", "string", "var", "new", "return", "async", "await", "if", "else", "for", "foreach", "while", "switch", "case", "break", "true", "false" });
+                int i = 0; while (i < code.Length)
                 {
                     char c = code[i];
-                    if (char.IsWhiteSpace(c)) { int j=i; while (j<code.Length && char.IsWhiteSpace(code[j])) j++; yield return (code.Substring(i, j-i), new DL.Rgb24(200,200,220), DL.CellAttrFlags.None); i=j; continue; }
-                    if (c=='"') { int j=i+1; while (j<code.Length && code[j] != '"') { if (code[j]=='\\' && j+1<code.Length) j+=2; else j++; } j=Math.Min(code.Length, j+1); yield return (code.Substring(i, j-i), new DL.Rgb24(220,200,160), DL.CellAttrFlags.None); i=j; continue; }
-                    if (char.IsLetter(c) || c=='_') { int j=i+1; while (j<code.Length && (char.IsLetterOrDigit(code[j])||code[j]=='_')) j++; var tok = code.Substring(i, j-i); var col = keywords.Contains(tok)? new DL.Rgb24(180,220,180): new DL.Rgb24(200,200,220); yield return (tok, col, DL.CellAttrFlags.None); i=j; continue; }
-                    yield return (code[i].ToString(), new DL.Rgb24(200,200,220), DL.CellAttrFlags.None); i++;
+                    if (char.IsWhiteSpace(c)) { int j = i; while (j < code.Length && char.IsWhiteSpace(code[j])) j++; yield return (code.Substring(i, j - i), new DL.Rgb24(200, 200, 220), DL.CellAttrFlags.None); i = j; continue; }
+                    if (c == '"') { int j = i + 1; while (j < code.Length && code[j] != '"') { if (code[j] == '\\' && j + 1 < code.Length) j += 2; else j++; } j = Math.Min(code.Length, j + 1); yield return (code.Substring(i, j - i), new DL.Rgb24(220, 200, 160), DL.CellAttrFlags.None); i = j; continue; }
+                    if (char.IsLetter(c) || c == '_') { int j = i + 1; while (j < code.Length && (char.IsLetterOrDigit(code[j]) || code[j] == '_')) j++; var tok = code.Substring(i, j - i); var col = keywords.Contains(tok) ? new DL.Rgb24(180, 220, 180) : new DL.Rgb24(200, 200, 220); yield return (tok, col, DL.CellAttrFlags.None); i = j; continue; }
+                    yield return (code[i].ToString(), new DL.Rgb24(200, 200, 220), DL.CellAttrFlags.None); i++;
                 }
             }
             static IEnumerable<(string, DL.Rgb24, DL.CellAttrFlags)> TokenizePython(string code)
             {
-                var keywords = new HashSet<string>(new[]{"def","class","return","if","elif","else","for","while","import","from","as","True","False","None","in","and","or","not","with","yield"});
-                int i=0; while (i < code.Length)
+                var keywords = new HashSet<string>(new[] { "def", "class", "return", "if", "elif", "else", "for", "while", "import", "from", "as", "True", "False", "None", "in", "and", "or", "not", "with", "yield" });
+                int i = 0; while (i < code.Length)
                 {
                     char c = code[i];
-                    if (char.IsWhiteSpace(c)) { int j=i; while (j<code.Length && char.IsWhiteSpace(code[j])) j++; yield return (code.Substring(i, j-i), new DL.Rgb24(200,200,220), DL.CellAttrFlags.None); i=j; continue; }
-                    if (c=='"' || c=='\'') { char q=c; int j=i+1; while (j<code.Length && code[j] != q) { if (code[j]=='\\' && j+1<code.Length) j+=2; else j++; } j=Math.Min(code.Length, j+1); yield return (code.Substring(i, j-i), new DL.Rgb24(220,200,160), DL.CellAttrFlags.None); i=j; continue; }
-                    if (char.IsLetter(c) || c=='_') { int j=i+1; while (j<code.Length && (char.IsLetterOrDigit(code[j])||code[j]=='_')) j++; var tok = code.Substring(i, j-i); var col = keywords.Contains(tok)? new DL.Rgb24(180,220,180): new DL.Rgb24(200,200,220); yield return (tok, col, DL.CellAttrFlags.None); i=j; continue; }
-                    yield return (code[i].ToString(), new DL.Rgb24(200,200,220), DL.CellAttrFlags.None); i++;
+                    if (char.IsWhiteSpace(c)) { int j = i; while (j < code.Length && char.IsWhiteSpace(code[j])) j++; yield return (code.Substring(i, j - i), new DL.Rgb24(200, 200, 220), DL.CellAttrFlags.None); i = j; continue; }
+                    if (c == '"' || c == '\'') { char q = c; int j = i + 1; while (j < code.Length && code[j] != q) { if (code[j] == '\\' && j + 1 < code.Length) j += 2; else j++; } j = Math.Min(code.Length, j + 1); yield return (code.Substring(i, j - i), new DL.Rgb24(220, 200, 160), DL.CellAttrFlags.None); i = j; continue; }
+                    if (char.IsLetter(c) || c == '_') { int j = i + 1; while (j < code.Length && (char.IsLetterOrDigit(code[j]) || code[j] == '_')) j++; var tok = code.Substring(i, j - i); var col = keywords.Contains(tok) ? new DL.Rgb24(180, 220, 180) : new DL.Rgb24(200, 200, 220); yield return (tok, col, DL.CellAttrFlags.None); i = j; continue; }
+                    yield return (code[i].ToString(), new DL.Rgb24(200, 200, 220), DL.CellAttrFlags.None); i++;
                 }
             }
         }
@@ -494,14 +502,14 @@ namespace Andy.Cli.Widgets
     public sealed class UserBubbleItem : IFeedItem
     {
         private readonly string[] _lines;
-        public UserBubbleItem(string text) { _lines = (text ?? string.Empty).Replace("\r\n","\n").Replace('\r','\n').Split('\n'); }
+        public UserBubbleItem(string text) { _lines = (text ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'); }
         public int MeasureLineCount(int width) => Math.Max(1, _lines.Length + 2); // top and bottom border rows
         public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
             int total = _lines.Length + 2;
             int end = Math.Min(total, startLine + maxLines);
-            var borderColor = new DL.Rgb24(120,180,255); // light blue
-            var labelColor = new DL.Rgb24(150,200,255);
+            var borderColor = new DL.Rgb24(120, 180, 255); // light blue
+            var labelColor = new DL.Rgb24(150, 200, 255);
             for (int i = startLine; i < end; i++)
             {
                 int row = y + (i - startLine);
@@ -509,13 +517,13 @@ namespace Andy.Cli.Widgets
                 {
                     // top border with rounded corners
                     int inner = Math.Max(0, width - 2);
-                    b.DrawText(new DL.TextRun(x, row, "╭" + new string('─', inner) + "╮", borderColor, new DL.Rgb24(0,0,0), DL.CellAttrFlags.None));
+                    b.DrawText(new DL.TextRun(x, row, "╭" + new string('─', inner) + "╮", borderColor, new DL.Rgb24(0, 0, 0), DL.CellAttrFlags.None));
                 }
                 else if (i == total - 1)
                 {
                     // bottom border with rounded corners
                     int inner = Math.Max(0, width - 2);
-                    b.DrawText(new DL.TextRun(x, row, "╰" + new string('─', inner) + "╯", borderColor, new DL.Rgb24(0,0,0), DL.CellAttrFlags.None));
+                    b.DrawText(new DL.TextRun(x, row, "╰" + new string('─', inner) + "╯", borderColor, new DL.Rgb24(0, 0, 0), DL.CellAttrFlags.None));
                 }
                 else
                 {
@@ -525,24 +533,24 @@ namespace Andy.Cli.Widgets
                     {
                         // show label on first content row
                         string label = "You:";
-                        b.DrawText(new DL.TextRun(x+2, row, label + " ", labelColor, new DL.Rgb24(0,0,0), DL.CellAttrFlags.Bold));
+                        b.DrawText(new DL.TextRun(x + 2, row, label + " ", labelColor, new DL.Rgb24(0, 0, 0), DL.CellAttrFlags.Bold));
                         int available = Math.Max(0, width - 4 - (label.Length + 1));
                         string t = available > 0 ? (content.Length > available ? content.Substring(0, available) : content) : string.Empty;
-                        b.DrawText(new DL.TextRun(x + 2 + label.Length + 1, row, t, new DL.Rgb24(220,220,220), new DL.Rgb24(0,0,0), DL.CellAttrFlags.None));
+                        b.DrawText(new DL.TextRun(x + 2 + label.Length + 1, row, t, new DL.Rgb24(220, 220, 220), new DL.Rgb24(0, 0, 0), DL.CellAttrFlags.None));
                     }
                     else
                     {
                         int available = Math.Max(0, width - 4);
                         string t = content.Length > available ? content.Substring(0, available) : content;
-                        b.DrawText(new DL.TextRun(x+2, row, t, new DL.Rgb24(220,220,220), new DL.Rgb24(0,0,0), DL.CellAttrFlags.None));
+                        b.DrawText(new DL.TextRun(x + 2, row, t, new DL.Rgb24(220, 220, 220), new DL.Rgb24(0, 0, 0), DL.CellAttrFlags.None));
                     }
-                    if (width >= 1) b.DrawText(new DL.TextRun(x, row, "│", borderColor, new DL.Rgb24(0,0,0), DL.CellAttrFlags.None));
-                    if (width >= 2) b.DrawText(new DL.TextRun(x + width - 1, row, "│", borderColor, new DL.Rgb24(0,0,0), DL.CellAttrFlags.None));
+                    if (width >= 1) b.DrawText(new DL.TextRun(x, row, "│", borderColor, new DL.Rgb24(0, 0, 0), DL.CellAttrFlags.None));
+                    if (width >= 2) b.DrawText(new DL.TextRun(x + width - 1, row, "│", borderColor, new DL.Rgb24(0, 0, 0), DL.CellAttrFlags.None));
                 }
             }
         }
     }
-    
+
     /// <summary>Tool execution display with dotted yellow line on the left side.</summary>
     public sealed class ToolExecutionItem : IFeedItem
     {
@@ -551,20 +559,20 @@ namespace Andy.Cli.Widgets
         private readonly string? _result;
         private readonly bool _isSuccess;
         private readonly string[] _lines;
-        
+
         public ToolExecutionItem(string toolId, Dictionary<string, object?> parameters, string? result = null, bool isSuccess = true)
         {
             _toolId = toolId;
             _parameters = parameters;
             _result = result;
             _isSuccess = isSuccess;
-            
+
             // Build the display lines
             var lines = new List<string>();
-            
+
             // Tool header
             lines.Add($"Tool: {toolId}");
-            
+
             // Parameters
             if (parameters?.Any() == true)
             {
@@ -580,12 +588,12 @@ namespace Andy.Cli.Widgets
                     lines.Add($"  ... and {parameters.Count - 3} more");
                 }
             }
-            
+
             // Result - check if this is a directory listing
             if (!string.IsNullOrEmpty(result))
             {
                 lines.Add("Result:");
-                
+
                 // Check if this looks like directory listing JSON and format as tree
                 if (toolId == "list_directory" || result.Contains("\"items\"") && result.Contains("\"type\""))
                 {
@@ -605,10 +613,10 @@ namespace Andy.Cli.Widgets
                     AddResultLines(lines, result);
                 }
             }
-            
+
             _lines = lines.ToArray();
         }
-        
+
         private static void AddResultLines(List<string> lines, string result)
         {
             var resultLines = result.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
@@ -621,23 +629,23 @@ namespace Andy.Cli.Widgets
                 lines.Add($"  ... ({resultLines.Length - 8} more lines)");
             }
         }
-        
+
         private static List<string>? TryFormatAsDirectoryTree(string jsonResult)
         {
             try
             {
                 using var doc = System.Text.Json.JsonDocument.Parse(jsonResult);
                 var root = doc.RootElement;
-                
+
                 // Look for the items array
                 if (!root.TryGetProperty("items", out var items) || items.ValueKind != System.Text.Json.JsonValueKind.Array)
                 {
                     return null;
                 }
-                
+
                 var treeLines = new List<string>();
                 var entries = new List<(string name, string type, int depth, string? size)>();
-                
+
                 // Parse all entries
                 foreach (var item in items.EnumerateArray())
                 {
@@ -645,28 +653,28 @@ namespace Andy.Cli.Widgets
                     var type = item.GetProperty("type").GetString() ?? "file";
                     var depth = 0;
                     string? size = null;
-                    
+
                     if (item.TryGetProperty("depth", out var depthProp))
                     {
                         depth = depthProp.GetInt32();
                     }
-                    
+
                     if (item.TryGetProperty("sizeFormatted", out var sizeProp) && sizeProp.ValueKind == System.Text.Json.JsonValueKind.String)
                     {
                         size = sizeProp.GetString();
                     }
-                    
+
                     entries.Add((name, type, depth, size));
                 }
-                
+
                 // Build tree structure
                 // Track which depths have more items coming (for vertical lines)
                 var depthHasMore = new Dictionary<int, bool>();
-                
+
                 for (int i = 0; i < entries.Count; i++)
                 {
                     var (name, type, depth, size) = entries[i];
-                    
+
                     // Check if this is the last item at this depth level
                     var isLast = true;
                     for (int j = i + 1; j < entries.Count; j++)
@@ -678,9 +686,9 @@ namespace Andy.Cli.Widgets
                             break;
                         }
                     }
-                    
+
                     var line = new System.Text.StringBuilder();
-                    
+
                     // Add indentation based on depth with proper vertical lines
                     for (int d = 0; d < depth; d++)
                     {
@@ -694,13 +702,13 @@ namespace Andy.Cli.Widgets
                             line.Append("    ");
                         }
                     }
-                    
+
                     // Update depth tracking
                     depthHasMore[depth] = !isLast;
-                    
+
                     // Add tree branch
                     line.Append(isLast ? "└─ " : "├─ ");
-                    
+
                     // Add name with type indicator
                     if (type == "directory")
                     {
@@ -715,10 +723,10 @@ namespace Andy.Cli.Widgets
                             line.Append($" ({size})");
                         }
                     }
-                    
+
                     treeLines.Add(line.ToString());
                 }
-                
+
                 // If no tree structure (all at depth 0), create a simple tree  
                 if (entries.All(e => e.depth == 0))
                 {
@@ -727,10 +735,10 @@ namespace Andy.Cli.Widgets
                     {
                         var (name, type, _, size) = entries[i];
                         var isLast = i == entries.Count - 1;
-                        
+
                         var line = new System.Text.StringBuilder();
                         line.Append(isLast ? "└─ " : "├─ ");
-                        
+
                         if (type == "directory")
                         {
                             line.Append(name);
@@ -744,11 +752,11 @@ namespace Andy.Cli.Widgets
                                 line.Append($" ({size})");
                             }
                         }
-                        
+
                         treeLines.Add(line.ToString());
                     }
                 }
-                
+
                 return treeLines;
             }
             catch
@@ -757,7 +765,7 @@ namespace Andy.Cli.Widgets
                 return null;
             }
         }
-        
+
         public int MeasureLineCount(int width)
         {
             // Account for wrapped lines
@@ -775,52 +783,52 @@ namespace Andy.Cli.Widgets
             }
             return Math.Max(1, totalLines);
         }
-        
+
         public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
             var dottedLineColor = new DL.Rgb24(200, 180, 100); // Yellow/gold
             var headerColor = new DL.Rgb24(150, 200, 255);     // Light blue
             var paramColor = new DL.Rgb24(180, 180, 200);      // Light gray
             var resultColor = _isSuccess ? new DL.Rgb24(150, 220, 150) : new DL.Rgb24(220, 150, 150); // Green/Red
-            
+
             int currentVisualLine = 0;
             int renderedLines = 0;
-            
+
             for (int i = 0; i < _lines.Length && renderedLines < maxLines; i++)
             {
                 var line = _lines[i];
-                int lineVisualLines = string.IsNullOrEmpty(line) ? 1 : 
+                int lineVisualLines = string.IsNullOrEmpty(line) ? 1 :
                     Math.Max(1, (int)Math.Ceiling((double)line.Length / Math.Max(1, width - 4)));
-                
+
                 // Skip lines before the viewport
                 if (currentVisualLine + lineVisualLines <= startLine)
                 {
                     currentVisualLine += lineVisualLines;
                     continue;
                 }
-                
+
                 // Render visible portion of this line
                 int lineStartOffset = Math.Max(0, startLine - currentVisualLine);
                 int linesToRender = Math.Min(lineVisualLines - lineStartOffset, maxLines - renderedLines);
-                
+
                 for (int j = lineStartOffset; j < lineStartOffset + linesToRender; j++)
                 {
                     int row = y + renderedLines;
-                    
+
                     // Draw dotted line on the left
-                    b.DrawText(new DL.TextRun(x, row, "┊", dottedLineColor, new DL.Rgb24(0,0,0), DL.CellAttrFlags.None));
-                    
+                    b.DrawText(new DL.TextRun(x, row, "┊", dottedLineColor, new DL.Rgb24(0, 0, 0), DL.CellAttrFlags.None));
+
                     // Draw content
                     int contentX = x + 2;
                     int contentWidth = Math.Max(1, width - 4);
-                    
+
                     // Determine which part of the line to show (for wrapped lines)
                     int charStart = j * contentWidth;
                     if (charStart < line.Length)
                     {
                         int charLength = Math.Min(contentWidth, line.Length - charStart);
                         string segment = line.Substring(charStart, charLength);
-                        
+
                         // Choose color based on line type
                         DL.Rgb24 textColor;
                         if (i == 0) // Tool header
@@ -831,22 +839,22 @@ namespace Andy.Cli.Widgets
                             textColor = line.Contains("Result:") ? resultColor : paramColor;
                         else
                             textColor = paramColor;
-                        
-                        b.DrawText(new DL.TextRun(contentX, row, segment, textColor, new DL.Rgb24(0,0,0), 
+
+                        b.DrawText(new DL.TextRun(contentX, row, segment, textColor, new DL.Rgb24(0, 0, 0),
                             i == 0 ? DL.CellAttrFlags.Bold : DL.CellAttrFlags.None));
                     }
-                    
+
                     renderedLines++;
                 }
-                
+
                 currentVisualLine += lineVisualLines;
-                
+
                 if (currentVisualLine >= startLine + maxLines)
                     break;
             }
         }
     }
-    
+
     /// <summary>A streaming message that can be updated progressively.</summary>
     public sealed class StreamingMessageItem : IFeedItem
     {
@@ -854,7 +862,7 @@ namespace Andy.Cli.Widgets
         private bool _completed = false;
         private bool _hidden = false;
         private string[] _lines = Array.Empty<string>();
-        
+
         /// <summary>Append content to the streaming message.</summary>
         public void AppendContent(string content)
         {
@@ -864,26 +872,26 @@ namespace Andy.Cli.Widgets
                 UpdateLines();
             }
         }
-        
+
         /// <summary>Mark the streaming message as complete.</summary>
         public void Complete()
         {
             _completed = true;
         }
-        
+
         /// <summary>Hide the streaming message (used when content will be reformatted).</summary>
         public void Hide()
         {
             _hidden = true;
             _lines = Array.Empty<string>();
         }
-        
+
         /// <summary>Get the full content of the streaming message.</summary>
         public string GetContent()
         {
             return _content.ToString();
         }
-        
+
         private void UpdateLines()
         {
             if (!_hidden)
@@ -891,12 +899,12 @@ namespace Andy.Cli.Widgets
                 _lines = _content.ToString().Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
             }
         }
-        
+
         /// <inheritdoc />
         public int MeasureLineCount(int width)
         {
             if (_content.Length == 0) return 1;
-            
+
             // Count wrapped lines
             int totalLines = 0;
             foreach (var line in _lines)
@@ -908,7 +916,7 @@ namespace Andy.Cli.Widgets
             }
             return Math.Max(1, totalLines);
         }
-        
+
         /// <inheritdoc />
         public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
@@ -921,24 +929,24 @@ namespace Andy.Cli.Widgets
                 }
                 return;
             }
-            
+
             // Render as simple markdown-styled text
             var renderer = new Andy.Tui.Widgets.MarkdownRenderer();
             renderer.SetText(_content.ToString());
             renderer.Render(new L.Rect(x, y, width, maxLines), baseDl, b);
-            
+
             // Show a blinking cursor at the end if still streaming
             if (!_completed && _lines.Length > 0)
             {
                 var lastLine = _lines[_lines.Length - 1];
                 int cursorX = x + (lastLine.Length % width);
                 int cursorY = y + Math.Min(maxLines - 1, MeasureLineCount(width) - 1 - startLine);
-                
+
                 if (cursorY >= y && cursorY < y + maxLines)
                 {
                     // Simple blinking cursor effect
                     var cursor = (DateTime.Now.Millisecond / 500) % 2 == 0 ? "▊" : " ";
-                    b.DrawText(new DL.TextRun(cursorX, cursorY, cursor, 
+                    b.DrawText(new DL.TextRun(cursorX, cursorY, cursor,
                         new DL.Rgb24(100, 200, 100), null, DL.CellAttrFlags.Bold));
                 }
             }

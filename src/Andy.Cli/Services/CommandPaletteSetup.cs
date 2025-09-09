@@ -23,38 +23,38 @@ public static class CommandPaletteSetup
     {
         commandPalette.SetCommands(new[]
         {
-            new CommandPalette.CommandItem 
-            { 
-                Name = "Exit", 
+            new CommandPalette.CommandItem
+            {
+                Name = "Exit",
                 Description = "Quit the application",
                 Category = "General",
                 Aliases = new[] { "quit", "exit", "bye", "q" },
-                Action = args => 
+                Action = args =>
                 {
                     setRunning(false);
                 }
             },
-            new CommandPalette.CommandItem 
-            { 
-                Name = "List Models", 
+            new CommandPalette.CommandItem
+            {
+                Name = "List Models",
                 Description = "Show available AI models",
                 Category = "Model",
                 Aliases = new[] { "models", "list" },
-                Action = async args => 
+                Action = async args =>
                 {
                     var modelListItem = await modelCommand.CreateModelListItemAsync();
                     feed.AddItem(modelListItem);
                 }
             },
-            new CommandPalette.CommandItem 
-            { 
-                Name = "Switch Model", 
+            new CommandPalette.CommandItem
+            {
+                Name = "Switch Model",
                 Description = "Change AI provider/model",
                 Category = "Model",
                 Aliases = new[] { "switch", "change" },
                 RequiredParams = new[] { "provider" },
                 ParameterHint = "Example: cerebras or openai gpt-4o",
-                Action = async args => 
+                Action = async args =>
                 {
                     if (args.Length < 1)
                     {
@@ -76,45 +76,45 @@ public static class CommandPaletteSetup
                     }
                 }
             },
-            new CommandPalette.CommandItem 
-            { 
-                Name = "Model Info", 
+            new CommandPalette.CommandItem
+            {
+                Name = "Model Info",
                 Description = "Show current model details",
                 Category = "Model",
                 Aliases = new[] { "info", "current" },
-                Action = async args => 
+                Action = async args =>
                 {
                     var result = await modelCommand.ExecuteAsync(new[] { "info" });
                     feed.AddMarkdownRich(result.Message);
                 }
             },
-            new CommandPalette.CommandItem 
-            { 
-                Name = "Test Model", 
+            new CommandPalette.CommandItem
+            {
+                Name = "Test Model",
                 Description = "Test current model",
                 Category = "Model",
                 Aliases = new[] { "test" },
-                Action = async args => 
+                Action = async args =>
                 {
                     var result = await modelCommand.ExecuteAsync(new[] { "test" }.Concat(args).ToArray());
                     feed.AddMarkdownRich(result.Message);
                 }
             },
-            new CommandPalette.CommandItem 
-            { 
-                Name = "List Tools", 
+            new CommandPalette.CommandItem
+            {
+                Name = "List Tools",
                 Description = "Show available AI tools",
                 Category = "Tools",
                 Aliases = new[] { "tools", "tool list" },
-                Action = args => 
+                Action = args =>
                 {
                     var toolListItem = toolsCommand.CreateToolListItem();
                     feed.AddItem(toolListItem);
                 }
             },
-            new CommandPalette.CommandItem 
-            { 
-                Name = "Tool Info", 
+            new CommandPalette.CommandItem
+            {
+                Name = "Tool Info",
                 Description = "Show details about a specific tool",
                 Category = "Tools",
                 Aliases = new[] { "tool info", "tool details" },
@@ -134,7 +134,7 @@ public static class CommandPaletteSetup
                     }
                     return Array.Empty<string>();
                 },
-                Action = async args => 
+                Action = async args =>
                 {
                     if (args.Length < 1)
                     {
@@ -147,9 +147,9 @@ public static class CommandPaletteSetup
                     }
                 }
             },
-            new CommandPalette.CommandItem 
-            { 
-                Name = "Execute Tool", 
+            new CommandPalette.CommandItem
+            {
+                Name = "Execute Tool",
                 Description = "Run a tool with parameters",
                 Category = "Tools",
                 Aliases = new[] { "tool exec", "tool run" },
@@ -169,7 +169,7 @@ public static class CommandPaletteSetup
                     }
                     return Array.Empty<string>();
                 },
-                Action = async args => 
+                Action = async args =>
                 {
                     if (args.Length < 1)
                     {
@@ -182,38 +182,38 @@ public static class CommandPaletteSetup
                     }
                 }
             },
-            new CommandPalette.CommandItem 
-            { 
-                Name = "Clear", 
+            new CommandPalette.CommandItem
+            {
+                Name = "Clear",
                 Description = "Clear the chat feed",
                 Category = "General",
                 Aliases = new[] { "cls", "clear" },
-                Action = args => 
+                Action = args =>
                 {
                     feed.Clear();
                     feed.AddMarkdownRich("**Chat cleared.** Ready for a fresh start!");
                 }
             },
-            new CommandPalette.CommandItem 
-            { 
-                Name = "Reset Context", 
+            new CommandPalette.CommandItem
+            {
+                Name = "Reset Context",
                 Description = "Reset conversation context",
                 Category = "Chat",
                 Aliases = new[] { "reset", "new" },
-                Action = args => 
+                Action = args =>
                 {
                     conversation.Clear();
                     conversation.SystemInstruction = "You are a helpful AI assistant. Keep your responses concise and helpful.";
                     feed.AddMarkdownRich("**Conversation context reset.** Starting fresh!");
                 }
             },
-            new CommandPalette.CommandItem 
-            { 
-                Name = "Toggle HUD", 
+            new CommandPalette.CommandItem
+            {
+                Name = "Toggle HUD",
                 Description = "Show/hide performance HUD",
                 Category = "General",
                 Aliases = new[] { "hud", "debug" },
-                Action = args => 
+                Action = args =>
                 {
                     // This will be handled in the main key handler
                     feed.AddMarkdownRich("Press **F2** to toggle the HUD");

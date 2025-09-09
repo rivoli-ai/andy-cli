@@ -49,7 +49,7 @@ public class QwenResponseParserTests
         // Assert
         Assert.True(result.HasToolCalls);
         Assert.Single(result.ToolCalls);
-        
+
         var toolCall = result.ToolCalls[0];
         Assert.Equal("search_files", toolCall.ToolId);
         Assert.Equal("test", toolCall.Parameters["query"]?.ToString());
@@ -72,7 +72,7 @@ public class QwenResponseParserTests
         // Assert
         Assert.True(result.HasToolCalls);
         Assert.Single(result.ToolCalls);
-        
+
         var toolCall = result.ToolCalls[0];
         Assert.Equal("test_tool", toolCall.ToolId);
         Assert.Equal("value", toolCall.Parameters["param"]?.ToString());

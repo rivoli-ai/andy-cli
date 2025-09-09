@@ -11,7 +11,7 @@ namespace Andy.Cli.Widgets
     {
         private readonly List<ModelEntry> _entries = new();
         private readonly string _title;
-        
+
         public class ModelEntry
         {
             public string Provider { get; set; } = "";
@@ -20,33 +20,33 @@ namespace Andy.Cli.Widgets
             public bool Available { get; set; }
             public bool IsCurrent { get; set; }
         }
-        
+
         public ModelListItem(string title = "")
         {
             _title = title;
         }
-        
+
         public void AddProvider(string providerName)
         {
             _entries.Add(new ModelEntry { Provider = providerName });
         }
-        
+
         public void AddModel(string modelName, string description, bool available, bool isCurrent = false)
         {
-            _entries.Add(new ModelEntry 
-            { 
-                ModelName = modelName, 
-                Description = description, 
+            _entries.Add(new ModelEntry
+            {
+                ModelName = modelName,
+                Description = description,
                 Available = available,
                 IsCurrent = isCurrent
             });
         }
-        
+
         public void AddApiKeyStatus(string text)
         {
             _entries.Add(new ModelEntry { Description = text });
         }
-        
+
         public int MeasureLineCount(int width)
         {
             int count = string.IsNullOrEmpty(_title) ? 0 : 1;
@@ -65,21 +65,21 @@ namespace Andy.Cli.Widgets
             }
             return Math.Max(1, count);
         }
-        
+
         public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
             if (width <= 0 || maxLines <= 0) return;
-            
+
             var blackBg = new DL.Rgb24(0, 0, 0);
             var greenFg = new DL.Rgb24(0, 255, 0);
             var redFg = new DL.Rgb24(255, 80, 80);
             var whiteFg = new DL.Rgb24(220, 220, 220);
             var grayFg = new DL.Rgb24(150, 150, 150);
             var cyanFg = new DL.Rgb24(100, 200, 255);
-            
+
             int currentLine = 0;
             int renderedLines = 0;
-            
+
             // Render title if present
             if (!string.IsNullOrEmpty(_title))
             {
@@ -90,12 +90,12 @@ namespace Andy.Cli.Widgets
                 }
                 currentLine++;
             }
-            
+
             // Render entries
             foreach (var entry in _entries)
             {
                 if (renderedLines >= maxLines) break;
-                
+
                 if (!string.IsNullOrEmpty(entry.Provider))
                 {
                     // Provider header
@@ -115,12 +115,12 @@ namespace Andy.Cli.Widgets
                         string status = entry.Available ? "OK" : "X";
                         var statusColor = entry.Available ? greenFg : redFg;
                         string availability = entry.Available ? "" : " (API key required)";
-                        
+
                         // Render indicator
                         int pos = x;
                         b.DrawText(new DL.TextRun(pos, y + renderedLines, indicator, whiteFg, blackBg, DL.CellAttrFlags.None));
                         pos += indicator.Length;
-                        
+
                         // Render colored status with brackets
                         b.DrawText(new DL.TextRun(pos, y + renderedLines, "[", whiteFg, blackBg, DL.CellAttrFlags.None));
                         pos += 1;
@@ -128,14 +128,14 @@ namespace Andy.Cli.Widgets
                         pos += status.Length;
                         b.DrawText(new DL.TextRun(pos, y + renderedLines, "] ", whiteFg, blackBg, DL.CellAttrFlags.None));
                         pos += 2;
-                        
+
                         // Render model name and availability
                         b.DrawText(new DL.TextRun(pos, y + renderedLines, entry.ModelName + availability, whiteFg, blackBg, DL.CellAttrFlags.None));
-                        
+
                         renderedLines++;
                     }
                     currentLine++;
-                    
+
                     // Render description if present
                     if (!string.IsNullOrEmpty(entry.Description))
                     {

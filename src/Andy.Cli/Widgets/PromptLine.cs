@@ -17,10 +17,10 @@ namespace Andy.Cli.Widgets
         private readonly List<string> _history = new();
         private int _historyIndex = -1; // -1 = current editing
         private Func<string, string?>? _suggest;
-        private DL.Rgb24 _bg = new DL.Rgb24(0,0,0);
-        private DL.Rgb24 _fg = new DL.Rgb24(150,200,255);
-        private DL.Rgb24 _ghost = new DL.Rgb24(100,100,100);
-        private DL.Rgb24 _border = new DL.Rgb24(80,80,80);
+        private DL.Rgb24 _bg = new DL.Rgb24(0, 0, 0);
+        private DL.Rgb24 _fg = new DL.Rgb24(150, 200, 255);
+        private DL.Rgb24 _ghost = new DL.Rgb24(100, 100, 100);
+        private DL.Rgb24 _border = new DL.Rgb24(80, 80, 80);
         private bool _showCaret = true;
         private bool _showBorder = true;
         private bool _useTerminalCursor = true;
@@ -68,8 +68,8 @@ namespace Andy.Cli.Widgets
             }
             if (k.Key == ConsoleKey.LeftArrow) { if (_cursor > 0) _cursor--; return null; }
             if (k.Key == ConsoleKey.RightArrow) { if (_cursor < _text.Length) _cursor++; return null; }
-            if (k.Key == ConsoleKey.Backspace) { if (_cursor > 0) { bool wasNewline = _text[_cursor-1] == '\n'; _text = _text.Remove(_cursor-1,1); _cursor--; /* shrink happens via GetLineCount */ } return null; }
-            if (k.Key == ConsoleKey.Delete) { if (_cursor < _text.Length) { _text = _text.Remove(_cursor,1); } return null; }
+            if (k.Key == ConsoleKey.Backspace) { if (_cursor > 0) { bool wasNewline = _text[_cursor - 1] == '\n'; _text = _text.Remove(_cursor - 1, 1); _cursor--; /* shrink happens via GetLineCount */ } return null; }
+            if (k.Key == ConsoleKey.Delete) { if (_cursor < _text.Length) { _text = _text.Remove(_cursor, 1); } return null; }
             if (k.Key == ConsoleKey.Home) { _cursor = 0; return null; }
             if (k.Key == ConsoleKey.End) { _cursor = _text.Length; return null; }
             if (k.Key == ConsoleKey.UpArrow) { NavigateHistory(-1); return null; }
@@ -96,15 +96,15 @@ namespace Andy.Cli.Widgets
         /// <summary>Render the prompt within the provided rectangle.</summary>
         public void Render(in L.Rect rect, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
-            int x=(int)rect.X, y=(int)rect.Y, w=(int)rect.Width, h=(int)rect.Height;
+            int x = (int)rect.X, y = (int)rect.Y, w = (int)rect.Width, h = (int)rect.Height;
             int innerW = Math.Max(0, w - 2);
             _lastX = x; _lastY = y; _lastInnerW = innerW;
-            b.PushClip(new DL.ClipPush(x,y,w,h));
+            b.PushClip(new DL.ClipPush(x, y, w, h));
             // background and optional border
-            b.DrawRect(new DL.Rect(x,y,w,h,_bg));
+            b.DrawRect(new DL.Rect(x, y, w, h, _bg));
             if (_showBorder) b.DrawBorder(new DL.Border(x, y, w, h, "single", _border));
             // Lines and caret placement
-            var lines = _text.Replace("\r\n","\n").Replace('\r','\n').Split('\n');
+            var lines = _text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
             int total = lines.Length;
             int visible = Math.Min(h, total);
             int startLine = Math.Max(0, total - visible);
@@ -113,7 +113,7 @@ namespace Andy.Cli.Widgets
             {
                 string line = lines[startLine + i];
                 string snippet = line.Length > innerW ? line.Substring(0, innerW) : line;
-                b.DrawText(new DL.TextRun(x+1, y + i, snippet, _fg, _bg, DL.CellAttrFlags.None));
+                b.DrawText(new DL.TextRun(x + 1, y + i, snippet, _fg, _bg, DL.CellAttrFlags.None));
             }
             // ghost suggestion only on last visible row
             if (_suggest is not null && _focused && visible > 0)
@@ -126,7 +126,7 @@ namespace Andy.Cli.Widgets
                     int room = Math.Max(0, innerW - Math.Min(innerW, lastLine.Length));
                     string ghost = sug!;
                     if (ghost.Length > room) ghost = ghost.Substring(0, room);
-                    b.DrawText(new DL.TextRun(x+1 + Math.Min(innerW, lastLine.Length), lastRow, ghost, _ghost, _bg, DL.CellAttrFlags.None));
+                    b.DrawText(new DL.TextRun(x + 1 + Math.Min(innerW, lastLine.Length), lastRow, ghost, _ghost, _bg, DL.CellAttrFlags.None));
                 }
             }
             // caret glyph if not using terminal cursor
@@ -136,15 +136,15 @@ namespace Andy.Cli.Widgets
                 int rowInViewport = cr - startLine;
                 if (rowInViewport >= 0 && rowInViewport < h)
                 {
-                    int caretCol = Math.Clamp(cc, 0, innerW-1);
-                    b.DrawText(new DL.TextRun(x+1 + caretCol, y + rowInViewport, "|", _fg, _bg, DL.CellAttrFlags.None));
+                    int caretCol = Math.Clamp(cc, 0, innerW - 1);
+                    b.DrawText(new DL.TextRun(x + 1 + caretCol, y + rowInViewport, "|", _fg, _bg, DL.CellAttrFlags.None));
                 }
             }
             b.Pop();
         }
 
         /// <summary>Return how many visual lines are present (splitting on newlines).</summary>
-        public int GetLineCount() => _text.Length == 0 ? 1 : _text.Replace("\r\n","\n").Replace('\r','\n').Split('\n').Length;
+        public int GetLineCount() => _text.Length == 0 ? 1 : _text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n').Length;
 
         private (int Row, int Col) GetCaretRowCol()
         {

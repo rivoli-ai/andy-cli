@@ -33,7 +33,7 @@ public class ContextManagerTests
 
         // Assert
         Assert.Equal(2, context.Messages.Count); // System + User
-        Assert.Contains(context.Messages, m => m.Role == Andy.Llm.Models.MessageRole.User && 
+        Assert.Contains(context.Messages, m => m.Role == Andy.Llm.Models.MessageRole.User &&
             m.Parts.OfType<Andy.Llm.Models.TextPart>().Any(p => p.Text == userMessage));
     }
 
@@ -50,7 +50,7 @@ public class ContextManagerTests
 
         // Assert
         Assert.Equal(2, context.Messages.Count); // System + Assistant
-        Assert.Contains(context.Messages, m => m.Role == Andy.Llm.Models.MessageRole.Assistant && 
+        Assert.Contains(context.Messages, m => m.Role == Andy.Llm.Models.MessageRole.Assistant &&
             m.Parts.OfType<Andy.Llm.Models.TextPart>().Any(p => p.Text == assistantMessage));
     }
 
@@ -64,7 +64,7 @@ public class ContextManagerTests
         var result = @"{""files"": [""test.txt""]}";
 
         // Act
-        manager.AddToolExecution(toolId, parameters, result);
+        manager.AddToolExecution(toolId, "call_test", parameters, result);
         var stats = manager.GetStats();
 
         // Assert
@@ -97,7 +97,7 @@ public class ContextManagerTests
         var manager = new ContextManager("System prompt");
         manager.AddUserMessage("Message 1");
         manager.AddAssistantMessage("Response 1");
-        manager.AddToolExecution("tool1", new Dictionary<string, object?>(), "result1");
+        manager.AddToolExecution("tool1", "call_test", new Dictionary<string, object?>(), "result1");
         manager.AddUserMessage("Message 2");
 
         // Act
@@ -146,7 +146,7 @@ public class ContextManagerTests
     {
         // Arrange
         var manager = new ContextManager("System prompt");
-        
+
         // Add many messages to exceed compression threshold
         for (int i = 0; i < 50; i++)
         {
@@ -180,21 +180,20 @@ public class ContextManagerTests
         var result = "File contents here";
 
         // Act
-        manager.AddToolExecution(toolId, parameters, result);
+        manager.AddToolExecution(toolId, "call_test", parameters, result);
         var context = manager.GetContext();
 
-        // Assert - Tool executions are now stored as Tool messages with ToolResponsePart
+        // Assert - Tool executions are stored as Tool messages with ToolResponsePart
         var toolMessage = context.Messages.FirstOrDefault(m => m.Role == Andy.Llm.Models.MessageRole.Tool);
         Assert.NotNull(toolMessage);
-        
+
         var toolResponsePart = toolMessage?.Parts.OfType<Andy.Llm.Models.ToolResponsePart>().FirstOrDefault();
         Assert.NotNull(toolResponsePart);
         Assert.Equal(toolId, toolResponsePart?.ToolName);
-        
-        // The formatted tool execution is in the Response field
+
+        // The raw tool result is in the Response field (no internal headers)
         var responseText = toolResponsePart?.Response?.ToString() ?? "";
-        Assert.Contains("[Tool Execution: read_file]", responseText);
-        Assert.Contains("file.txt", responseText);
+        Assert.DoesNotContain("[Tool Execution:", responseText);
         Assert.Contains(result, responseText);
     }
 }

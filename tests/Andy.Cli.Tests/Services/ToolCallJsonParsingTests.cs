@@ -22,7 +22,7 @@ public class ToolCallJsonParsingTests
     public void ParseToolCallJson_HandlesRegularJson(string input, string expectedTool)
     {
         _output.WriteLine($"Input: {input}");
-        
+
         // Try to unescape if needed
         var jsonStr = input;
         if (input.Contains("\\\""))
@@ -37,10 +37,10 @@ public class ToolCallJsonParsingTests
         {
             using var doc = JsonDocument.Parse(jsonStr);
             var root = doc.RootElement;
-            
+
             Assert.True(root.TryGetProperty("tool", out var toolProp));
             Assert.Equal(expectedTool, toolProp.GetString());
-            
+
             _output.WriteLine($"Successfully parsed tool: {toolProp.GetString()}");
         }
         catch (JsonException ex)
@@ -55,16 +55,16 @@ public class ToolCallJsonParsingTests
     {
         // Test with escaped JSON (as might come from the LLM)
         var response = @"{""tool"":""read_file"",""parameters"":{""path"":""/Users/samibengrine/Devel/rivoli-ai/andy-cli/project.sln""}}";
-        
+
         _output.WriteLine($"Original response: {response}");
-        
+
         // Parse it directly - it's already valid JSON
         using var doc = JsonDocument.Parse(response);
         var root = doc.RootElement;
-        
+
         Assert.True(root.TryGetProperty("tool", out var toolProp));
         Assert.Equal("read_file", toolProp.GetString());
-        
+
         Assert.True(root.TryGetProperty("parameters", out var parameters));
         Assert.True(parameters.TryGetProperty("path", out var pathProp));
         Assert.Equal("/Users/samibengrine/Devel/rivoli-ai/andy-cli/project.sln", pathProp.GetString());

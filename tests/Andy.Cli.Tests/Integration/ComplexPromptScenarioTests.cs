@@ -58,7 +58,7 @@ public class ComplexPromptScenarioTests : PromptTestBase
     public async Task Scenario_FileBackup_CreatesBackupAndCleanup()
     {
         // Scenario: "Backup important files and clean up old ones"
-        
+
         // Setup initial files
         CreateTestFile("config.json", "{\"setting\": \"value\"}");
         CreateTestFile("data.csv", "id,name\\n1,test");
@@ -92,7 +92,7 @@ public class ComplexPromptScenarioTests : PromptTestBase
     public async Task Scenario_DataProcessing_ReadsModifiesWrites()
     {
         // Scenario: "Process and transform data files"
-        
+
         // Setup initial data
         var csvContent = "name,age,city\\nAlice,30,NYC\\nBob,25,LA\\nCharlie,35,Chicago";
         CreateTestFile("input.csv", csvContent);
@@ -119,7 +119,7 @@ public class ComplexPromptScenarioTests : PromptTestBase
     public async Task Scenario_ErrorRecovery_HandlesFailuresGracefully()
     {
         // Scenario: "Recover from errors and complete task"
-        
+
         // Setup mock responses showing error and recovery
         SetupMockResponses(
             SampleLlmResponses.ErrorResponses.FileNotFound,
@@ -143,7 +143,7 @@ public class ComplexPromptScenarioTests : PromptTestBase
     public async Task Scenario_ConditionalExecution_MakesDecisions()
     {
         // Scenario: "Clean up based on file conditions"
-        
+
         // Setup files with different sizes
         CreateTestFile("small.txt", "a");
         CreateTestFile("medium.txt", new string('b', 1000));
@@ -173,7 +173,7 @@ public class ComplexPromptScenarioTests : PromptTestBase
     public async Task Scenario_InformationGathering_SystemAnalysis()
     {
         // Scenario: "Analyze system and create report"
-        
+
         // Setup mock responses for system information gathering
         SetupMockResponses(
             SampleLlmResponses.SingleToolCalls.SystemInfo,
@@ -197,12 +197,12 @@ public class ComplexPromptScenarioTests : PromptTestBase
     public async Task Scenario_InteractiveWorkflow_StepByStep()
     {
         // Scenario: "Interactive file organization with user feedback"
-        
+
         // Setup test files
         CreateTestFile("doc1.txt", "text content");
         CreateTestFile("data.json", "{}");
         CreateTestFile("table.csv", "a,b,c");
-        
+
         // Setup mock responses for interactive workflow
         SetupMockResponses(
             SampleLlmResponses.NonToolResponses.Greeting,
@@ -245,18 +245,18 @@ public abstract class PromptTestBase : IDisposable
     {
         TestDirectory = Path.Combine(Path.GetTempPath(), $"andy_test_{Guid.NewGuid()}");
         Directory.CreateDirectory(TestDirectory);
-        
+
         InitializeServices();
     }
-    
+
     private void InitializeServices()
     {
         // Set up services
         var services = new ServiceCollection();
-        
+
         // Add logging
         services.AddLogging(builder => builder.AddConsole());
-        
+
         // Add tools framework
         services.AddSingleton<IToolRegistry, ToolRegistry>();
         services.AddSingleton<IToolExecutor, ToolExecutor>();
@@ -265,7 +265,7 @@ public abstract class PromptTestBase : IDisposable
         services.AddSingleton<ISecurityManager, SecurityManager>();
         services.AddSingleton<IToolOutputLimiter, ToolOutputLimiter>();
         services.AddSingleton<IServiceProvider>(sp => sp);
-        
+
         // Register tools
         services.AddTransient<ListDirectoryTool>();
         services.AddTransient<ReadFileTool>();
@@ -275,31 +275,27 @@ public abstract class PromptTestBase : IDisposable
         services.AddTransient<DeleteFileTool>();
         services.AddTransient<Andy.Cli.Tools.CreateDirectoryTool>();
         services.AddTransient<SystemInfoTool>();
-        
+
         _serviceProvider = services.BuildServiceProvider();
-        
+
         // Initialize tools
         ToolRegistry = _serviceProvider.GetRequiredService<IToolRegistry>();
         ToolExecutor = _serviceProvider.GetRequiredService<IToolExecutor>();
         RegisterTools();
-        
+
         // Set up mock LLM client
         MockLlmClient = new Mock<LlmClient>("test-api-key");
-        
+
         // Set up UI components
         Feed = new FeedView();
-        
+
         // Create system prompt
         var systemPromptService = new SystemPromptService();
         var systemPrompt = systemPromptService.BuildSystemPrompt(ToolRegistry.GetTools());
-        
-        // Create parser and validator
-        var parser = new QwenResponseParser(
-            new JsonRepairService(),
-            new StreamingToolCallAccumulator(new JsonRepairService(), null),
-            null);
-        var validator = new ToolCallValidator(ToolRegistry);
-        
+
+        // Create JSON repair service
+        var jsonRepair = new JsonRepairService();
+
         // Create AI service
         AiService = new AiConversationService(
             MockLlmClient.Object,
@@ -307,14 +303,13 @@ public abstract class PromptTestBase : IDisposable
             ToolExecutor,
             Feed,
             systemPrompt,
-            parser,
-            validator);
+            jsonRepair);
     }
-    
+
     private void RegisterTools()
     {
         var emptyConfig = new Dictionary<string, object?>();
-        
+
         // Register tools using Type
         ToolRegistry!.RegisterTool(typeof(ListDirectoryTool), emptyConfig);
         ToolRegistry.RegisterTool(typeof(ReadFileTool), emptyConfig);
@@ -340,13 +335,13 @@ public abstract class PromptTestBase : IDisposable
         }
         return await AiService.ProcessMessageAsync(prompt, false);
     }
-    
+
     protected void SetupMockResponse(string response)
     {
         MockLlmClient?.Setup(x => x.CompleteAsync(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(TestResponseHelper.CreateResponse(response));
     }
-    
+
     protected void SetupMockResponses(params string[] responses)
     {
         var queue = new Queue<LlmResponse>(responses.Select(r => TestResponseHelper.CreateResponse(r)));

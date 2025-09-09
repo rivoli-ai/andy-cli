@@ -37,7 +37,7 @@ public class QwenCleanupPatternsTest
         foreach (var input in testCases)
         {
             var result = _parser.CleanResponseText(input);
-            
+
             if (input == "You normal text")
             {
                 Assert.Contains("You normal text", result);
@@ -55,7 +55,7 @@ public class QwenCleanupPatternsTest
     {
         var input = "Try this: let me search for files.";
         var result = _parser.CleanResponseText(input);
-        
+
         Assert.DoesNotContain("Try this", result);
         Assert.Empty(result); // The entire thought should be removed
     }
@@ -71,7 +71,7 @@ public class QwenCleanupPatternsTest
 The solution contains these files.";
 
         var result = _parser.CleanResponseText(input);
-        
+
         Assert.DoesNotContain("[Tool Results]", result);
         Assert.DoesNotContain("\"files\"", result);
         Assert.Contains("Here is the analysis", result);
@@ -95,7 +95,7 @@ The solution contains these files.";
 Summary provided above.";
 
         var result = _parser.CleanResponseText(input);
-        
+
         Assert.DoesNotContain("[Tool Results]", result);
         Assert.DoesNotContain("files", result);
         Assert.DoesNotContain("subdirectories", result);
@@ -137,7 +137,7 @@ Summary provided above.";
 This is a typical .NET solution layout.";
 
         var result = _parser.CleanResponseText(input);
-        
+
         Assert.Contains("solution contains", result);
         Assert.Contains("Source code", result);
         Assert.Contains("Tests in", result);
@@ -158,7 +158,7 @@ I'll check the files now.
 The solution has multiple projects.";
 
         var result = _parser.CleanResponseText(input);
-        
+
         Assert.DoesNotContain("Y‌ou", result);
         Assert.DoesNotContain("Try this", result);
         Assert.DoesNotContain("[Tool Results]", result);
@@ -187,7 +187,7 @@ Newlines
 Here.";
 
         var result = _parser.CleanResponseText(input);
-        
+
         Assert.DoesNotContain("  ", result); // No double spaces
         Assert.DoesNotContain("\n\n", result); // No double newlines
         Assert.Contains("Text with multiple spaces", result);

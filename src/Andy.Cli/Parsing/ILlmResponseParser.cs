@@ -13,7 +13,7 @@ public interface ILlmResponseParser
     /// Parse a complete response into an AST
     /// </summary>
     ResponseNode Parse(string response, ParserContext? context = null);
-    
+
     /// <summary>
     /// Parse streaming response chunks into an AST
     /// </summary>
@@ -21,12 +21,12 @@ public interface ILlmResponseParser
         IAsyncEnumerable<string> chunks,
         ParserContext? context = null,
         CancellationToken cancellationToken = default);
-    
+
     /// <summary>
     /// Validate the AST for completeness and correctness
     /// </summary>
     ValidationResult Validate(ResponseNode ast);
-    
+
     /// <summary>
     /// Get parser capabilities and supported features
     /// </summary>
@@ -68,9 +68,9 @@ public class ValidationResult
 {
     public bool IsValid { get; set; }
     public List<ValidationIssue> Issues { get; set; } = new();
-    
+
     public static ValidationResult Success() => new() { IsValid = true };
-    
+
     public static ValidationResult Failure(params ValidationIssue[] issues) => new()
     {
         IsValid = false,

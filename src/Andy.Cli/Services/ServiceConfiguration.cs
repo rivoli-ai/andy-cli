@@ -20,28 +20,28 @@ public static class ServiceConfiguration
     public static ServiceProvider ConfigureServices()
     {
         var services = new ServiceCollection();
-        
+
         // Add logging
         services.AddLogging();
-        
+
         // Configure LLM services
         services.ConfigureLlmFromEnvironment();
         services.AddLlmServices(options =>
         {
             options.DefaultProvider = "cerebras";
         });
-        
+
         // Configure Tool services
         services.AddSingleton<IToolRegistry, ToolRegistry>();
         services.AddSingleton<IToolExecutor, ToolExecutor>();
         services.AddSingleton<ISecurityManager, SecurityManager>();
         services.AddSingleton<IPermissionProfileService, PermissionProfileService>();
-        
+
         // Register built-in tools
         services.AddBuiltInTools();
-        
+
         var serviceProvider = services.BuildServiceProvider();
-        
+
         // Initialize tool registry and register tools
         var toolRegistry = serviceProvider.GetRequiredService<IToolRegistry>();
         var toolRegistrations = serviceProvider.GetServices<ToolRegistrationInfo>();
@@ -49,7 +49,7 @@ public static class ServiceConfiguration
         {
             toolRegistry.RegisterTool(registration.ToolType, registration.Configuration);
         }
-        
+
         return serviceProvider;
     }
 }

@@ -79,27 +79,27 @@ public static class ParameterMapper
     /// Maps parameter names from what the LLM provided to what the tool expects
     /// </summary>
     public static Dictionary<string, object?> MapParameters(
-        string toolId, 
+        string toolId,
         Dictionary<string, object?> inputParameters,
         ToolMetadata toolMetadata)
     {
         var mappedParameters = new Dictionary<string, object?>();
-        
+
         // Get the mapping for this specific tool if it exists
         var hasToolMapping = ToolParameterMappings.TryGetValue(toolId, out var mappings);
-        
+
         // Get expected parameter names from tool metadata
         var expectedParams = toolMetadata.Parameters.ToDictionary(p => p.Name.ToLower(), p => p.Name);
-        
+
         // Create a map of parameter metadata for type checking
         var paramMetadata = toolMetadata.Parameters.ToDictionary(p => p.Name.ToLower(), p => p);
-        
+
         foreach (var kvp in inputParameters)
         {
             var paramName = kvp.Key;
             var paramValue = kvp.Value;
             string finalParamName = paramName;
-            
+
             // First, check if it's already the correct name
             if (expectedParams.ContainsKey(paramName.ToLower()))
             {
@@ -123,16 +123,16 @@ public static class ParameterMapper
                     finalParamName = expectedParams[fuzzyMatch];
                 }
             }
-            
+
             // Apply type conversion if needed
             if (paramMetadata.TryGetValue(finalParamName.ToLower(), out var metadata))
             {
                 paramValue = ConvertParameterType(paramValue, metadata);
             }
-            
+
             mappedParameters[finalParamName] = paramValue;
         }
-        
+
         return mappedParameters;
     }
 
@@ -142,9 +142,9 @@ public static class ParameterMapper
     private static object? ConvertParameterType(object? value, ToolParameter metadata)
     {
         if (value == null) return null;
-        
+
         var expectedType = metadata.Type?.ToLower() ?? "string";
-        
+
         // Handle array conversions
         if (expectedType == "array" || expectedType.Contains("[]"))
         {
@@ -153,7 +153,7 @@ public static class ParameterMapper
             {
                 return value;
             }
-            
+
             // If it's a string that looks like JSON array, try to parse it
             if (value is string strValue)
             {
@@ -170,21 +170,21 @@ public static class ParameterMapper
                         return new[] { value };
                     }
                 }
-                
+
                 // For comma-separated values
                 if (strValue.Contains(","))
                 {
                     return strValue.Split(',').Select(s => s.Trim()).ToArray();
                 }
-                
+
                 // Single value - wrap in array
                 return new[] { strValue };
             }
-            
+
             // For any other type, wrap in array
             return new[] { value };
         }
-        
+
         // Handle boolean conversions
         if (expectedType == "boolean" || expectedType == "bool")
         {
@@ -193,7 +193,7 @@ public static class ParameterMapper
             {
                 if (bool.TryParse(strBool, out var result))
                     return result;
-                
+
                 // Handle common variations
                 var lower = strBool.ToLower();
                 return lower == "true" || lower == "yes" || lower == "1" || lower == "on";
@@ -201,7 +201,7 @@ public static class ParameterMapper
             if (value is int intBool) return intBool != 0;
             return false;
         }
-        
+
         // Handle number conversions
         if (expectedType == "integer" || expectedType == "int" || expectedType == "number")
         {
@@ -217,13 +217,13 @@ public static class ParameterMapper
             }
             return value;
         }
-        
+
         // Handle string conversions
         if (expectedType == "string")
         {
             return value.ToString();
         }
-        
+
         // Return as-is for unknown types
         return value;
     }
@@ -234,25 +234,25 @@ public static class ParameterMapper
     private static string? FindFuzzyMatch(string input, IEnumerable<string> candidates)
     {
         var normalizedInput = NormalizeParamName(input);
-        
+
         foreach (var candidate in candidates)
         {
             var normalizedCandidate = NormalizeParamName(candidate);
-            
+
             // Check if one contains the other
-            if (normalizedInput.Contains(normalizedCandidate) || 
+            if (normalizedInput.Contains(normalizedCandidate) ||
                 normalizedCandidate.Contains(normalizedInput))
             {
                 return candidate;
             }
-            
+
             // Check Levenshtein distance for close matches
             if (GetLevenshteinDistance(normalizedInput, normalizedCandidate) <= 2)
             {
                 return candidate;
             }
         }
-        
+
         return null;
     }
 
@@ -272,18 +272,18 @@ public static class ParameterMapper
     {
         if (string.IsNullOrEmpty(s1))
             return string.IsNullOrEmpty(s2) ? 0 : s2.Length;
-        
+
         if (string.IsNullOrEmpty(s2))
             return s1.Length;
-        
+
         int[,] distance = new int[s1.Length + 1, s2.Length + 1];
-        
+
         for (int i = 0; i <= s1.Length; i++)
             distance[i, 0] = i;
-        
+
         for (int j = 0; j <= s2.Length; j++)
             distance[0, j] = j;
-        
+
         for (int i = 1; i <= s1.Length; i++)
         {
             for (int j = 1; j <= s2.Length; j++)
@@ -294,7 +294,7 @@ public static class ParameterMapper
                     distance[i - 1, j - 1] + cost);
             }
         }
-        
+
         return distance[s1.Length, s2.Length];
     }
 }

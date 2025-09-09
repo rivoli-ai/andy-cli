@@ -15,23 +15,27 @@ public class SystemPromptService
     public string BuildSystemPrompt(IEnumerable<ToolRegistration> availableTools, string? modelName = null, string? providerName = null)
     {
         _prompt.Clear();
-        
+
         AddCoreMandates();
         AddEnvironmentContext();
         AddAvailableTools(availableTools);
         AddWorkflowGuidelines();
         AddToolUsageInstructions(modelName, providerName);
         AddCriticalInstructions(modelName, providerName);
-        
+
         return _prompt.ToString();
     }
 
     private void AddCoreMandates()
     {
         _prompt.AppendLine("You are an AI assistant with tool access. Be helpful, accurate, and concise.");
+        _prompt.AppendLine("Never mention internal tools, tool names, or tool execution to the user.");
+        _prompt.AppendLine("Reference only entities verified by actual tool outputs; do not invent details.");
+        _prompt.AppendLine("For multi-step tasks, follow: Clarify → Plan → Act → Conclude. Keep answers grounded and concise.");
+        _prompt.AppendLine("If ambiguous, ask 1–2 clarifying questions before proceeding.");
         _prompt.AppendLine($"Environment: {Environment.OSVersion.Platform}, {Environment.CurrentDirectory}, {DateTime.Now:yyyy-MM-dd}");
         _prompt.AppendLine();
-        
+
         // Add project structure
         var projectTree = GetDirectoryTree(Environment.CurrentDirectory, maxDepth: 3);
         if (!string.IsNullOrEmpty(projectTree))
@@ -42,7 +46,7 @@ public class SystemPromptService
             _prompt.AppendLine("```");
             _prompt.AppendLine();
         }
-        
+
         _prompt.AppendLine("## Best Practices");
         _prompt.AppendLine("- The project structure above shows available files and directories");
         _prompt.AppendLine("- Use this information to read actual files that exist");
@@ -60,18 +64,18 @@ public class SystemPromptService
     {
         _prompt.AppendLine("## Available Tools");
         _prompt.AppendLine();
-        
+
         // Group tools by category for better organization
         var toolsByCategory = tools.GroupBy(t => t.Metadata.Category).OrderBy(g => g.Key);
-        
+
         foreach (var category in toolsByCategory)
         {
             _prompt.AppendLine($"### {category.Key}");
-            
+
             foreach (var tool in category.OrderBy(t => t.Metadata.Name))
             {
                 _prompt.AppendLine($"- **{tool.Metadata.Id}**: {tool.Metadata.Description}");
-                
+
                 if (tool.Metadata.Parameters.Any())
                 {
                     // Show exact parameter names and types
@@ -82,7 +86,7 @@ public class SystemPromptService
                         paramDetails.Add(paramStr);
                     }
                     _prompt.AppendLine($"  Parameters: {string.Join(", ", paramDetails)} (* = required)");
-                    
+
                     // Add example for commonly used tools
                     if (tool.Metadata.Id == "read_file")
                     {
@@ -111,14 +115,19 @@ public class SystemPromptService
         _prompt.AppendLine("## How Tools Work");
         _prompt.AppendLine("When you need to use a tool:");
         _prompt.AppendLine("1. Output ONLY the JSON: {\"tool\":\"tool_id\",\"parameters\":{}}");
-        _prompt.AppendLine("2. I will execute the tool and respond with [Tool Results]");
-        _prompt.AppendLine("3. Then continue with your response based on the actual results");
+        _prompt.AppendLine("2. The system will execute the tool and provide results (not visible to the user).");
+        _prompt.AppendLine("3. Continue with your response based on actual results. Do not disclose tools.");
         _prompt.AppendLine();
         _prompt.AppendLine("## Example Workflow for Project Exploration");
         _prompt.AppendLine("When asked about a project or codebase:");
-        _prompt.AppendLine("1. FIRST: {\"tool\":\"list_directory\",\"parameters\":{\"path\":\".\"}} to see what's available");
-        _prompt.AppendLine("2. THEN: Based on actual files found, read specific files like README.md or .csproj files");
-        _prompt.AppendLine("3. NEVER: Try to read files you haven't verified exist with list_directory");
+        _prompt.AppendLine("1. Clarify the user's depth/targets (top-level vs deep dive). Ask 1–2 quick questions if ambiguous.");
+        _prompt.AppendLine("2. Plan explicit steps (list → select → read → summarize → recurse). Keep it concise for the user.");
+        _prompt.AppendLine("3. FIRST: {\"tool\":\"list_directory\",\"parameters\":{\"path\":\".\"}} to see what's available");
+        _prompt.AppendLine("4. THEN: Based on actual files found, list specific subdirectories (e.g., src/Andy.Cli) before reading files");
+        _prompt.AppendLine("5. NEXT: Read key files (README.md, *.csproj, Program.cs) and summarize");
+        _prompt.AppendLine("6. DEEPER: For each important directory, list it then sample representative files (services, parsers, widgets) and summarize roles");
+        _prompt.AppendLine("7. REPEAT: Continue until coverage is sufficient or token budget is reached");
+        _prompt.AppendLine("8. NEVER: Try to read files you haven't verified exist with list_directory");
         _prompt.AppendLine();
     }
 
@@ -130,10 +139,10 @@ public class SystemPromptService
     private void AddCriticalInstructions(string? modelName, string? providerName)
     {
         _prompt.AppendLine("## CRITICAL: How to Use Tools");
-        
+
         // Check if this is a Qwen model
         bool isQwenModel = modelName?.ToLowerInvariant().Contains("qwen") ?? false;
-        
+
         if (isQwenModel)
         {
             _prompt.AppendLine("CRITICAL INSTRUCTIONS FOR QWEN MODEL:");
@@ -153,7 +162,7 @@ public class SystemPromptService
             _prompt.AppendLine("4. IMPORTANT: If you say you're going to do something (e.g., 'Let me list...'), ");
             _prompt.AppendLine("   you MUST output the corresponding tool call JSON immediately after");
             _prompt.AppendLine("5. Use ONE tool at a time - wait for results before using another");
-            _prompt.AppendLine("6. NEVER output fake '[Tool Results]' or simulate tool execution");
+            _prompt.AppendLine("6. NEVER simulate tool execution or mention tools to the user");
             _prompt.AppendLine("7. NEVER just say what you're going to do without actually doing it");
             _prompt.AppendLine("8. Be concise - avoid repeating yourself or outputting corrupted text");
         }
@@ -166,11 +175,10 @@ public class SystemPromptService
         }
         _prompt.AppendLine();
         _prompt.AppendLine("## ABSOLUTELY FORBIDDEN:");
-        _prompt.AppendLine("❌ NEVER output \"[Tool Results]\" - this is ONLY for system use");
+        _prompt.AppendLine("❌ NEVER reveal or mention internal tools, tool names, or tool execution to the user");
         _prompt.AppendLine("❌ NEVER simulate or fake tool execution results");
         _prompt.AppendLine("❌ NEVER pretend a tool was called without actually calling it");
         _prompt.AppendLine("❌ NEVER make up file contents or directory listings");
-        _prompt.AppendLine("❌ NEVER output fake JSON results wrapped in [Tool Results]");
         _prompt.AppendLine();
         _prompt.AppendLine("## REQUIRED:");
         _prompt.AppendLine("✓ ALWAYS make real tool calls using the exact JSON format above");
@@ -201,20 +209,20 @@ public class SystemPromptService
             _ => type
         };
     }
-    
+
     private string GetDirectoryTree(string path, int maxDepth = 3, int currentDepth = 0, string prefix = "")
     {
         if (currentDepth >= maxDepth)
             return "";
-            
+
         var result = new StringBuilder();
         var dirInfo = new DirectoryInfo(path);
-        
+
         if (currentDepth == 0)
         {
             result.AppendLine(dirInfo.Name + "/");
         }
-        
+
         try
         {
             // Get directories and files, filter out common ignored items
@@ -224,14 +232,14 @@ public class SystemPromptService
                 .ThenBy(e => e.Name)
                 .Take(50) // Limit entries per directory to avoid huge trees
                 .ToList();
-            
+
             for (int i = 0; i < entries.Count; i++)
             {
                 var isLast = i == entries.Count - 1;
                 var entry = entries[i];
                 var connector = isLast ? "└── " : "├── ";
                 var extension = isLast ? "    " : "│   ";
-                
+
                 if (entry is DirectoryInfo dir)
                 {
                     result.AppendLine($"{prefix}{connector}{dir.Name}/");
@@ -251,23 +259,23 @@ public class SystemPromptService
         {
             // Skip directories we can't access
         }
-        
+
         return result.ToString();
     }
-    
+
     private bool ShouldIgnoreEntry(string name)
     {
         // Common directories and files to ignore
-        var ignoredPatterns = new[] 
-        { 
-            ".git", ".vs", ".vscode", ".idea", 
-            "bin", "obj", "node_modules", 
+        var ignoredPatterns = new[]
+        {
+            ".git", ".vs", ".vscode", ".idea",
+            "bin", "obj", "node_modules",
             ".DS_Store", "Thumbs.db",
             "TestResults", "packages", ".nuget",
             "__pycache__", ".pytest_cache", ".mypy_cache"
         };
-        
-        return ignoredPatterns.Any(pattern => 
+
+        return ignoredPatterns.Any(pattern =>
             name.Equals(pattern, StringComparison.OrdinalIgnoreCase));
     }
 }

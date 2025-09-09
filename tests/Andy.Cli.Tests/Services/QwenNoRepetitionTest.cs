@@ -42,24 +42,24 @@ To know more about the project details execute the following command:
         // Clean the response
         var cleaned = _interpreter.CleanResponseForDisplay(response, "qwen-3-coder-480b");
         _output.WriteLine($"Cleaned response: {cleaned}");
-        
+
         // Check that the tool call JSON is removed
         Assert.DoesNotContain("{\"tool\"", cleaned);
-        
+
         // Check for no duplicate sentences
         var sentences = cleaned.Split(new[] { '.', '!', '?' }, StringSplitOptions.RemoveEmptyEntries)
             .Select(s => s.Trim())
             .Where(s => s.Length > 10) // Ignore very short fragments
             .ToList();
-        
+
         _output.WriteLine($"Found {sentences.Count} sentences");
-        
+
         // Check each sentence appears only once
         var duplicates = sentences.GroupBy(s => s)
             .Where(g => g.Count() > 1)
             .Select(g => new { Sentence = g.Key, Count = g.Count() })
             .ToList();
-        
+
         if (duplicates.Any())
         {
             foreach (var dup in duplicates)
@@ -67,7 +67,7 @@ To know more about the project details execute the following command:
                 _output.WriteLine($"Duplicate found ({dup.Count}x): {dup.Sentence}");
             }
         }
-        
+
         Assert.Empty(duplicates);
     }
 
@@ -83,16 +83,16 @@ I'll help you read the README file.";
 
         var cleaned = _interpreter.CleanResponseForDisplay(response, "qwen-3-coder-480b");
         _output.WriteLine($"Cleaned: '{cleaned}'");
-        
+
         // Should not contain the tool call
         Assert.DoesNotContain("{\"tool\"", cleaned);
-        
+
         // Count occurrences of the sentence
         var sentence = "I'll help you read the README file";
         var matches = Regex.Matches(cleaned, Regex.Escape(sentence));
-        
+
         _output.WriteLine($"Occurrences of '{sentence}': {matches.Count}");
-        
+
         // Should appear only once (or be completely removed if it's only around tool call)
         Assert.True(matches.Count <= 1, $"Sentence appears {matches.Count} times, expected 0 or 1");
     }
@@ -110,18 +110,18 @@ Let me check the system information.
 
         var cleaned = _interpreter.CleanResponseForDisplay(response, "qwen-3-coder-480b");
         _output.WriteLine($"Cleaned: '{cleaned}'");
-        
+
         // Split into lines and check for duplicates
         var lines = cleaned.Split('\n', StringSplitOptions.RemoveEmptyEntries)
             .Select(l => l.Trim())
             .Where(l => !string.IsNullOrWhiteSpace(l))
             .ToList();
-        
+
         var duplicateLines = lines.GroupBy(l => l)
             .Where(g => g.Count() > 1)
             .Select(g => new { Line = g.Key, Count = g.Count() })
             .ToList();
-        
+
         if (duplicateLines.Any())
         {
             foreach (var dup in duplicateLines)
@@ -129,7 +129,7 @@ Let me check the system information.
                 _output.WriteLine($"Duplicate line ({dup.Count}x): {dup.Line}");
             }
         }
-        
+
         // For now, we detect duplicates but don't fail - this helps us understand the issue
         // In production, we might want to deduplicate in the cleaning process
         _output.WriteLine($"Total lines: {lines.Count}, Unique lines: {lines.Distinct().Count()}");
@@ -144,9 +144,9 @@ The project structure is about a CLI (Command Line Interface) tool named Andy.Cl
 
         // Check if this pattern of truncated repetition exists
         var lines = response.Split('\n');
-        
+
         _output.WriteLine($"Line count: {lines.Length}");
-        
+
         // Check if lines are similar (potential repetition with truncation)
         for (int i = 0; i < lines.Length - 1; i++)
         {
@@ -164,9 +164,9 @@ The project structure is about a CLI (Command Line Interface) tool named Andy.Cl
                 }
             }
         }
-        
+
         // For streaming responses, we should detect and remove duplicates
-        Assert.True(lines.Length <= 2 || !AreLinesRepetitive(lines), 
+        Assert.True(lines.Length <= 2 || !AreLinesRepetitive(lines),
             "Response contains repetitive lines that should be cleaned");
     }
 
@@ -211,11 +211,11 @@ The project structure is about a CLI (Command Line Interface) tool named Andy.Cl
         // The interpreter should detect this as potentially problematic
         _output.WriteLine($"Response contains escaped quotes: {response.Contains(@"\u0022")}");
         _output.WriteLine($"Response contains Tool Execution: {response.Contains("Tool Execution")}");
-        
+
         // Clean the response
         var cleaned = _interpreter.CleanResponseForDisplay(response, "qwen-3-coder-480b");
         _output.WriteLine($"Cleaned: '{cleaned}'");
-        
+
         // The escaped JSON should be detected and removed or cleaned
         Assert.DoesNotContain(@"\u0022", cleaned);
         Assert.DoesNotContain(@"Tool Execution", cleaned);
@@ -226,13 +226,13 @@ The project structure is about a CLI (Command Line Interface) tool named Andy.Cl
     {
         // Test case showing Qwen correctly responding to hello without tools
         var response = @"Hello! How can I assist you today?";
-        
+
         // Check no tool calls are extracted
         var toolCalls = _interpreter.ExtractToolCalls(response, "qwen-3-coder-480b", "cerebras");
         _output.WriteLine($"Tool calls found: {toolCalls.Count}");
-        
+
         Assert.Empty(toolCalls);
-        
+
         // Clean response should be unchanged
         var cleaned = _interpreter.CleanResponseForDisplay(response, "qwen-3-coder-480b");
         Assert.Equal("Hello! How can I assist you today?", cleaned);

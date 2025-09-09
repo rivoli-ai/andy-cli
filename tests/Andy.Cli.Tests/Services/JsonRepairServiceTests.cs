@@ -20,7 +20,7 @@ public class JsonRepairServiceTests
         // Assert
         Assert.NotNull(result);
         Assert.Equal("test", result["name"]?.ToString());
-        
+
         // JsonElement needs special handling for numeric values
         if (result["value"] is JsonElement element)
         {
@@ -112,7 +112,7 @@ public class JsonRepairServiceTests
         // Assert
         Assert.True(success);
         Assert.NotEqual(malformed, repaired);
-        
+
         // Should be parseable now
         var parsed = JsonDocument.Parse(repaired);
         Assert.Equal("test", parsed.RootElement.GetProperty("name").GetString());

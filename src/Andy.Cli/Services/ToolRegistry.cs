@@ -69,9 +69,9 @@ public class ToolRegistry : IToolRegistry
             };
 
             _tools[metadata.Id] = registration;
-            
+
             ToolRegistered?.Invoke(this, new ToolRegisteredEventArgs(registration));
-            
+
             return registration;
         }
     }
@@ -215,7 +215,7 @@ public class ToolRegistry : IToolRegistry
         lock (_lock)
         {
             var tools = _tools.Values.ToList();
-            
+
             return new ToolRegistryStatistics
             {
                 TotalTools = tools.Count,

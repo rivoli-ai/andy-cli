@@ -7,6 +7,9 @@ using Microsoft.Extensions.Logging;
 using Andy.Cli.Parsing.Lexer;
 using Andy.Cli.Parsing.Parsers;
 using Andy.Cli.Services;
+// using Andy.Llm.Parsing;
+// using Andy.Llm.Parsing.Ast;
+// Temporarily disabled while we resolve interface compatibility issues
 
 namespace Andy.Cli.Parsing.Compiler;
 
@@ -21,7 +24,7 @@ public class LlmResponseCompiler
     private readonly ILlmResponseParser _parser;
     private readonly SemanticAnalyzer _semanticAnalyzer;
     private readonly IJsonRepairService _jsonRepair;
-    
+
     public CompilationResult LastCompilationResult { get; private set; } = new();
 
     public LlmResponseCompiler(
@@ -44,7 +47,7 @@ public class LlmResponseCompiler
         options ??= new CompilerOptions();
         var result = new CompilationResult();
         var startTime = DateTime.UtcNow;
-        
+
         try
         {
             // Phase 1: Lexical Analysis
@@ -52,14 +55,14 @@ public class LlmResponseCompiler
             var lexerResult = _lexer.Tokenize(response);
             result.Tokens = lexerResult.Tokens;
             result.Diagnostics.AddRange(ConvertLexicalErrors(lexerResult.Errors));
-            
+
             if (options.StopOnLexicalErrors && lexerResult.Errors.Any(e => e.Severity == Lexer.ErrorSeverity.Error))
             {
                 result.Success = false;
                 result.CompilationTime = DateTime.UtcNow - startTime;
                 return result;
             }
-            
+
             // Phase 2: Parsing (Syntax Analysis)
             _logger?.LogDebug("Phase 2: Parsing");
             var context = new ParserContext
@@ -69,22 +72,22 @@ public class LlmResponseCompiler
                 StrictMode = options.StrictMode,
                 PreserveThoughts = options.PreserveThoughts
             };
-            
+
             result.Ast = _parser.Parse(response, context);
-            
+
             // Phase 3: Semantic Analysis
             _logger?.LogDebug("Phase 3: Semantic analysis");
             var semanticResult = _semanticAnalyzer.Analyze(result.Ast, options);
             result.Diagnostics.AddRange(semanticResult.Diagnostics);
             result.SemanticInfo = semanticResult;
-            
+
             // Phase 4: Optimization (if enabled)
             if (options.EnableOptimizations)
             {
                 _logger?.LogDebug("Phase 4: Optimization");
                 result.Ast = Optimize(result.Ast, options);
             }
-            
+
             // Phase 5: Validation
             _logger?.LogDebug("Phase 5: Validation");
             var validationResult = _parser.Validate(result.Ast);
@@ -92,10 +95,10 @@ public class LlmResponseCompiler
             {
                 result.Diagnostics.AddRange(ConvertValidationIssues(validationResult.Issues));
             }
-            
+
             result.Success = !result.Diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error);
             result.CompilationTime = DateTime.UtcNow - startTime;
-            
+
             LastCompilationResult = result;
         }
         catch (Exception ex)
@@ -110,7 +113,7 @@ public class LlmResponseCompiler
             });
             result.CompilationTime = DateTime.UtcNow - startTime;
         }
-        
+
         return result;
     }
 
@@ -126,14 +129,14 @@ public class LlmResponseCompiler
         options ??= new CompilerOptions();
         var state = new IncrementalCompilationState();
         var result = new CompilationResult();
-        
+
         await foreach (var chunk in chunks.WithCancellation(cancellationToken))
         {
             state.Buffer += chunk;
-            
+
             // Try to compile what we have so far
             var partialResult = Compile(state.Buffer, options);
-            
+
             // Emit incremental updates
             if (IncrementalUpdateAvailable != null)
             {
@@ -143,15 +146,15 @@ public class LlmResponseCompiler
                     UpdatedAst = partialResult.Ast,
                     NewDiagnostics = partialResult.Diagnostics.Skip(state.LastDiagnosticCount).ToList()
                 };
-                
+
                 IncrementalUpdateAvailable?.Invoke(update);
             }
-            
+
             state.LastTokenCount = partialResult.Tokens.Count;
             state.LastDiagnosticCount = partialResult.Diagnostics.Count;
             result = partialResult;
         }
-        
+
         return result;
     }
 
@@ -162,19 +165,19 @@ public class LlmResponseCompiler
     {
         // Remove duplicate tool calls
         RemoveDuplicateToolCalls(ast);
-        
+
         // Merge adjacent text nodes
         MergeAdjacentTextNodes(ast);
-        
+
         // Clean up empty nodes
         RemoveEmptyNodes(ast);
-        
+
         // Normalize file paths
         if (options.NormalizeFilePaths)
         {
             NormalizeFilePaths(ast);
         }
-        
+
         return ast;
     }
 
@@ -182,7 +185,7 @@ public class LlmResponseCompiler
     {
         var seenCalls = new HashSet<string>();
         var toolCalls = ast.Children.OfType<ToolCallNode>().ToList();
-        
+
         foreach (var toolCall in toolCalls)
         {
             var key = $"{toolCall.ToolName}:{System.Text.Json.JsonSerializer.Serialize(toolCall.Arguments)}";
@@ -198,7 +201,7 @@ public class LlmResponseCompiler
     {
         var textNodes = new List<TextNode>();
         var newChildren = new List<AstNode>();
-        
+
         foreach (var child in ast.Children)
         {
             if (child is TextNode textNode)
@@ -216,13 +219,13 @@ public class LlmResponseCompiler
                 newChildren.Add(child);
             }
         }
-        
+
         if (textNodes.Count > 0)
         {
             var merged = MergeTextNodes(textNodes);
             newChildren.Add(merged);
         }
-        
+
         ast.Children = newChildren;
     }
 
@@ -230,7 +233,7 @@ public class LlmResponseCompiler
     {
         if (nodes.Count == 1)
             return nodes[0];
-        
+
         return new TextNode
         {
             Content = string.Join(" ", nodes.Select(n => n.Content)),
@@ -253,7 +256,7 @@ public class LlmResponseCompiler
         {
             // Normalize path separators
             fileRef.Path = fileRef.Path.Replace('\\', '/');
-            
+
             // Resolve relative paths if possible
             if (!fileRef.IsAbsolute && !fileRef.Path.StartsWith("./"))
             {
@@ -264,11 +267,9 @@ public class LlmResponseCompiler
 
     private ILlmResponseParser CreateParserForModel(string modelProvider, IJsonRepairService jsonRepair, ILogger? logger)
     {
-        return modelProvider.ToLower() switch
-        {
-            "qwen" or "cerebras" => new QwenParser(jsonRepair, null),
-            _ => new QwenParser(jsonRepair, null) // Default to Qwen for now
-        };
+        // For now, keep using QwenParser directly until we can properly integrate andy-llm
+        // TODO: Integrate HybridLlmParser properly when interface compatibility is resolved
+        return new QwenParser(jsonRepair, null);
     }
 
     private List<Diagnostic> ConvertLexicalErrors(List<LexicalError> errors)

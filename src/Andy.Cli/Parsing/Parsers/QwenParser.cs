@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Andy.Cli.Services;
+using Andy.Cli.Parsing.Validation;
 
 namespace Andy.Cli.Parsing.Parsers;
 
@@ -18,30 +19,34 @@ public class QwenParser : BaseParser
     private static readonly Regex QwenToolCallPattern = new(
         @"\{[^{}]*""tool_call""\s*:\s*\{[^{}]*""name""\s*:\s*""([^""]+)""[^{}]*\}[^{}]*\}",
         RegexOptions.Singleline | RegexOptions.Compiled);
-    
+
     // Direct tool format: {"tool":"name","parameters":{...}}
     private static readonly Regex DirectToolPattern = new(
         @"\{\s*""tool""\s*:\s*""([^""]+)""\s*,\s*""parameters""\s*:\s*\{[^{}]*\}\s*\}",
         RegexOptions.Singleline | RegexOptions.Compiled);
-    
+
     // Qwen sometimes outputs internal thoughts with specific markers
     private static readonly Regex ThoughtPattern = new(
         @"(?:<thinking>|<thought>|<internal>|【[^】]+】|\[\[.*?\]\])(.*?)(?:</thinking>|</thought>|</internal>)",
         RegexOptions.Singleline | RegexOptions.Compiled | RegexOptions.IgnoreCase);
-    
+
     // Garbage text patterns specific to Qwen
     private static readonly Regex GarbagePattern = new(
         @"Y[\u200B-\u200F\uFEFF]*ou\b|^\s*[{}]\s*$|""contents""\s*:\s*\[|""recursive""\s*:",
         RegexOptions.Multiline | RegexOptions.Compiled);
-    
+
     // Pattern to remove any remaining tool JSON from display
     private static readonly Regex AnyToolJsonPattern = new(
         @"\{[^{}]*""(?:tool|tool_call|function|name)""[^{}]*\}",
         RegexOptions.Singleline | RegexOptions.Compiled);
 
+    private readonly HallucinationDetector _hallucinationDetector;
+
     public QwenParser(IJsonRepairService jsonRepair, ILogger<QwenParser>? logger = null)
         : base(jsonRepair, logger)
     {
+        // Create a separate logger for HallucinationDetector or pass null
+        _hallucinationDetector = new HallucinationDetector();
     }
 
     public override ResponseNode Parse(string response, ParserContext? context = null)
@@ -51,24 +56,42 @@ public class QwenParser : BaseParser
             ModelProvider = context?.ModelProvider ?? "qwen",
             ModelName = context?.ModelName ?? "unknown"
         };
-        
+
         if (string.IsNullOrWhiteSpace(response))
         {
             _logger?.LogDebug("Empty response received");
             return root;
         }
-        
+
         _logger?.LogDebug("Parsing Qwen response of length {Length}", response.Length);
-        
+
         // Extract and remove tool calls first
         var (toolCalls, cleanedText) = ExtractToolCalls(response);
-        
+
+        // Check for hallucination
+        var hallucinationCheck = _hallucinationDetector.CheckForHallucination(response, toolCalls.Any());
+        if (hallucinationCheck.IsHallucinating)
+        {
+            _logger?.LogWarning("Hallucination detected: {Issues}", string.Join("; ", hallucinationCheck.Issues));
+
+            // Add warning to AST
+            root.Children.Add(new ErrorNode
+            {
+                Message = "Warning: The model appears to be generating fake content. " + hallucinationCheck.SuggestedAction,
+                Severity = ErrorSeverity.Warning,
+                ErrorCode = "HALLUCINATION_DETECTED"
+            });
+
+            // Clean the hallucinated content
+            cleanedText = _hallucinationDetector.CleanHallucinatedContent(cleanedText);
+        }
+
         // Add tool calls to AST
         foreach (var toolCall in toolCalls)
         {
             root.Children.Add(toolCall);
         }
-        
+
         // Extract and handle thoughts (if preserving)
         if (context?.PreserveThoughts == true)
         {
@@ -85,23 +108,20 @@ public class QwenParser : BaseParser
             // Just remove thoughts from text
             cleanedText = ThoughtPattern.Replace(cleanedText, "");
         }
-        
+
         // Clean garbage text
         cleanedText = CleanGarbageText(cleanedText);
-        
-        // Extract code blocks
-        var codeBlocks = ExtractCodeBlocks(cleanedText);
+
+        // Extract code blocks and remove them from text
+        var codeBlocks = ExtractAndRemoveCodeBlocks(ref cleanedText);
         foreach (var code in codeBlocks)
         {
             root.Children.Add(code);
-            // Remove code block from text
-            cleanedText = cleanedText.Substring(0, code.StartPosition) + 
-                         cleanedText.Substring(code.EndPosition);
         }
-        
+
         // Extract semantic elements
         ExtractSemanticElements(root, cleanedText, context);
-        
+
         // Add remaining text as text nodes
         if (!string.IsNullOrWhiteSpace(cleanedText))
         {
@@ -112,11 +132,11 @@ public class QwenParser : BaseParser
             };
             root.Children.Add(textNode);
         }
-        
+
         // Set metadata
-        root.ResponseMetadata.IsComplete = !response.Contains("[INCOMPLETE]") && 
+        root.ResponseMetadata.IsComplete = !response.Contains("[INCOMPLETE]") &&
                                           !response.EndsWith("...");
-        
+
         return root;
     }
 
@@ -125,20 +145,20 @@ public class QwenParser : BaseParser
         var toolCalls = new List<ToolCallNode>();
         var cleanedText = response;
         var seenCalls = new HashSet<string>();
-        
+
         // Try nested tool_call format first
         var matches = QwenToolCallPattern.Matches(response);
-        
+
         foreach (Match match in matches)
         {
             try
             {
                 var json = match.Value;
                 _logger?.LogDebug("Found nested tool call JSON: {Json}", json);
-                
+
                 // Use JSON repair to handle malformed JSON
                 var parsed = _jsonRepair.SafeParse<Dictionary<string, object?>>(json);
-                
+
                 if (parsed?.TryGetValue("tool_call", out var toolCallObj) == true)
                 {
                     var toolCall = ParseToolCallObject(toolCallObj);
@@ -155,7 +175,7 @@ public class QwenParser : BaseParser
                         }
                     }
                 }
-                
+
                 // Remove tool call JSON from text
                 cleanedText = cleanedText.Replace(match.Value, "");
             }
@@ -164,23 +184,23 @@ public class QwenParser : BaseParser
                 _logger?.LogWarning(ex, "Failed to parse nested tool call: {Match}", match.Value);
             }
         }
-        
+
         // Try direct tool format: {"tool":"name","parameters":{...}}
         var directMatches = DirectToolPattern.Matches(cleanedText);
-        
+
         foreach (Match match in directMatches)
         {
             try
             {
                 var json = match.Value;
                 _logger?.LogDebug("Found direct tool JSON: {Json}", json);
-                
+
                 // Fix malformed JSON (missing parameter names)
                 var fixedJson = FixMalformedToolJson(json);
-                
+
                 // Use JSON repair to handle malformed JSON
                 var parsed = _jsonRepair.SafeParse<Dictionary<string, object?>>(fixedJson);
-                
+
                 if (parsed != null && parsed.TryGetValue("tool", out var toolNameObj))
                 {
                     var toolName = toolNameObj?.ToString();
@@ -192,12 +212,12 @@ public class QwenParser : BaseParser
                             ToolName = toolName,
                             Arguments = new Dictionary<string, object?>()
                         };
-                        
+
                         if (parsed.TryGetValue("parameters", out var paramsObj))
                         {
                             toolCall.Arguments = ExtractArguments(paramsObj);
                         }
-                        
+
                         // Create unique key to prevent duplicates
                         var callKey = $"{toolCall.ToolName}:{JsonSerializer.Serialize(toolCall.Arguments)}";
                         if (seenCalls.Add(callKey))
@@ -209,7 +229,7 @@ public class QwenParser : BaseParser
                         }
                     }
                 }
-                
+
                 // Remove tool call JSON from text
                 cleanedText = cleanedText.Replace(match.Value, "");
             }
@@ -218,10 +238,10 @@ public class QwenParser : BaseParser
                 _logger?.LogWarning(ex, "Failed to parse direct tool call: {Match}", match.Value);
             }
         }
-        
+
         // Final cleanup: remove any remaining tool-related JSON
         cleanedText = AnyToolJsonPattern.Replace(cleanedText, "");
-        
+
         return (toolCalls, cleanedText);
     }
 
@@ -229,11 +249,11 @@ public class QwenParser : BaseParser
     {
         if (toolCallObj == null)
             return null;
-        
+
         try
         {
             Dictionary<string, object?>? dict = null;
-            
+
             // Handle JsonElement
             if (toolCallObj is JsonElement je && je.ValueKind == JsonValueKind.Object)
             {
@@ -248,31 +268,31 @@ public class QwenParser : BaseParser
             {
                 dict = d;
             }
-            
+
             if (dict == null)
                 return null;
-            
+
             // Extract tool name
-            if (!dict.TryGetValue("name", out var nameObj) || 
+            if (!dict.TryGetValue("name", out var nameObj) ||
                 string.IsNullOrWhiteSpace(nameObj?.ToString()))
             {
                 _logger?.LogDebug("No tool name found in tool call object");
                 return null;
             }
-            
+
             var toolCall = new ToolCallNode
             {
                 CallId = "call_" + Guid.NewGuid().ToString("N"),
                 ToolName = nameObj.ToString()!,
                 Arguments = new Dictionary<string, object?>()
             };
-            
+
             // Extract arguments
             if (dict.TryGetValue("arguments", out var argsObj))
             {
                 toolCall.Arguments = ExtractArguments(argsObj);
             }
-            
+
             return toolCall;
         }
         catch (Exception ex)
@@ -285,10 +305,10 @@ public class QwenParser : BaseParser
     private Dictionary<string, object?> ExtractArguments(object? argsObj)
     {
         var args = new Dictionary<string, object?>();
-        
+
         if (argsObj == null)
             return args;
-        
+
         // Handle JsonElement
         if (argsObj is JsonElement je && je.ValueKind == JsonValueKind.Object)
         {
@@ -311,7 +331,7 @@ public class QwenParser : BaseParser
                 args = parsed;
             }
         }
-        
+
         return args;
     }
 
@@ -319,7 +339,7 @@ public class QwenParser : BaseParser
     {
         var thoughts = new List<ThoughtNode>();
         var matches = ThoughtPattern.Matches(text);
-        
+
         foreach (Match match in matches)
         {
             var thought = new ThoughtNode
@@ -332,7 +352,7 @@ public class QwenParser : BaseParser
             thought.Metadata["original"] = match.Value;
             thoughts.Add(thought);
         }
-        
+
         return thoughts;
     }
 
@@ -349,24 +369,90 @@ public class QwenParser : BaseParser
                           .Replace(",true}", ",\"recursive\":true}");
             }
         }
-        
+
         return json;
     }
-    
+
+    /// <summary>
+    /// Extract code blocks and remove them from the text
+    /// </summary>
+    private List<CodeNode> ExtractAndRemoveCodeBlocks(ref string text)
+    {
+        var codeBlocks = new List<CodeNode>();
+
+        // Improved pattern that handles both ``` and ` style code blocks
+        var pattern = @"```(?<lang>\w*)\s*(?<code>.*?)```|`(?<inline>[^`]+)`";
+        var regex = new Regex(pattern, RegexOptions.Singleline | RegexOptions.Compiled);
+
+        var matches = regex.Matches(text);
+        var processedBlocks = new List<(int start, int end, CodeNode node)>();
+
+        foreach (Match match in matches)
+        {
+            CodeNode codeBlock;
+
+            if (match.Groups["code"].Success)
+            {
+                // Multi-line code block
+                codeBlock = new CodeNode
+                {
+                    Language = match.Groups["lang"].Value.ToLowerInvariant(),
+                    Code = match.Groups["code"].Value.Trim(),
+                    IsExecutable = IsExecutableLanguage(match.Groups["lang"].Value),
+                    StartPosition = match.Index,
+                    EndPosition = match.Index + match.Length
+                };
+            }
+            else
+            {
+                // Inline code - skip for now as it's not a full code block
+                continue;
+            }
+
+            // Try to extract filename from first line comment
+            var firstLine = codeBlock.Code.Split('\n').FirstOrDefault() ?? "";
+            if (firstLine.StartsWith("//") || firstLine.StartsWith("#"))
+            {
+                var fileMatch = Regex.Match(firstLine, @"(?:file:|filename:)?\s*([^\s]+\.\w+)");
+                if (fileMatch.Success)
+                {
+                    codeBlock.FileName = fileMatch.Groups[1].Value;
+                }
+            }
+
+            processedBlocks.Add((match.Index, match.Index + match.Length, codeBlock));
+            codeBlocks.Add(codeBlock);
+        }
+
+        // Remove code blocks from text (in reverse order to preserve positions)
+        foreach (var (start, end, _) in processedBlocks.OrderByDescending(b => b.start))
+        {
+            text = text.Remove(start, end - start);
+        }
+
+        return codeBlocks;
+    }
+
+    private bool IsExecutableLanguage(string language)
+    {
+        var lang = language.ToLower();
+        return lang is "bash" or "sh" or "shell" or "powershell" or "cmd" or "bat" or "python" or "javascript" or "ruby";
+    }
+
     private string CleanGarbageText(string text)
     {
         // Remove Qwen-specific garbage patterns
         text = GarbagePattern.Replace(text, "");
-        
+
         // Remove common AI fluff phrases
-        text = Regex.Replace(text, 
-            @"(?i)^\\s*(?:Let me|I'll|I need to|Now I'll|I will|I'm going to)[^.!?]*[.!?:]*", 
+        text = Regex.Replace(text,
+            @"(?i)^\\s*(?:Let me|I'll|I need to|Now I'll|I will|I'm going to)[^.!?]*[.!?:]*",
             "", RegexOptions.Multiline);
-        
+
         // Clean up excessive whitespace
         text = Regex.Replace(text, @"[ \t]+", " ");
         text = Regex.Replace(text, @"\n{3,}", "\n\n");
-        
+
         return text.Trim();
     }
 
@@ -379,14 +465,14 @@ public class QwenParser : BaseParser
         {
             return TextFormat.Markdown;
         }
-        
+
         // Check for JSON
         if ((text.TrimStart().StartsWith("{") && text.TrimEnd().EndsWith("}")) ||
             (text.TrimStart().StartsWith("[") && text.TrimEnd().EndsWith("]")))
         {
             return TextFormat.Json;
         }
-        
+
         return TextFormat.Plain;
     }
 
