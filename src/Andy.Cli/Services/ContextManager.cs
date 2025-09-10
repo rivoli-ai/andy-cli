@@ -19,8 +19,8 @@ public class ContextManager
 
     public ContextManager(
         string systemPrompt,
-        int maxTokens = 6000,
-        int compressionThreshold = 4500)
+        int maxTokens = 12000,
+        int compressionThreshold = 10000)
     {
         _systemPrompt = systemPrompt;
         _maxTokens = maxTokens;
@@ -61,12 +61,18 @@ public class ContextManager
     /// </summary>
     public void AddToolExecution(string toolId, string callId, Dictionary<string, object?> parameters, string result)
     {
-        // Cap tool result size to avoid exceeding provider limits
-        const int maxToolResultChars = 4000;
+        // Secondary cap for tool results (primary limiting happens in ToolOutputLimits)
+        // This is a safety net in case tool output wasn't limited earlier
+        const int maxToolResultChars = 3000;
         var cappedResult = result;
         if (!string.IsNullOrEmpty(result) && result.Length > maxToolResultChars)
         {
-            cappedResult = result.Substring(0, maxToolResultChars) + "\n...[truncated]";
+            // Include information about how much was truncated
+            var totalChars = result.Length;
+            var truncatedChars = totalChars - maxToolResultChars;
+            // Use a cleaner truncation format that won't confuse JSON parsing
+            cappedResult = result.Substring(0, maxToolResultChars) + 
+                          $"\n\n... (output truncated - showing first {maxToolResultChars} of {totalChars} total characters)";
         }
         _history.Add(new ContextEntry
         {
@@ -155,8 +161,9 @@ public class ContextManager
         };
 
         // Keep the most recent messages and summarize older ones
-        var recentMessages = _history.TakeLast(10).ToList();
-        var olderMessages = _history.Take(_history.Count - 10).ToList();
+        // But ensure we don't orphan tool responses from their tool calls
+        var recentMessages = GetRecentMessagesWithoutOrphans(10);
+        var olderMessages = _history.Take(_history.Count - recentMessages.Count).ToList();
 
         if (olderMessages.Any())
         {
@@ -204,6 +211,102 @@ public class ContextManager
         }
 
         return context;
+    }
+
+    /// <summary>
+    /// Get recent messages ensuring no orphaned tool responses
+    /// </summary>
+    private List<ContextEntry> GetRecentMessagesWithoutOrphans(int targetCount)
+    {
+        if (_history.Count <= targetCount)
+            return _history.ToList();
+
+        var result = new List<ContextEntry>();
+        var toolCallIds = new HashSet<string>();
+        
+        // Start from the end and work backwards
+        for (int i = _history.Count - 1; i >= 0 && result.Count < targetCount; i--)
+        {
+            var entry = _history[i];
+            
+            if (entry.Role == MessageRole.Tool)
+            {
+                // This is a tool response - we need to ensure we include its tool call
+                var callId = entry.ToolCallId;
+                if (!string.IsNullOrEmpty(callId))
+                {
+                    // Find the assistant message with this tool call
+                    for (int j = i - 1; j >= 0; j--)
+                    {
+                        var prevEntry = _history[j];
+                        if (prevEntry.Role == MessageRole.Assistant && 
+                            prevEntry.ToolCalls?.Any(tc => tc.CallId == callId) == true)
+                        {
+                            // We need to include this assistant message too
+                            if (!result.Contains(prevEntry))
+                            {
+                                result.Insert(0, prevEntry);
+                            }
+                            break;
+                        }
+                    }
+                }
+                result.Insert(0, entry);
+            }
+            else if (entry.Role == MessageRole.Assistant && entry.ToolCalls?.Any() == true)
+            {
+                // This assistant message has tool calls - track them
+                foreach (var tc in entry.ToolCalls)
+                {
+                    toolCallIds.Add(tc.CallId);
+                }
+                result.Insert(0, entry);
+            }
+            else
+            {
+                result.Insert(0, entry);
+            }
+        }
+        
+        // If we have too many messages due to including tool call pairs, take the most recent
+        if (result.Count > targetCount * 1.5)
+        {
+            // Keep complete tool call/response pairs from the end
+            var finalResult = new List<ContextEntry>();
+            var seenCallIds = new HashSet<string>();
+            
+            for (int i = result.Count - 1; i >= 0 && finalResult.Count < targetCount; i--)
+            {
+                var entry = result[i];
+                if (entry.Role == MessageRole.Tool)
+                {
+                    // Always include tool responses with their calls
+                    finalResult.Insert(0, entry);
+                    if (!string.IsNullOrEmpty(entry.ToolCallId))
+                        seenCallIds.Add(entry.ToolCallId);
+                }
+                else if (entry.Role == MessageRole.Assistant && entry.ToolCalls?.Any() == true)
+                {
+                    // Include if any of its tool calls are in our seen set
+                    if (entry.ToolCalls.Any(tc => seenCallIds.Contains(tc.CallId)))
+                    {
+                        finalResult.Insert(0, entry);
+                    }
+                    else if (finalResult.Count < targetCount)
+                    {
+                        finalResult.Insert(0, entry);
+                    }
+                }
+                else if (finalResult.Count < targetCount)
+                {
+                    finalResult.Insert(0, entry);
+                }
+            }
+            
+            return finalResult;
+        }
+        
+        return result;
     }
 
     /// <summary>

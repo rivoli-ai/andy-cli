@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using Andy.Cli.Commands;
 using Andy.Cli.Widgets;
@@ -19,7 +20,8 @@ public static class CommandPaletteSetup
         Action<bool> setRunning,
         Func<LlmClient?> getCurrentClient,
         Action<LlmClient?> setCurrentClient,
-        ConversationContext conversation)
+        ConversationContext conversation,
+        CodeIndexingService? codeIndexingService = null)
     {
         commandPalette.SetCommands(new[]
         {
@@ -58,11 +60,44 @@ public static class CommandPaletteSetup
                 {
                     if (args.Length < 1)
                     {
-                        feed.AddMarkdownRich("Usage: Switch Model <provider> [model]\nProviders: cerebras, openai, anthropic");
+                        feed.AddMarkdownRich("Usage: Switch Model <provider> [model]\nProviders: cerebras, openai, anthropic, gemini, ollama");
                     }
                     else
                     {
-                        var result = await modelCommand.ExecuteAsync(new[] { "switch" }.Concat(args).ToArray());
+                        var firstArg = args[0].ToLowerInvariant();
+                        var knownProviders = new[] { "cerebras", "openai", "anthropic", "gemini", "ollama" };
+                        
+                        CommandResult result;
+                        if (knownProviders.Contains(firstArg))
+                        {
+                            // First argument is a provider name
+                            if (args.Length > 1)
+                            {
+                                // Provider + model specified: switch provider first, then model
+                                var providerResult = await modelCommand.ExecuteAsync(new[] { "provider", firstArg });
+                                if (providerResult.Success)
+                                {
+                                    // Now switch to the specified model
+                                    var modelArgs = args.Skip(1).ToArray();
+                                    result = await modelCommand.ExecuteAsync(new[] { "switch" }.Concat(modelArgs).ToArray());
+                                }
+                                else
+                                {
+                                    result = providerResult;
+                                }
+                            }
+                            else
+                            {
+                                // Just provider specified: switch provider (will use last remembered model)
+                                result = await modelCommand.ExecuteAsync(new[] { "provider", firstArg });
+                            }
+                        }
+                        else
+                        {
+                            // Not a known provider, treat as model switch for current provider
+                            result = await modelCommand.ExecuteAsync(new[] { "switch" }.Concat(args).ToArray());
+                        }
+                        
                         feed.AddMarkdownRich(result.Message);
                         if (result.Success)
                         {
@@ -217,6 +252,45 @@ public static class CommandPaletteSetup
                 {
                     // This will be handled in the main key handler
                     feed.AddMarkdownRich("Press **F2** to toggle the HUD");
+                }
+            },
+            new CommandPalette.CommandItem
+            {
+                Name = "Reindex Code",
+                Description = "Rebuild the code index for the current directory",
+                Category = "Code",
+                Aliases = new[] { "reindex", "index", "rebuild" },
+                Action = async args =>
+                {
+                    if (codeIndexingService != null)
+                    {
+                        feed.AddMarkdownRich("**Reindexing codebase...** This may take a moment.");
+                        await codeIndexingService.IndexDirectoryAsync(Directory.GetCurrentDirectory());
+                        feed.AddMarkdownRich($"**Indexing complete!** {codeIndexingService.SymbolCount} symbols indexed.");
+                    }
+                    else
+                    {
+                        feed.AddMarkdownRich("**Error:** Code indexing service not available.");
+                    }
+                }
+            },
+            new CommandPalette.CommandItem
+            {
+                Name = "Index Status",
+                Description = "Show code index statistics",
+                Category = "Code",
+                Aliases = new[] { "index status", "index info" },
+                Action = args =>
+                {
+                    if (codeIndexingService != null)
+                    {
+                        var status = codeIndexingService.IsIndexed ? "Indexed" : "Not indexed";
+                        feed.AddMarkdownRich($"**Code Index Status**\nStatus: {status}\nSymbols: {codeIndexingService.SymbolCount}\n\nUse the `code_index` tool to search the codebase.");
+                    }
+                    else
+                    {
+                        feed.AddMarkdownRich("**Error:** Code indexing service not available.");
+                    }
                 }
             }
         });

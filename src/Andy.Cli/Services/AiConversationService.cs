@@ -35,6 +35,8 @@ public class AiConversationService
     private readonly QwenResponseDiagnostic? _diagnostic;
     private readonly IToolCallValidator _toolCallValidator;
     private readonly IJsonRepairService _jsonRepair;
+    private readonly ConversationTracer? _tracer;
+    private readonly CumulativeOutputTracker _outputTracker = new();
     private string _currentModel = "";
     private string _currentProvider = "";
     // Note: Avoid writing partial streaming chunks to the feed to prevent broken/partial lines
@@ -84,6 +86,18 @@ public class AiConversationService
             Directory.CreateDirectory(Path.GetDirectoryName(debugFile)!);
             File.WriteAllText(debugFile, $"AiConversationService initialized at {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC\nModel: {modelName}\nProvider: {providerName}\n");
         }
+        
+        // Initialize tracer based on environment variable
+        var enableTrace = Environment.GetEnvironmentVariable("ANDY_TRACE") == "1" || 
+                         Environment.GetEnvironmentVariable("ANDY_DEBUG") == "1";
+        var consoleTrace = Environment.GetEnvironmentVariable("ANDY_TRACE_CONSOLE") == "1";
+        var tracePath = Environment.GetEnvironmentVariable("ANDY_TRACE_PATH");
+        
+        if (enableTrace)
+        {
+            _tracer = new ConversationTracer(enabled: true, consoleOutput: consoleTrace, customPath: tracePath);
+            _logger?.LogInformation($"Conversation tracing enabled. Output: {_tracer.TraceFilePath}");
+        }
     }
 
     /// <summary>
@@ -115,6 +129,12 @@ public class AiConversationService
         bool enableStreaming,
         CancellationToken cancellationToken = default)
     {
+        // Trace user message
+        _tracer?.TraceUserMessage(userMessage);
+        
+        // Reset cumulative output tracker for new message
+        _outputTracker.Reset();
+        
         // Add user message to context
         _contextManager.AddUserMessage(userMessage);
 
@@ -147,12 +167,19 @@ public class AiConversationService
         while (iteration < maxIterations)
         {
             iteration++;
+            _tracer?.TraceIteration(iteration, maxIterations);
 
             // Get LLM response with streaming if enabled
             // Always render final content once; do not render partial streaming deltas to the feed
+            _tracer?.TraceLlmRequest(request);
+            var startTime = DateTime.UtcNow;
+            
             var response = enableStreaming
                 ? await GetLlmStreamingResponseAsync(request, cancellationToken)
                 : await GetLlmResponseAsync(request, cancellationToken);
+            
+            var elapsed = DateTime.UtcNow - startTime;
+            _tracer?.TraceLlmResponse(response, elapsed);
 
             if (response == null)
             {
@@ -203,6 +230,8 @@ public class AiConversationService
 
             if (renderResult.ToolCalls.Any())
             {
+                // Trace tool calls found
+                _tracer?.TraceToolCalls(renderResult.ToolCalls.Select(tc => new TracedToolCall { ToolId = tc.ToolId, Parameters = tc.Parameters }).ToList());
                 // Display text content if it exists
                 if (!string.IsNullOrWhiteSpace(renderResult.TextContent))
                 {
@@ -266,11 +295,31 @@ public class AiConversationService
                     {
                         try
                         {
-                            outputStr = SerializeToolDataWithTruncation(execResult.Data, callToExecute.ToolId, 2000);
+                            // Increase limit for list_directory to handle recursive listings
+                            int maxChars = callToExecute.ToolId == "list_directory" ? 5000 : 2000;
+                            outputStr = SerializeToolDataWithTruncation(execResult.Data, callToExecute.ToolId, maxChars);
                         }
-                        catch
+                        catch (Exception ex)
                         {
-                            outputStr = execResult.Data.ToString() ?? execResult.Message ?? execResult.ErrorMessage ?? "No output";
+                            _logger?.LogWarning(ex, "Failed to serialize tool data for {Tool}", callToExecute.ToolId);
+                            // Fallback: try to serialize as JSON
+                            try
+                            {
+                                outputStr = System.Text.Json.JsonSerializer.Serialize(execResult.Data, new System.Text.Json.JsonSerializerOptions
+                                {
+                                    WriteIndented = false,
+                                    PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
+                                });
+                                // If it's too large, truncate it safely
+                                if (outputStr.Length > 5000)
+                                {
+                                    outputStr = outputStr.Substring(0, 4900) + "... [truncated]";
+                                }
+                            }
+                            catch
+                            {
+                                outputStr = execResult.Message ?? execResult.ErrorMessage ?? "Tool execution completed but output serialization failed";
+                            }
                         }
                     }
                     else if (!string.IsNullOrEmpty(execResult.FullOutput))
@@ -282,12 +331,18 @@ public class AiConversationService
                         outputStr = execResult.Message ?? execResult.ErrorMessage ?? "No output";
                     }
 
+                    // Apply tool-specific output limit with cumulative tracking
+                    var baseLimit = ToolOutputLimits.GetLimit(callToExecute.ToolId);
+                    var adjustedLimit = _outputTracker.GetAdjustedLimit(callToExecute.ToolId, baseLimit);
+                    var limitedOutput = ToolOutputLimits.LimitOutput(callToExecute.ToolId, outputStr, adjustedLimit);
+                    _outputTracker.RecordOutput(callToExecute.ToolId, limitedOutput.Length);
+                    
                     // Add tool response to context referencing the correct call_id
                     _contextManager.AddToolExecution(
                         callToExecute.ToolId,
                         thisCallId,
                         callToExecute.Parameters,
-                        outputStr);
+                        limitedOutput);
 
                     toolResults.Add(outputStr);
                 }
@@ -402,11 +457,17 @@ public class AiConversationService
                                 outputStr = execResult.Message ?? execResult.ErrorMessage ?? "No output";
                             }
 
+                            // Apply tool-specific output limit with cumulative tracking
+                            var baseLimit = ToolOutputLimits.GetLimit(callToExecute.ToolId);
+                            var adjustedLimit = _outputTracker.GetAdjustedLimit(callToExecute.ToolId, baseLimit);
+                            var limitedOutput = ToolOutputLimits.LimitOutput(callToExecute.ToolId, outputStr, adjustedLimit);
+                            _outputTracker.RecordOutput(callToExecute.ToolId, limitedOutput.Length);
+                            
                             _contextManager.AddToolExecution(
                                 callToExecute.ToolId,
                                 thisCallId,
                                 callToExecute.Parameters,
-                                outputStr);
+                                limitedOutput);
                         }
 
                         // We executed fallback tool calls; stop loop like normal text path
@@ -425,9 +486,12 @@ public class AiConversationService
             }
         }
 
-        // Show context stats
+        // Show context stats with dim gray color (with proper spacing)
         var stats = _contextManager.GetStats();
-        _feed.AddMarkdownRich($"*Context: {stats.MessageCount} messages, ~{stats.EstimatedTokens} tokens, {stats.ToolCallCount} tool calls*");
+        _tracer?.TraceContextStats(stats.MessageCount, stats.EstimatedTokens, stats.ToolCallCount);
+        _feed.AddMarkdownRich(""); // Add blank line for spacing
+        var contextInfo = Commands.ConsoleColors.Dim($"Context: {stats.MessageCount} messages, ~{stats.EstimatedTokens} tokens, {stats.ToolCallCount} tool calls");
+        _feed.AddMarkdownRich(contextInfo);
 
         return finalResponse.ToString();
     }
@@ -500,7 +564,12 @@ public class AiConversationService
                     outputStr = execResult.Message ?? execResult.ErrorMessage ?? "No output";
                 }
 
-                _contextManager.AddToolExecution(call.ToolId, call.CallId, call.Params, outputStr);
+                // Apply tool-specific output limit with cumulative tracking
+                var baseLimit = ToolOutputLimits.GetLimit(call.ToolId);
+                var adjustedLimit = _outputTracker.GetAdjustedLimit(call.ToolId, baseLimit);
+                var limitedOutput = ToolOutputLimits.LimitOutput(call.ToolId, outputStr, adjustedLimit);
+                _outputTracker.RecordOutput(call.ToolId, limitedOutput.Length);
+                _contextManager.AddToolExecution(call.ToolId, call.CallId, call.Params, limitedOutput);
             }
             catch (Exception ex)
             {
@@ -935,21 +1004,93 @@ public class AiConversationService
             if (toolId == "read_file" && obj.TryGetPropertyValue("content", out var contentNode) && contentNode is JsonValue)
             {
                 var content = contentNode!.GetValue<string?>();
-                if (!string.IsNullOrEmpty(content) && content!.Length > maxFieldChars)
+                if (!string.IsNullOrEmpty(content))
                 {
-                    var head = content.Substring(0, maxFieldChars);
-                    var remaining = content.Length - head.Length;
-                    obj["content"] = head + $"\n...[truncated {remaining} chars]";
-                    obj["length"] = content.Length;
+                    // Extract file path if available
+                    var filePath = "unknown";
+                    if (obj.TryGetPropertyValue("file_path", out var pathNode) && pathNode is JsonValue)
+                    {
+                        filePath = pathNode.GetValue<string?>() ?? "unknown";
+                    }
+                    else if (obj.TryGetPropertyValue("filePath", out pathNode) && pathNode is JsonValue)
+                    {
+                        filePath = pathNode.GetValue<string?>() ?? "unknown";
+                    }
+                    
+                    // Use intelligent summarization for large files
+                    if (content!.Length > maxFieldChars)
+                    {
+                        var summarized = FileContentSummarizer.SummarizeFileContent(filePath, content);
+                        obj["content"] = summarized;
+                        obj["original_length"] = content.Length;
+                        obj["summarized"] = true;
+                    }
                 }
             }
-
-            // Generic cap: if any string property exceeds maxFieldChars, cap it
-            foreach (var kv in obj.ToList())
+            // Special handling: list_directory returns array of items
+            else if (toolId == "list_directory" && obj.TryGetPropertyValue("items", out var itemsNode) && itemsNode is JsonArray itemsArray)
             {
-                if (kv.Value is JsonValue val && val.TryGetValue<string>(out var s) && s != null && s.Length > maxFieldChars)
+                // For recursive listings, be more aggressive with truncation
+                // Check if this appears to be a recursive listing (has nested directories)
+                bool isRecursive = false;
+                foreach (var item in itemsArray)
                 {
-                    obj[kv.Key] = s.Substring(0, maxFieldChars) + $"\n...[truncated {s.Length - maxFieldChars} chars]";
+                    if (item is JsonObject itemObj && 
+                        itemObj.TryGetPropertyValue("fullPath", out var pathNode) && 
+                        pathNode is JsonValue pathVal)
+                    {
+                        var path = pathVal.GetValue<string>() ?? "";
+                        if (path.Count(c => c == '/' || c == '\\') > 2)
+                        {
+                            isRecursive = true;
+                            break;
+                        }
+                    }
+                }
+                
+                // Use different limits for recursive vs non-recursive
+                int maxItems = isRecursive ? 25 : 50;
+                if (itemsArray.Count > maxItems)
+                {
+                    var truncatedItems = new JsonArray();
+                    // Take a mix of items from different depths if recursive
+                    if (isRecursive)
+                    {
+                        // Take first 15 and last 10 to show structure
+                        for (int i = 0; i < Math.Min(15, itemsArray.Count); i++)
+                        {
+                            truncatedItems.Add(itemsArray[i]?.DeepClone());
+                        }
+                        for (int i = Math.Max(15, itemsArray.Count - 10); i < itemsArray.Count; i++)
+                        {
+                            truncatedItems.Add(itemsArray[i]?.DeepClone());
+                        }
+                    }
+                    else
+                    {
+                        for (int i = 0; i < maxItems; i++)
+                        {
+                            truncatedItems.Add(itemsArray[i]?.DeepClone());
+                        }
+                    }
+                    obj["items"] = truncatedItems;
+                    obj["truncated"] = true;
+                    obj["original_count"] = itemsArray.Count;
+                    obj["showing_count"] = truncatedItems.Count;
+                    obj["truncation_note"] = $"Showing {truncatedItems.Count} of {itemsArray.Count} items";
+                }
+            }
+            // Don't apply generic truncation to structured data
+            else if (toolId != "list_directory" && toolId != "code_index")
+            {
+                // Generic cap: if any string property exceeds maxFieldChars, cap it
+                // But skip this for tools that return structured data
+                foreach (var kv in obj.ToList())
+                {
+                    if (kv.Value is JsonValue val && val.TryGetValue<string>(out var s) && s != null && s.Length > maxFieldChars)
+                    {
+                        obj[kv.Key] = s.Substring(0, maxFieldChars) + $"\n...[truncated {s.Length - maxFieldChars} chars]";
+                    }
                 }
             }
         }

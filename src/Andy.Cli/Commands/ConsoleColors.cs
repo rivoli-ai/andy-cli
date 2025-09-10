@@ -12,6 +12,7 @@ public static class ConsoleColors
     private const string Yellow = "\u001b[33m";
     private const string Blue = "\u001b[34m";
     private const string Cyan = "\u001b[36m";
+    private const string Gray = "\u001b[90m"; // Bright black/gray
     private const string Bold = "\u001b[1m";
     private const string BlackBg = "\u001b[40m";
     private const string DefaultFg = "\u001b[39m"; // Reset foreground only
@@ -26,6 +27,7 @@ public static class ConsoleColors
     public static string Warning(string text) => $"{Yellow}{text}{Reset}";
     public static string Info(string text) => $"{Cyan}{text}{Reset}";
     public static string Primary(string text) => $"{Blue}{text}{Reset}";
+    public static string Dim(string text) => $"{Gray}{text}{Reset}";
 
     public static string BoldSuccess(string text) => $"{Bold}{Green}{text}{Reset}";
     public static string BoldError(string text) => $"{Bold}{Red}{text}{Reset}";

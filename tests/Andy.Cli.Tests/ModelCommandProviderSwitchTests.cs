@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Andy.Cli.Commands;
@@ -17,8 +18,21 @@ public class ModelCommandProviderSwitchTests
         var prevOpenAiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
         var prevCerebrasKey = Environment.GetEnvironmentVariable("CEREBRAS_API_KEY");
         var prevOpenAiModel = Environment.GetEnvironmentVariable("OPENAI_MODEL");
+        
+        // Temporarily clear any persisted model memory
+        var configDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".andy");
+        var memoryPath = Path.Combine(configDir, "model-memory.json");
+        var backupPath = memoryPath + ".backup";
+        bool hadMemoryFile = File.Exists(memoryPath);
+        
         try
         {
+            // Backup and clear model memory
+            if (hadMemoryFile)
+            {
+                File.Move(memoryPath, backupPath, true);
+            }
+            
             Environment.SetEnvironmentVariable("OPENAI_API_KEY", "test-openai-key");
             Environment.SetEnvironmentVariable("CEREBRAS_API_KEY", "test-cerebras-key");
             // Ensure we test default model fallback for OpenAI
@@ -53,6 +67,12 @@ public class ModelCommandProviderSwitchTests
             Environment.SetEnvironmentVariable("OPENAI_API_KEY", prevOpenAiKey);
             Environment.SetEnvironmentVariable("CEREBRAS_API_KEY", prevCerebrasKey);
             Environment.SetEnvironmentVariable("OPENAI_MODEL", prevOpenAiModel);
+            
+            // Restore model memory
+            if (hadMemoryFile && File.Exists(backupPath))
+            {
+                File.Move(backupPath, memoryPath, true);
+            }
         }
     }
 

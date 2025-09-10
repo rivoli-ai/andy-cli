@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Net.Http;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -26,6 +27,7 @@ public class ModelCommand : ICommand
     private readonly Dictionary<string, List<ModelInfo>> _modelCache = new();
     private readonly Dictionary<string, DateTime> _cacheTimestamps = new();
     private readonly TimeSpan _cacheExpiry = TimeSpan.FromMinutes(10);
+    private readonly Dictionary<string, string> _lastProviderErrors = new();
 
     private LlmClient? _currentClient;
     private string _currentProvider = "cerebras";
@@ -127,21 +129,26 @@ public class ModelCommand : ICommand
                 result.AppendLine($"  {provider.ToUpper()} [{url}]");
             }
 
-            // API key status
+            // API key status and model listing
             if (!hasApiKey && provider != "ollama")
             {
                 result.AppendLine($"  ⚠ No API key configured");
+                // Show remembered model if any
+                if (!string.IsNullOrEmpty(rememberedModel))
+                {
+                    result.AppendLine($"  Last used: {rememberedModel}");
+                }
             }
-            else if (isCurrentProvider || provider == "ollama")
+            else
             {
-                // Try to get models for current provider or ollama (which doesn't need API key)
+                // Try to get models for any provider with API key (or ollama)
                 var models = await GetProviderModelsAsync(provider, cancellationToken);
 
                 if (models.Any())
                 {
                     result.AppendLine($"  Models ({models.Count}):");
 
-                    // Show first 10 models and indicate if there are more
+                    // Show first 15 models and indicate if there are more
                     var displayModels = models.Take(15).ToList();
                     foreach (var model in displayModels)
                     {
@@ -170,24 +177,39 @@ public class ModelCommand : ICommand
                     if (models.Count > 15)
                     {
                         result.AppendLine($"    ... and {models.Count - 15} more models");
+                        result.AppendLine($"    Use /model refresh to update the list");
                     }
                 }
                 else
                 {
-                    result.AppendLine($"  Models: Unable to fetch (API may be unavailable)");
+                    // Show more specific error message
+                    if (hasApiKey)
+                    {
+                        result.AppendLine($"  Models: Unable to fetch");
+                        // Show detailed error if available
+                        if (_lastProviderErrors.TryGetValue(provider, out var error))
+                        {
+                            result.AppendLine($"    Error: {error}");
+                        }
+                        else
+                        {
+                            result.AppendLine($"    (check API key or connectivity)");
+                        }
+                    }
+                    else if (provider == "ollama")
+                    {
+                        result.AppendLine($"  Models: Ollama service not running or unreachable");
+                    }
+                    else
+                    {
+                        result.AppendLine($"  Models: No API key configured");
+                    }
+                    
                     // Show remembered model if any
                     if (!string.IsNullOrEmpty(rememberedModel))
                     {
                         result.AppendLine($"    • {rememberedModel} ← last used");
                     }
-                }
-            }
-            else
-            {
-                // Show remembered model for non-current providers
-                if (!string.IsNullOrEmpty(rememberedModel))
-                {
-                    result.AppendLine($"  Last used: {rememberedModel}");
                 }
             }
 
@@ -218,17 +240,26 @@ public class ModelCommand : ICommand
 
         try
         {
-            // Create a temporary service provider for the specific provider
-            var services = new ServiceCollection();
-            services.AddLogging();
-            services.ConfigureLlmFromEnvironment();
-            services.AddLlmServices(options =>
+            // Clear any previous error for this provider
+            _lastProviderErrors.Remove(providerName);
+            
+            // Try to use the existing service provider first
+            var factory = _serviceProvider.GetService<ILlmProviderFactory>();
+            
+            if (factory == null)
             {
-                options.DefaultProvider = providerName;
-            });
+                // Fallback: Create a temporary service provider for the specific provider
+                var services = new ServiceCollection();
+                services.AddLogging();
+                services.ConfigureLlmFromEnvironment();
+                services.AddLlmServices(options =>
+                {
+                    options.DefaultProvider = providerName;
+                });
 
-            var tempProvider = services.BuildServiceProvider();
-            var factory = tempProvider.GetService<ILlmProviderFactory>();
+                var tempProvider = services.BuildServiceProvider();
+                factory = tempProvider.GetService<ILlmProviderFactory>();
+            }
 
             if (factory != null)
             {
@@ -244,12 +275,64 @@ public class ModelCommand : ICommand
 
                     return modelList;
                 }
+                else
+                {
+                    // More specific error messages for common issues
+                    if (!HasApiKey(providerName) && providerName != "ollama")
+                    {
+                        _lastProviderErrors[providerName] = $"No API key configured (set {GetApiKeyName(providerName)})";
+                    }
+                    else
+                    {
+                        _lastProviderErrors[providerName] = $"Could not create provider instance";
+                    }
+                }
             }
+            else
+            {
+                _lastProviderErrors[providerName] = "LLM provider factory not available";
+            }
+        }
+        catch (HttpRequestException httpEx)
+        {
+            // Network or API errors
+            var errorMsg = httpEx.StatusCode?.ToString() ?? "Network error";
+            if (httpEx.Message.Contains("401") || httpEx.Message.Contains("Unauthorized"))
+            {
+                _lastProviderErrors[providerName] = $"Invalid API key (401 Unauthorized)";
+            }
+            else if (httpEx.Message.Contains("403") || httpEx.Message.Contains("Forbidden"))
+            {
+                _lastProviderErrors[providerName] = $"Access denied (403 Forbidden) - Check API permissions";
+            }
+            else if (httpEx.Message.Contains("404"))
+            {
+                _lastProviderErrors[providerName] = $"API endpoint not found (404) - Check provider URL";
+            }
+            else
+            {
+                _lastProviderErrors[providerName] = $"{errorMsg}: {httpEx.Message}";
+            }
+        }
+        catch (TaskCanceledException)
+        {
+            _lastProviderErrors[providerName] = "Request timeout - API may be unavailable";
         }
         catch (Exception ex)
         {
             // Log error but don't fail completely
-            Console.Error.WriteLine($"Failed to fetch models for {providerName}: {ex.Message}");
+            var errorMsg = ex.Message;
+            if (ex.InnerException != null)
+            {
+                errorMsg = ex.InnerException.Message;
+            }
+            
+            // Store error for display - keep it concise
+            if (errorMsg.Length > 100)
+            {
+                errorMsg = errorMsg.Substring(0, 100) + "...";
+            }
+            _lastProviderErrors[providerName] = errorMsg;
         }
 
         // Return empty list if we can't fetch models
@@ -582,6 +665,7 @@ public class ModelCommand : ICommand
             // Add provider with URL in description
             item.AddProvider($"{provider} [{url}]{status}");
 
+            // Show models for current provider only (to keep visual display compact)
             if (isCurrentProvider)
             {
                 // Get actual models from API
@@ -589,17 +673,17 @@ public class ModelCommand : ICommand
 
                 if (models.Any())
                 {
-                    // Show first 10 models
-                    foreach (var model in models.Take(10))
+                    // Show first 5 models in visual display
+                    foreach (var model in models.Take(5))
                     {
                         var isCurrentModel = model.Id == _currentModel;
                         var description = isCurrentModel ? "active" : "";
                         item.AddModel(model.Id, description, true, isCurrentModel);
                     }
 
-                    if (models.Count > 10)
+                    if (models.Count > 5)
                     {
-                        item.AddModel($"... and {models.Count - 10} more", "Use /model list to see all", false, false);
+                        item.AddModel($"... and {models.Count - 5} more", "Use /model list to see all", false, false);
                     }
                 }
                 else

@@ -83,12 +83,23 @@ public class SystemPromptService
                     foreach (var param in tool.Metadata.Parameters)
                     {
                         var paramStr = param.Required ? $"`{param.Name}`*" : $"`{param.Name}`";
+                        
+                        // Add allowed values if they exist
+                        if (param.AllowedValues?.Any() == true)
+                        {
+                            paramStr += $" [{string.Join("|", param.AllowedValues)}]";
+                        }
+                        
                         paramDetails.Add(paramStr);
                     }
                     _prompt.AppendLine($"  Parameters: {string.Join(", ", paramDetails)} (* = required)");
 
                     // Add example for commonly used tools
-                    if (tool.Metadata.Id == "read_file")
+                    if (tool.Metadata.Id == "code_index")
+                    {
+                        _prompt.AppendLine($"  Example: {{\"tool\":\"code_index\",\"parameters\":{{\"query\":\"symbols\",\"pattern\":\"*Service\"}}}}");
+                    }
+                    else if (tool.Metadata.Id == "read_file")
                     {
                         _prompt.AppendLine($"  Example: {{\"tool\":\"read_file\",\"parameters\":{{\"file_path\":\"/path/to/file.txt\"}}}}");
                     }
@@ -99,6 +110,14 @@ public class SystemPromptService
                     else if (tool.Metadata.Id == "write_file")
                     {
                         _prompt.AppendLine($"  Example: {{\"tool\":\"write_file\",\"parameters\":{{\"file_path\":\"test.txt\",\"content\":\"Hello\"}}}}");
+                    }
+                    else if (tool.Metadata.Id == "datetime_tool")
+                    {
+                        _prompt.AppendLine($"  Example: {{\"tool\":\"datetime_tool\",\"parameters\":{{\"operation\":\"now\",\"timezone\":\"America/Los_Angeles\"}}}}");
+                    }
+                    else if (tool.Metadata.Id == "web_search")
+                    {
+                        _prompt.AppendLine($"  Example: {{\"tool\":\"web_search\",\"parameters\":{{\"query\":\"latest news about AI\",\"max_results\":5}}}}");
                     }
                 }
                 else
@@ -114,20 +133,62 @@ public class SystemPromptService
     {
         _prompt.AppendLine("## How Tools Work");
         _prompt.AppendLine("When you need to use a tool:");
-        _prompt.AppendLine("1. Output ONLY the JSON: {\"tool\":\"tool_id\",\"parameters\":{}}");
-        _prompt.AppendLine("2. The system will execute the tool and provide results (not visible to the user).");
-        _prompt.AppendLine("3. Continue with your response based on actual results. Do not disclose tools.");
+        _prompt.AppendLine("1. Output ONLY the JSON on a single line: {\"tool\":\"tool_id\",\"parameters\":{}}");
+        _prompt.AppendLine("2. DO NOT explain what you're going to do - just output the JSON immediately");
+        _prompt.AppendLine("3. The system will execute the tool and provide results (not visible to the user)");
+        _prompt.AppendLine("4. After receiving results, continue with your response based on actual data");
+        _prompt.AppendLine("5. Never say 'Please wait' or 'Let me execute' - just output the JSON");
+        _prompt.AppendLine();
+        _prompt.AppendLine("## CRITICAL: Tool Usage Priority");
+        _prompt.AppendLine();
+        _prompt.AppendLine("### Tool Selection Guidelines:");
+        _prompt.AppendLine("1. **code_index** - FIRST for code-related questions (classes, services, methods, structure)");
+        _prompt.AppendLine("2. **search_text** - For searching content within local files");
+        _prompt.AppendLine("3. **list_directory** - For exploring file structure and finding files");
+        _prompt.AppendLine("4. **read_file** - For reading specific file contents");
+        _prompt.AppendLine("5. **web_search** - For current information, facts, news, or knowledge not available locally");
+        _prompt.AppendLine();
+        _prompt.AppendLine("### Code Search Priority:");
+        _prompt.AppendLine("FOR ANY CODE-RELATED QUESTIONS (classes, services, methods, structure):");
+        _prompt.AppendLine("YOU MUST USE code_index TOOL FIRST!");
+        _prompt.AppendLine();
+        _prompt.AppendLine("Examples of when to use code_index:");
+        _prompt.AppendLine("- User asks: \"What services are available?\" → {\"tool\":\"code_index\",\"parameters\":{\"query_type\":\"symbols\",\"pattern\":\"*Service\"}}");
+        _prompt.AppendLine("- User asks: \"Show me the classes\" → {\"tool\":\"code_index\",\"parameters\":{\"query_type\":\"symbols\",\"pattern\":\"*\"}}");
+        _prompt.AppendLine("- User asks: \"Find X class/method\" → {\"tool\":\"code_index\",\"parameters\":{\"query_type\":\"find\",\"pattern\":\"X\"}}");
+        _prompt.AppendLine();
+        _prompt.AppendLine("### Web Search Usage:");
+        _prompt.AppendLine("Use web_search when user asks about:");
+        _prompt.AppendLine("- Current events or news");
+        _prompt.AppendLine("- General knowledge not in the codebase");
+        _prompt.AppendLine("- External libraries or frameworks documentation");
+        _prompt.AppendLine("- Company/organization information");
+        _prompt.AppendLine("- Technical concepts needing clarification");
+        _prompt.AppendLine();
+        _prompt.AppendLine("### DateTime Tool Usage:");
+        _prompt.AppendLine("For time/date questions, immediately output:");
+        _prompt.AppendLine("{\"tool\":\"datetime_tool\",\"parameters\":{\"operation\":\"now\",\"timezone\":\"<timezone>\"}}");
+        _prompt.AppendLine("Common timezones: America/Los_Angeles, America/New_York, UTC, Europe/London");
+        _prompt.AppendLine("- User asks about code structure → {\"tool\":\"code_index\",\"parameters\":{\"query_type\":\"structure\"}}");
         _prompt.AppendLine();
         _prompt.AppendLine("## Example Workflow for Project Exploration");
         _prompt.AppendLine("When asked about a project or codebase:");
-        _prompt.AppendLine("1. Clarify the user's depth/targets (top-level vs deep dive). Ask 1–2 quick questions if ambiguous.");
-        _prompt.AppendLine("2. Plan explicit steps (list → select → read → summarize → recurse). Keep it concise for the user.");
-        _prompt.AppendLine("3. FIRST: {\"tool\":\"list_directory\",\"parameters\":{\"path\":\".\"}} to see what's available");
-        _prompt.AppendLine("4. THEN: Based on actual files found, list specific subdirectories (e.g., src/Andy.Cli) before reading files");
-        _prompt.AppendLine("5. NEXT: Read key files (README.md, *.csproj, Program.cs) and summarize");
-        _prompt.AppendLine("6. DEEPER: For each important directory, list it then sample representative files (services, parsers, widgets) and summarize roles");
-        _prompt.AppendLine("7. REPEAT: Continue until coverage is sufficient or token budget is reached");
-        _prompt.AppendLine("8. NEVER: Try to read files you haven't verified exist with list_directory");
+        _prompt.AppendLine("1. ALWAYS START WITH: {\"tool\":\"code_index\",\"parameters\":{\"query_type\":\"symbols\",\"pattern\":\"*\"}} to understand code structure");
+        _prompt.AppendLine("2. NEVER just guess or hallucinate about code - USE THE TOOLS!");
+        _prompt.AppendLine("3. FOR FILE LISTINGS: {\"tool\":\"list_directory\",\"parameters\":{\"path\":\".\"}} to see file structure");
+        _prompt.AppendLine("4. FOR SPECIFIC FILES: {\"tool\":\"read_file\",\"parameters\":{\"file_path\":\"path/to/file\"}} to read contents");
+        _prompt.AppendLine("5. DEEPER: For each important directory, use code_index to find key classes and methods");
+        _prompt.AppendLine("6. REPEAT: Continue until coverage is sufficient or token budget is reached");
+        _prompt.AppendLine("7. NEVER: Try to read files you haven't verified exist with list_directory or code_index");
+        _prompt.AppendLine();
+        _prompt.AppendLine("## Code Index Tool Priority");
+        _prompt.AppendLine("MANDATORY USE of code_index tool for:");
+        _prompt.AppendLine("- Any question about Services, Classes, Methods, Interfaces");
+        _prompt.AppendLine("- Understanding code structure and organization");
+        _prompt.AppendLine("- Finding specific code elements");
+        _prompt.AppendLine("- Getting overview of codebase");
+        _prompt.AppendLine();
+        _prompt.AppendLine("DO NOT GUESS OR HALLUCINATE - USE THE SEARCH TOOLS!");
         _prompt.AppendLine();
     }
 

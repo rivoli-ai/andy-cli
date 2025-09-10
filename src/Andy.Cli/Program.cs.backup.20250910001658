@@ -188,15 +188,6 @@ class Program
                 ToolType = typeof(Andy.Cli.Tools.BashCommandTool),
                 Configuration = new Dictionary<string, object?>()
             });
-            services.AddSingleton(new ToolRegistrationInfo
-            {
-                ToolType = typeof(Andy.Cli.Tools.CodeIndexTool),
-                Configuration = new Dictionary<string, object?>()
-            });
-
-            // Register code indexing service
-            services.AddSingleton<CodeIndexingService>();
-            services.AddHostedService<CodeIndexingService>(provider => provider.GetRequiredService<CodeIndexingService>());
 
             var serviceProvider = services.BuildServiceProvider();
 
