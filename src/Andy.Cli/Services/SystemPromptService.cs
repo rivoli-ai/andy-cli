@@ -97,7 +97,7 @@ public class SystemPromptService
                     // Add example for commonly used tools
                     if (tool.Metadata.Id == "code_index")
                     {
-                        _prompt.AppendLine($"  Example: {{\"tool\":\"code_index\",\"parameters\":{{\"query\":\"symbols\",\"pattern\":\"*Service\"}}}}");
+                        _prompt.AppendLine($"  Example: {{\"tool\":\"code_index\",\"parameters\":{{\"query_type\":\"symbols\",\"pattern\":\"*Service\"}}}}");
                     }
                     else if (tool.Metadata.Id == "read_file")
                     {
@@ -245,6 +245,7 @@ public class SystemPromptService
         _prompt.AppendLine("✓ ALWAYS make real tool calls using the exact JSON format above");
         _prompt.AppendLine("✓ ALWAYS wait for actual [Tool Results] from the system");
         _prompt.AppendLine("✓ ALWAYS use EXACT parameter names (e.g., `file_path` not `path` for read_file)");
+        _prompt.AppendLine("✓ ALWAYS use ONLY the allowed values shown in brackets [value1|value2] for parameters");
         _prompt.AppendLine("✓ ALWAYS list_directory FIRST before trying to read files");
         _prompt.AppendLine();
         _prompt.AppendLine("## Common Parameter Names:");
