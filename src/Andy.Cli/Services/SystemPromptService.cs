@@ -64,6 +64,11 @@ public class SystemPromptService
     {
         _prompt.AppendLine("## Available Tools");
         _prompt.AppendLine();
+        _prompt.AppendLine("⚠️ CRITICAL PARAMETER RULES:");
+        _prompt.AppendLine("• Parameters in brackets like [option1|option2|option3] mean you MUST use EXACTLY one of those values");
+        _prompt.AppendLine("• NEVER make up your own values - use ONLY what's shown in the brackets");
+        _prompt.AppendLine("• For code_index: query_type MUST be 'symbols', 'structure', 'references', or 'hierarchy' (NOT 'find' or 'search')");
+        _prompt.AppendLine();
 
         // Group tools by category for better organization
         var toolsByCategory = tools.GroupBy(t => t.Metadata.Category).OrderBy(g => g.Key);
@@ -98,6 +103,8 @@ public class SystemPromptService
                     if (tool.Metadata.Id == "code_index")
                     {
                         _prompt.AppendLine($"  Example: {{\"tool\":\"code_index\",\"parameters\":{{\"query_type\":\"symbols\",\"pattern\":\"*Service\"}}}}");
+                        _prompt.AppendLine($"  IMPORTANT: query_type MUST be one of: symbols, structure, references, hierarchy");
+                        _prompt.AppendLine($"  DO NOT use 'find' or 'search' as query_type - use 'symbols' instead");
                     }
                     else if (tool.Metadata.Id == "read_file")
                     {
