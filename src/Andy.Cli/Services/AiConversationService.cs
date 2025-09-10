@@ -356,6 +356,13 @@ public class AiConversationService
             {
                 // Regular text response - rendered content without tool calls
                 var content = SanitizeAssistantText(renderResult.TextContent ?? "");
+                
+                // If sanitization removed everything but we had original content, keep it
+                if (string.IsNullOrWhiteSpace(content) && !string.IsNullOrWhiteSpace(renderResult.TextContent))
+                {
+                    _logger?.LogDebug("Content was completely sanitized, using original text");
+                    content = renderResult.TextContent.Trim();
+                }
 
                 // Check if the response looks like a raw tool execution result (escaped JSON)
                 if (content.StartsWith("\"\\\"[Tool Execution:") || content.StartsWith("\"[Tool Execution:"))
@@ -726,6 +733,10 @@ public class AiConversationService
             return;
         }
 
+        // Debug logging to understand the issue
+        _logger?.LogDebug("DisplayParsedResponse: AST has {NodeCount} child nodes", ast.Children.Count);
+        _logger?.LogDebug("DisplayParsedResponse: renderResult.TextContent length = {Length}", renderResult.TextContent?.Length ?? 0);
+
         // Walk through AST nodes and display them appropriately
         var hasDisplayedContent = false;
         var textBuffer = new System.Text.StringBuilder();
@@ -749,6 +760,7 @@ public class AiConversationService
 
                 case TextNode textNode:
                     // Buffer text to combine adjacent text nodes
+                    _logger?.LogDebug("TextNode content: '{Content}'", textNode.Content);
                     textBuffer.AppendLine(textNode.Content);
                     break;
 
@@ -799,14 +811,41 @@ public class AiConversationService
         // Flush any remaining text
         if (textBuffer.Length > 0)
         {
-            RenderTextWithCodeExtraction(SanitizeAssistantText(textBuffer.ToString().Trim()));
+            var bufferContent = textBuffer.ToString().Trim();
+            _logger?.LogDebug("Flushing text buffer with content: '{Content}'", bufferContent);
+            var sanitizedContent = SanitizeAssistantText(bufferContent);
+            _logger?.LogDebug("Sanitized content: '{Content}'", sanitizedContent);
+            RenderTextWithCodeExtraction(sanitizedContent);
             hasDisplayedContent = true;
         }
 
         // If nothing was displayed, fall back to the rendered text content
         if (!hasDisplayedContent && !string.IsNullOrEmpty(renderResult.TextContent))
         {
-            RenderTextWithCodeExtraction(SanitizeAssistantText(renderResult.TextContent));
+            _logger?.LogDebug("Fallback: Using renderResult.TextContent: '{Content}'", renderResult.TextContent);
+            var sanitizedContent = SanitizeAssistantText(renderResult.TextContent);
+            _logger?.LogDebug("Fallback sanitized content: '{Content}'", sanitizedContent);
+            
+            // If sanitization removed all content, just show the original (with basic cleanup)
+            if (string.IsNullOrWhiteSpace(sanitizedContent) && !string.IsNullOrWhiteSpace(renderResult.TextContent))
+            {
+                _logger?.LogDebug("Sanitization removed all content, using original with basic cleanup");
+                sanitizedContent = renderResult.TextContent.Trim();
+            }
+            
+            if (!string.IsNullOrWhiteSpace(sanitizedContent))
+            {
+                RenderTextWithCodeExtraction(sanitizedContent);
+                hasDisplayedContent = true;
+            }
+        }
+        
+        // Final safety net - if still nothing displayed but we had AST content, show a message
+        if (!hasDisplayedContent && ast != null && ast.Children.Count > 0)
+        {
+            _logger?.LogWarning("No content was displayed despite having {Count} AST nodes", ast.Children.Count);
+            // Show at least some indication that we processed the response
+            _feed.AddMarkdownRich("*Response processed but contained no displayable content.*");
         }
     }
 
@@ -816,7 +855,12 @@ public class AiConversationService
     /// </summary>
     private void RenderTextWithCodeExtraction(string text)
     {
-        if (string.IsNullOrEmpty(text)) return;
+        _logger?.LogDebug("RenderTextWithCodeExtraction called with text length: {Length}", text?.Length ?? 0);
+        if (string.IsNullOrEmpty(text)) 
+        {
+            _logger?.LogDebug("RenderTextWithCodeExtraction: text is null or empty, returning");
+            return;
+        }
 
         var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
 
@@ -1190,35 +1234,23 @@ public class AiConversationService
         if (string.IsNullOrWhiteSpace(line))
             return false;
 
-        // Common patterns for internal tool mentions
+        // Common patterns for internal tool mentions - be specific to avoid false positives
         var toolMentionPatterns = new[]
         {
             // Pattern: [Calling toolname] or [Using toolname] etc.
             @"^\[(?:Calling|Using|Executing)\s+\w+\]$",
             
-            // Pattern: I'll use the [toolname] tool
-            @"^I'll use the \w+ tool",
-            @"^I'm using the \w+ tool",
-            @"^Let me use the \w+ tool",
-            
-            // Pattern: <function_calls> or similar
+            // Pattern: <function_calls> or similar XML tags
             @"^<[^>]*function[^>]*>",
             @"^<[^>]*invoke[^>]*>",
+            @"^</[^>]*function[^>]*>",
+            @"^</[^>]*invoke[^>]*>",
             
-            // Pattern: Tool call: toolname
-            @"^Tool call:\s*\w+",
+            // Pattern: Tool call: toolname (exact format)
+            @"^Tool call:\s*\w+$",
             
-            // Pattern: Invoking toolname...
-            @"^Invoking\s+\w+",
-            
-            // Pattern: Using toolname to...
-            @"^Using\s+\w+\s+to\s+",
-            
-            // Pattern: I need to use/call...
-            @"^I need to (?:use|call)\s+",
-            
-            // Pattern: Let me call/invoke...  
-            @"^Let me (?:call|invoke)\s+"
+            // Pattern: Invoking toolname... (exact format)
+            @"^Invoking\s+\w+\.\.\.$"
         };
 
         foreach (var pattern in toolMentionPatterns)

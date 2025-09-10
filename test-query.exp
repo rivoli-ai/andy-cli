@@ -1,0 +1,53 @@
+#!/usr/bin/expect -f
+
+# Test script for Andy CLI
+set timeout 30
+
+# Start the application with debug mode
+spawn env ANDY_DEBUG_RAW=true dotnet run --project src/Andy.Cli
+
+# Wait for the prompt to appear
+expect {
+    "Ready to assist!" {
+        puts "\nApplication started successfully"
+    }
+    timeout {
+        puts "\nTimeout waiting for application to start"
+        exit 1
+    }
+}
+
+# Wait a moment for initialization
+sleep 2
+
+# Send the query about migration
+send "how would you do a migration from .NET 8 to .NET 10 in this project?\r"
+
+# Wait for response
+expect {
+    -re ".*migration.*" {
+        puts "\nResponse received containing 'migration'"
+    }
+    -re ".*NET.*" {
+        puts "\nResponse received containing 'NET'"
+    }
+    -re "Context:.*messages" {
+        puts "\nContext info received"
+    }
+    timeout {
+        puts "\nTimeout waiting for response"
+    }
+}
+
+# Wait to see the output
+sleep 5
+
+# Send ESC twice to quit (once for dialog, once to confirm)
+send "\033"
+sleep 1
+send "y"
+
+# Wait for exit
+expect eof
+
+puts "\nTest completed"
