@@ -1170,8 +1170,14 @@ public class AiConversationService
 
         sanitized = string.Join('\n', filteredLines);
 
-        // Trim excessive whitespace
+        // Trim excessive whitespace and remove multiple consecutive blank lines
         sanitized = sanitized.Trim();
+        
+        // Replace multiple consecutive newlines with at most two
+        while (sanitized.Contains("\n\n\n"))
+        {
+            sanitized = sanitized.Replace("\n\n\n", "\n\n");
+        }
 
         return sanitized;
     }

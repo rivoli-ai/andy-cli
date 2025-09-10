@@ -90,12 +90,12 @@ public static class ToolOutputLimits
         var lastNewline = truncated.LastIndexOf('\n');
         var lastSpace = truncated.LastIndexOf(' ');
         
-        if (lastNewline > limit - 200) // If there's a newline near the end
+        if (lastNewline > 0 && lastNewline > limit - 200) // If there's a newline near the end
         {
             truncated = output.Substring(0, lastNewline);
             remainingChars = output.Length - lastNewline;
         }
-        else if (lastSpace > limit - 50) // If there's a space near the end
+        else if (lastSpace > 0 && lastSpace > limit - 50) // If there's a space near the end
         {
             truncated = output.Substring(0, lastSpace);
             remainingChars = output.Length - lastSpace;
