@@ -42,11 +42,33 @@ public class ModelCommand : ICommand
         _currentClient = serviceProvider.GetService<LlmClient>();
         _modelMemory = new ModelMemoryService();
 
+        // Try to get the configured default provider from options
+        var options = serviceProvider.GetService<IOptions<LlmOptions>>();
+        var hasConfiguredProvider = options?.Value != null && !string.IsNullOrEmpty(options.Value.DefaultProvider);
+        if (hasConfiguredProvider)
+        {
+            _currentProvider = options.Value.DefaultProvider!;
+        }
+
         // Load last used provider and model
         var current = _modelMemory.GetCurrent();
-        if (current.HasValue)
+        if (current.HasValue && !hasConfiguredProvider)
         {
-            _currentProvider = current.Value.Provider;
+            // Only use the saved provider if it has a valid API key and no provider was explicitly configured
+            if (HasApiKey(current.Value.Provider))
+            {
+                _currentProvider = current.Value.Provider;
+                _currentModel = current.Value.Model;
+            }
+            else
+            {
+                // Use default model for the current provider
+                _currentModel = GetDefaultModel(_currentProvider);
+            }
+        }
+        else if (current.HasValue && _currentProvider == current.Value.Provider)
+        {
+            // If saved provider matches current provider (from options), use the saved model
             _currentModel = current.Value.Model;
         }
         else

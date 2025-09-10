@@ -93,7 +93,7 @@ public class AiConversationServiceTests
     [InlineData(@"{""tool"": ""read_file"", ""parameters"": {""path"": ""test.txt""}}", "read_file", "path", "test.txt")]
     [InlineData(@"{""function"": ""write_file"", ""arguments"": {""content"": ""hello""}}", "write_file", "content", "hello")]
     [InlineData(@"<tool_use>{""tool"": ""list_directory"", ""parameters"": {""recursive"": true}}</tool_use>", "list_directory", "recursive", true)]
-    public void ExtractToolCalls_ParsesVariousFormats(string expectedTool, object paramValue)
+    public void ExtractToolCalls_ParsesVariousFormats(string input, string expectedTool, string paramName, object paramValue)
     {
         // This test would need access to private methods, so we'll test through the public interface
         // In a real scenario, we might refactor to make this testable or use reflection

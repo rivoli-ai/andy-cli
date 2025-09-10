@@ -24,8 +24,9 @@ public class HallucinationDetector
         RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.Multiline);
 
     // Pattern for detecting code blocks that claim to be file contents but weren't from tool calls
+    // Made more specific to avoid false positives on legitimate code examples
     private static readonly Regex FakeFileContentPattern = new(
-        @"(?:Here(?:'s| is) (?:the )?(?:content|code)|The (?:file|code) contains?|File contents?:).*?```[\s\S]*?```",
+        @"(?:Here(?:'s| is) (?:the )?(?:content of|contents from)|The (?:file|code) (?:contains?|shows)|File contents?:|Contents of .*?[/\\]).*?```[\s\S]*?```",
         RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.Multiline);
 
     // Pattern for responses that claim to have read/executed something without tool calls
