@@ -9,7 +9,6 @@ using System.Threading.Tasks;
 using Andy.Cli.Diagnostics;
 using Andy.Cli.Parsing;
 using Andy.Cli.Parsing.Compiler;
-using Andy.Cli.Parsing.Rendering;
 using Andy.Cli.Services.ContentPipeline;
 using Andy.Cli.Widgets;
 using Andy.Llm;
@@ -31,8 +30,6 @@ public class AiConversationService : IDisposable
     private readonly ContextManager _contextManager;
     private readonly FeedView _feed;
     private readonly IToolRegistry _toolRegistry;
-    private LlmResponseCompiler _compiler;
-    private readonly AstRenderer _renderer;
     private readonly ILogger<AiConversationService>? _logger;
     private readonly QwenResponseDiagnostic? _diagnostic;
     private readonly IToolCallValidator _toolCallValidator;
@@ -63,13 +60,6 @@ public class AiConversationService : IDisposable
         _toolService = new ToolExecutionService(toolRegistry, toolExecutor, feed);
         _contextManager = new ContextManager(systemPrompt);
         _jsonRepair = jsonRepair;
-        _compiler = new LlmResponseCompiler(NormalizeProviderName(providerName, modelName), jsonRepair, null);
-        _renderer = new AstRenderer(new RenderOptions
-        {
-            ShowToolCalls = false,
-            UseEmoji = false,
-            ToolCallFormat = ToolCallDisplayFormat.Hidden
-        }, null);
         _currentModel = modelName;
         _currentProvider = providerName;
         _toolCallValidator = new ToolCallValidator(_toolRegistry, logger as ILogger<ToolCallValidator>);
@@ -198,6 +188,7 @@ public class AiConversationService : IDisposable
         var hasDisplayedContent = false; // Track if we've displayed any content to the user
         var consecutiveToolOnlyIterations = 0; // Track consecutive iterations with only tool calls
         const int maxConsecutiveToolIterations = 3; // Break after 3 consecutive tool-only iterations
+        var toolFallbackTried = false; // Retry once without tools on provider 400s
 
         while (iteration < maxIterations)
         {
@@ -294,6 +285,18 @@ public class AiConversationService : IDisposable
 
             if (response == null)
             {
+                // Fallback: if tools were included and request failed, retry once without tools
+                if ((request.Tools?.Any() ?? false) && !toolFallbackTried)
+                {
+                    _logger?.LogWarning("[FALLBACK] LLM response was null; retrying once without tools");
+                    toolFallbackTried = true;
+                    request = CreateRequestWithTools(new List<ToolRegistration>());
+                    // Ensure Parts are fixed
+                    request = FixEmptyMessageParts(request);
+                    // Retry this iteration without incrementing iteration further
+                    iteration--; // Counteract the ++ at loop start to keep iteration numbering stable
+                    continue;
+                }
                 break;
             }
 
@@ -373,111 +376,22 @@ public class AiConversationService : IDisposable
                 continue;
             }
 
-            // Parse the response using the AST compiler (fallback path only)
-            var compilerOptions = new CompilerOptions
-            {
-                ModelProvider = NormalizeProviderName(_currentProvider, _currentModel),
-                ModelName = _currentModel,
-                PreserveThoughts = false,
-                EnableOptimizations = true
-            };
-
-            var compilationResult = _compiler.Compile(response.Content ?? "", compilerOptions);
-
-            // Log any compilation diagnostics
-            foreach (var diagnostic in compilationResult.Diagnostics)
-            {
-                if (diagnostic.Severity == DiagnosticSeverity.Error)
-                    _logger?.LogError("Compilation error: {Message}", diagnostic.Message);
-                else if (diagnostic.Severity == DiagnosticSeverity.Warning)
-                    _logger?.LogWarning("Compilation warning: {Message}", diagnostic.Message);
-            }
-
-            if (!compilationResult.Success || compilationResult.Ast == null)
-            {
-                _logger?.LogWarning("Failed to parse response cleanly, falling back to basic parsing");
-
-                // Fall back to basic parsing - still try to extract tool calls
-                compilationResult.Ast = new ResponseNode
-                {
-                    ModelProvider = _currentProvider,
-                    ModelName = _currentModel
-                };
-
-                // Add the raw text as a text node (will be cleaned by renderer)
-                compilationResult.Ast.Children.Add(new TextNode
-                {
-                    Content = response.Content ?? "",
-                    Format = TextFormat.Plain
-                });
-            }
-
-            // Render the AST for display and tool extraction
-            _logger?.LogInformation("[AST DEBUG] AST has {Count} children", compilationResult.Ast?.Children.Count ?? 0);
-            if (compilationResult.Ast != null)
-            {
-                foreach (var child in compilationResult.Ast.Children)
-                {
-                    if (child is TextNode textNode)
-                    {
-                        _logger?.LogInformation("[AST DEBUG] TextNode content: '{Content}'", 
-                            textNode.Content?.Length > 100 ? textNode.Content.Substring(0, 100) + "..." : textNode.Content);
-                    }
-                    else
-                    {
-                        _logger?.LogInformation("[AST DEBUG] Child type: {Type}", child.GetType().Name);
-                    }
-                }
-            }
-            
-            var renderResult = _renderer.RenderForStreaming(compilationResult.Ast);
-            
-            _logger?.LogInformation("[RENDER RESULT] TextContent: '{Content}', HasContent: {HasContent}, HasToolCalls: {HasTools}", 
-                renderResult.TextContent?.Length > 100 ? renderResult.TextContent.Substring(0, 100) + "..." : renderResult.TextContent,
-                renderResult.HasContent, 
-                renderResult.HasToolCalls);
-            
-            // CRITICAL FIX: Check if raw response contains both tool JSON and additional text
-            // This happens when LLM responds with: {"tool":"..."} followed by explanatory text
+            // Structured path: no custom parsing; treat response.Content as text
             var rawContent = response.Content ?? "";
             string? additionalText = null;
             
-            if (renderResult.ToolCalls.Any() && rawContent.Length > 0)
-            {
-                // Try to find text after the tool call JSON
-                var toolJsonPattern = @"\{[^}]*""tool""\s*:\s*""[^""]+""[^}]*\}";
-                var match = System.Text.RegularExpressions.Regex.Match(rawContent, toolJsonPattern);
-                if (match.Success)
-                {
-                    // Get text after the JSON
-                    var afterJson = rawContent.Substring(match.Index + match.Length).Trim();
-                    if (!string.IsNullOrWhiteSpace(afterJson))
-                    {
-                        additionalText = afterJson;
-                        _logger?.LogInformation("[MIXED RESPONSE] Found text after tool call: '{Text}'", 
-                            afterJson.Length > 100 ? afterJson.Substring(0, 100) + "..." : afterJson);
-                    }
-                }
-            }
-            
-            _logger?.LogInformation("[RENDER RESULT] Iteration {Iteration}: ToolCalls={ToolCount}, TextContent length={TextLength}, AdditionalText length={AddLen}, TextPreview='{Preview}'",
+            _logger?.LogInformation("[STRUCTURED RESULT] Iteration {Iteration}: Text length={TextLength}, Preview='{Preview}'",
                 iteration,
-                renderResult.ToolCalls.Count,
-                renderResult.TextContent?.Length ?? 0,
-                additionalText?.Length ?? 0,
-                renderResult.TextContent?.Length > 100 ? renderResult.TextContent.Substring(0, 100) + "..." : renderResult.TextContent ?? "(null)");
-
-            if (renderResult.ToolCalls.Any())
+                rawContent?.Length ?? 0,
+                rawContent?.Length > 100 ? rawContent.Substring(0, 100) + "..." : rawContent ?? "(null)");
+ 
+            if (_pendingFunctionCalls.Any())
             {
                 _logger?.LogInformation("[TOOL CALLS FOUND] Found {Count} tool calls in iteration {Iteration}", 
-                    renderResult.ToolCalls.Count, iteration);
-                
-                // Trace tool calls found
-                _tracer?.TraceToolCalls(renderResult.ToolCalls.Select(tc => new TracedToolCall { ToolId = tc.ToolId, Parameters = tc.Parameters }).ToList());
-                
+                    _pendingFunctionCalls.Count, iteration);
+                 
                 // If there's text content along with tool calls, display it
-                // This handles cases where the LLM explains what it's about to do
-                var textToDisplay = additionalText ?? renderResult.TextContent;
+                var textToDisplay = rawContent;
                 if (!string.IsNullOrWhiteSpace(textToDisplay))
                 {
                     var textWithoutTools = ExtractNonToolText(textToDisplay);
@@ -489,61 +403,52 @@ public class AiConversationService : IDisposable
                         finalResponse.AppendLine(textWithoutTools);
                         hasDisplayedContent = true;
                     }
-                    else if (!string.IsNullOrWhiteSpace(additionalText))
-                    {
-                        // If ExtractNonToolText removed everything but we have additional text, use it directly
-                        _logger?.LogInformation("[TOOL WITH TEXT FALLBACK] Using additional text directly: '{Preview}'",
-                            additionalText.Length > 100 ? additionalText.Substring(0, 100) + "..." : additionalText);
-                        _contentPipeline.AddRawContent(additionalText);
-                        finalResponse.AppendLine(additionalText);
-                        hasDisplayedContent = true;
-                    }
                 }
-
+ 
                 // Generate call IDs for each tool call and add them as assistant tool_calls
                 var contextToolCalls = new List<ContextToolCall>();
                 var callIdMap = new Dictionary<int, string>();
-                for (int i = 0; i < renderResult.ToolCalls.Count; i++)
+                for (int i = 0; i < _pendingFunctionCalls.Count; i++)
                 {
                     var generatedCallId = "call_" + Guid.NewGuid().ToString("N");
                     callIdMap[i] = generatedCallId;
                     contextToolCalls.Add(new ContextToolCall
                     {
                         CallId = generatedCallId,
-                        ToolId = renderResult.ToolCalls[i].ToolId,
-                        Parameters = renderResult.ToolCalls[i].Parameters
+                        ToolId = _pendingFunctionCalls[i].Name,
+                        Parameters = _pendingFunctionCalls[i].Arguments ?? new Dictionary<string, object?>()
                     });
                 }
-
+ 
                 // Add assistant message with tool calls to context
                 // This is critical - the assistant message must include tool_calls
                 // If there's no text content, use a placeholder that indicates tool execution
-                var assistantText = !string.IsNullOrWhiteSpace(renderResult.TextContent) 
-                    ? renderResult.TextContent 
+                var assistantText = !string.IsNullOrWhiteSpace(rawContent) 
+                    ? rawContent 
                     : "(Executing tools...)";
                 _contextManager.AddAssistantMessage(assistantText, contextToolCalls);
-
+ 
                 // Execute tools and collect results
                 var toolResults = new List<string>();
-
-                for (int i = 0; i < renderResult.ToolCalls.Count; i++)
+ 
+                for (int i = 0; i < _pendingFunctionCalls.Count; i++)
                 {
-                    var toolCall = renderResult.ToolCalls[i];
+                    var fc = _pendingFunctionCalls[i];
                     var thisCallId = callIdMap[i];
-
+ 
                     // Validate and optionally repair parameters before execution
-                    var toolMetadata = _toolRegistry.GetTool(toolCall.ToolId)?.Metadata;
-                    var callToExecute = toolCall;
+                    var toolMetadata = _toolRegistry.GetTool(fc.Name)?.Metadata;
+                    var callToExecute = new ModelToolCall { ToolId = fc.Name, Parameters = fc.Arguments ?? new Dictionary<string, object?>() };
                     if (toolMetadata != null)
                     {
-                        var validation = _toolCallValidator.Validate(toolCall, toolMetadata);
+                        var validation = _toolCallValidator.Validate(callToExecute, toolMetadata);
                         if (!validation.IsValid && validation.RepairedCall != null)
                         {
-                            _logger?.LogWarning("Parameters for tool '{Tool}' were invalid; applying single repair attempt.", toolCall.ToolId);
+                            _logger?.LogWarning("Parameters for tool '{Tool}' were invalid; applying single repair attempt.", fc.Name);
                             callToExecute = validation.RepairedCall;
                         }
                     }
-
+ 
                     // Execute tool
                     var execResult = await _toolService.ExecuteToolAsync(
                         callToExecute.ToolId,
@@ -668,7 +573,7 @@ public class AiConversationService : IDisposable
             else
             {
                 // Regular text response - rendered content without tool calls
-                var content = renderResult.TextContent ?? "";
+                var content = rawContent;
                 
                 _logger?.LogInformation("[TEXT RESPONSE PATH] Iteration {Iteration}, Content length: {Length}, Preview: '{Preview}'", 
                     iteration, content.Length, content.Length > 100 ? content.Substring(0, 100) + "..." : content);
@@ -736,8 +641,8 @@ public class AiConversationService : IDisposable
                             });
                         }
 
-                        var assistantTextFallback = !string.IsNullOrWhiteSpace(renderResult.TextContent) 
-                            ? renderResult.TextContent 
+                        var assistantTextFallback = !string.IsNullOrWhiteSpace(rawContent) 
+                            ? rawContent 
                             : "(Executing tools...)";
                         _contextManager.AddAssistantMessage(assistantTextFallback, contextToolCalls);
 
@@ -758,8 +663,8 @@ public class AiConversationService : IDisposable
                                 }
                             }
 
-                            // Use raw execution to preserve original parameter names from model output
-                            var execResult = await _toolService.ExecuteRawAsync(
+                            // Execute with standard path so tool invocation is displayed in the feed
+                            var execResult = await _toolService.ExecuteToolAsync(
                                 callToExecute.ToolId,
                                 callToExecute.Parameters,
                                 cancellationToken);
@@ -1476,24 +1381,6 @@ This is a basic C# console application that demonstrates fundamental concepts li
     // Tool call extraction now handled by AST compiler
 
     // Tool result formatting and text extraction now handled by AST compiler
-
-    /// <summary>
-    /// Display parsed response with proper formatting for code blocks
-    /// </summary>
-    private void DisplayParsedResponse(ResponseNode? ast, StreamingRenderResult renderResult)
-    {
-        // Use content pipeline for all rendering instead of direct feed manipulation
-        if (!string.IsNullOrEmpty(renderResult.TextContent))
-        {
-            _logger?.LogDebug("DisplayParsedResponse: Using content pipeline for text content length = {Length}", renderResult.TextContent.Length);
-            _contentPipeline.AddRawContent(renderResult.TextContent);
-        }
-        else if (ast != null && ast.Children.Count > 0)
-        {
-            _logger?.LogWarning("DisplayParsedResponse: AST has {Count} nodes but no TextContent", ast.Children.Count);
-            _contentPipeline.AddRawContent("_[Response content was parsed but could not be displayed]_");
-        }
-    }
 
     /// <summary>
     /// Render text content while extracting code blocks from both proper and malformed code fences.

@@ -14,7 +14,7 @@ public class SemanticAnalyzer
     private readonly ILogger<SemanticAnalyzer>? _logger;
     private readonly Dictionary<string, ToolDefinition> _knownTools;
 
-    public SemanticAnalyzer(ILogger<SemanticAnalyzer>? logger = null)
+    public SemanticAnalyzer(object options, ILogger<SemanticAnalyzer>? logger = null)
     {
         _logger = logger;
         _knownTools = InitializeKnownTools();

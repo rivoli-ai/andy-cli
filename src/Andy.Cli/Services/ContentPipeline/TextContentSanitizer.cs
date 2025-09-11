@@ -1,5 +1,6 @@
 using System;
 using System.Text.RegularExpressions;
+using System.Collections.Generic; // Added for List
 
 namespace Andy.Cli.Services.ContentPipeline;
 
@@ -8,6 +9,9 @@ namespace Andy.Cli.Services.ContentPipeline;
 /// </summary>
 public class TextContentSanitizer : IContentSanitizer
 {
+    // Redact internal tool disclosures
+    private static readonly Regex ToolJsonPattern = new(@"\{[^}]*""(?:tool|function|tool_call)""[^}]*\}", RegexOptions.Singleline | RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex ToolMentionPattern = new(@"(?i)\b(tool call|using (?:a|the) tool|call(?:ing)? a tool|invoke|invoking|function call|list_directory|read_file|bash_command|create_directory|codeindex)\b", RegexOptions.Compiled);
     private static readonly Regex EmptyJsonPattern = new(@"`json\s*\n\s*`", RegexOptions.Multiline | RegexOptions.Compiled);
     private static readonly Regex EmptyTripleJsonPattern = new(@"```json\s*\n\s*```", RegexOptions.Multiline | RegexOptions.Compiled);
     private static readonly Regex ConsecutiveNewlinesPattern = new(@"\n\s*\n\s*\n+", RegexOptions.Compiled);  // 3+ newlines with optional whitespace
@@ -28,6 +32,8 @@ public class TextContentSanitizer : IContentSanitizer
     private TextBlock SanitizeTextBlock(TextBlock block)
     {
         var content = block.Content;
+        // Redact any internal tool disclosure before other processing
+        content = RedactToolMentions(content);
         
         // Remove empty JSON blocks
         content = EmptyJsonPattern.Replace(content, "");
@@ -58,6 +64,21 @@ public class TextContentSanitizer : IContentSanitizer
         {
             IsComplete = block.IsComplete
         };
+    }
+    
+    private static string RedactToolMentions(string content)
+    {
+        if (string.IsNullOrEmpty(content)) return content;
+        // Remove inline tool JSON objects
+        var redacted = ToolJsonPattern.Replace(content, "");
+        // Drop any line that explicitly mentions tools
+        var lines = redacted.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+        var kept = new List<string>(lines.Length);
+        foreach (var line in lines)
+        {
+            if (!ToolMentionPattern.IsMatch(line)) kept.Add(line);
+        }
+        return string.Join("\n", kept);
     }
     
     private CodeBlock SanitizeCodeBlock(CodeBlock block)
