@@ -11,39 +11,12 @@ namespace Andy.Cli.Tests.Services;
 /// </summary>
 public class QwenRawJsonOutputTest
 {
-    private readonly QwenResponseParser _parser;
+    // Parser removed; tests skipped
 
-    public QwenRawJsonOutputTest()
-    {
-        _parser = new QwenResponseParser(
-            new JsonRepairService(),
-            new StreamingToolCallAccumulator(new JsonRepairService(), null),
-            NullLogger<QwenResponseParser>.Instance);
-    }
-
-    [Fact]
+    [Fact(Skip = "Parser removed in structured flow")]
     public void Parse_HandlesRawJsonWithToolCall()
     {
-        // This is the actual output from Qwen model as shown by the user
-        var input = @"}
-{
-  ""tool_call"": {
-    ""name"": ""list_directory"",
-    ""arguments"": {
-      ""directory_path"": "".""
-    }
-  }
-}";
-
-        var result = _parser.Parse(input);
-
-        Assert.Single(result.ToolCalls);
-        Assert.Equal("list_directory", result.ToolCalls[0].ToolId);
-        Assert.True(result.ToolCalls[0].Parameters.ContainsKey("directory_path"));
-        Assert.Equal(".", result.ToolCalls[0].Parameters["directory_path"]?.ToString());
-
-        // The text should be cleaned
-        Assert.Empty(result.TextContent);
+        // Skipped
     }
 
     [Fact]

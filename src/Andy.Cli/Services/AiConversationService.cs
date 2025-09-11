@@ -1,20 +1,10 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Text;
-using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
 using Andy.Cli.Diagnostics;
-using Andy.Cli.Parsing;
-using Andy.Cli.Parsing.Compiler;
 using Andy.Cli.Services.ContentPipeline;
 using Andy.Cli.Widgets;
 using Andy.Llm;
 using Andy.Llm.Models;
 using Andy.Tools.Core;
-using Andy.Tools.Execution;
 using Microsoft.Extensions.Logging;
 using System.Text.Json.Nodes;
 
@@ -108,7 +98,7 @@ public class AiConversationService : IDisposable
         _currentModel = modelName;
         _currentProvider = providerName;
         // Recreate compiler with normalized provider to ensure correct parsing (e.g., Qwen via other providers)
-        _compiler = new LlmResponseCompiler(NormalizeProviderName(_currentProvider, _currentModel), _jsonRepair, null);
+        // no-op
     }
 
     /// <summary>
@@ -130,7 +120,7 @@ public class AiConversationService : IDisposable
         CancellationToken cancellationToken = default)
     {
         // Prefer streaming when tools might be used so we can consume structured FunctionCall items
-        var useStreaming = enableStreaming || !IsSimpleGreeting(userMessage);
+        var useStreaming = enableStreaming;
         // Recreate content pipeline for this request to avoid finalized state carrying over
         _contentPipeline?.Dispose();
         var processor = new ContentPipeline.MarkdownContentProcessor();
@@ -148,16 +138,21 @@ public class AiConversationService : IDisposable
 
         // Get available tools
         var availableTools = _toolRegistry.GetTools(enabledOnly: true).ToList();
-
-        // For simple greetings, don't send tools to avoid overwhelming the LLM
-        // This also helps with providers that have issues with large tool lists
-        var shouldIncludeTools = !IsSimpleGreeting(userMessage);
+ 
+        // Local shortcut: answer simple environment questions without LLM
+        if (LooksLikeCurrentDirectoryQuery(userMessage))
+        {
+            var cwd = Directory.GetCurrentDirectory();
+            var msg = $"Current directory: {cwd}";
+            _contentPipeline.AddRawContent(msg);
+            _contextManager.AddAssistantMessage(msg);
+            await _contentPipeline.FinalizeAsync();
+            return msg;
+        }
         
         // Create the LLM request with tool definitions (if appropriate)
-        var request = shouldIncludeTools 
-            ? CreateRequestWithTools(availableTools)
-            : CreateRequestWithTools(new List<ToolRegistration>());
-
+        var request = CreateRequestWithTools(availableTools);
+        
         // DISABLED: Preloading causes issues with proper response generation
         // The LLM gets confused when it sees pre-executed tool results
         // and doesn't provide a proper summary of findings
@@ -280,7 +275,6 @@ public class AiConversationService : IDisposable
             if (iteration == 1)
             {
                 _logger?.LogInformation("[LLM LOG] Logging to: {LogFile}", logFile);
-                Console.Error.WriteLine($"[LLM LOG] Writing to: {logFile}");
             }
 
             if (response == null)
@@ -615,12 +609,8 @@ public class AiConversationService : IDisposable
                 {
                     _logger?.LogInformation("[FALLBACK PATH] Content doesn't look like escaped JSON, trying fallback parser");
                     
-                    // Fallback: try QwenResponseParser-based extraction if AST produced no tool calls
-                    var fallbackParser = new QwenResponseParser(
-                        _jsonRepair,
-                        new StreamingToolCallAccumulator(_jsonRepair, null),
-                        null);
-                    var fallbackCalls = fallbackParser.ExtractToolCalls(response.Content ?? string.Empty);
+                    // Fallback parser removed; no tool extraction here
+                    var fallbackCalls = new List<ModelToolCall>();
                     
                     _logger?.LogInformation("[FALLBACK PARSER] Found {Count} tool calls", fallbackCalls.Count);
                     
@@ -858,99 +848,20 @@ This is a basic C# console application that demonstrates fundamental concepts li
         return finalResponse.ToString();
     }
 
-    private bool LooksLikeRepoExploration(string userMessage)
+    private bool LooksLikeCurrentDirectoryQuery(string userMessage)
     {
-        if (string.IsNullOrWhiteSpace(userMessage)) return false;
-        var s = userMessage.ToLowerInvariant();
-        return (s.Contains("what's in") || s.Contains("what is in") || s.Contains("contents") || s.Contains("list") || s.Contains("show files") || s.Contains("source code") || s.Contains("repo"))
-               && (s.Contains("src") || s.Contains("repo") || s.Contains("code"));
+        var s = userMessage?.ToLowerInvariant().Trim() ?? string.Empty;
+        if (string.IsNullOrEmpty(s)) return false;
+        // Only treat as local CWD query if it's a short, direct question
+        if (s.Length > 80) return false;
+        bool mentionsCwd = s.Contains("current directory") || s.Contains("cwd") || s.Contains("pwd");
+        if (!mentionsCwd) return false;
+        // If also asking about repo/files/contents, defer to tools/LLM
+        if (s.Contains("repo") || s.Contains("repository") || s.Contains("files") || s.Contains("file") || s.Contains("contents") || s.Contains("what can you tell"))
+            return false;
+        return true;
     }
     
-    private bool IsSimpleGreeting(string userMessage)
-    {
-        if (string.IsNullOrWhiteSpace(userMessage)) return false;
-        var s = userMessage.ToLowerInvariant().Trim();
-        // Common greetings that don't need tools
-        return s == "hello" || s == "hi" || s == "hey" || 
-               s == "good morning" || s == "good afternoon" || s == "good evening" ||
-               s.StartsWith("hello ") || s.StartsWith("hi ") || s.StartsWith("hey ") ||
-               s == "test" || s == "ping";
-    }
-
-    private async Task PreloadRepoContextAsync(CancellationToken cancellationToken)
-    {
-        // Build a batch of assistant-declared tool_calls (client-initiated), then execute them
-        var initialCalls = new List<ModelToolCall>();
-
-        // Top-level and src structure
-        initialCalls.Add(new ModelToolCall { ToolId = "list_directory", Parameters = new Dictionary<string, object?> { ["path"] = "." } });
-        initialCalls.Add(new ModelToolCall { ToolId = "list_directory", Parameters = new Dictionary<string, object?> { ["path"] = "./src" } });
-        initialCalls.Add(new ModelToolCall { ToolId = "list_directory", Parameters = new Dictionary<string, object?> { ["path"] = "./src/Andy.Cli" } });
-
-        // Key files commonly useful for summary
-        var candidateFiles = new[]
-        {
-            "README.md",
-            "./src/Andy.Cli/Andy.Cli.csproj",
-            "./src/Andy.Cli/Program.cs"
-        };
-        foreach (var f in candidateFiles)
-        {
-            initialCalls.Add(new ModelToolCall { ToolId = "read_file", Parameters = new Dictionary<string, object?> { ["file_path"] = f } });
-        }
-
-        // Post a synthetic assistant message with tool_calls
-        var contextToolCalls = new List<ContextToolCall>();
-        var callIdMap = new List<(string ToolId, string CallId, Dictionary<string, object?> Params)>();
-        foreach (var call in initialCalls)
-        {
-            var id = "call_" + Guid.NewGuid().ToString("N");
-            contextToolCalls.Add(new ContextToolCall { CallId = id, ToolId = call.ToolId, Parameters = call.Parameters });
-            callIdMap.Add((call.ToolId, id, call.Parameters));
-        }
-        _contextManager.AddAssistantMessage("", contextToolCalls);
-
-        // Execute each tool call and add tool responses to context
-        foreach (var call in callIdMap)
-        {
-            try
-            {
-                var execResult = await _toolService.ExecuteToolAsync(call.ToolId, call.Params, cancellationToken);
-                string outputStr;
-                if (execResult.Data != null)
-                {
-                    try
-                    {
-                        outputStr = SerializeToolDataWithTruncation(execResult.Data, call.ToolId, 2000);
-                    }
-                    catch
-                    {
-                        outputStr = execResult.Data.ToString() ?? execResult.Message ?? execResult.ErrorMessage ?? "No output";
-                    }
-                }
-                else if (!string.IsNullOrEmpty(execResult.FullOutput))
-                {
-                    outputStr = execResult.FullOutput!;
-                }
-                else
-                {
-                    outputStr = execResult.Message ?? execResult.ErrorMessage ?? "No output";
-                }
-
-                // Apply tool-specific output limit with cumulative tracking
-                var baseLimit = ToolOutputLimits.GetLimit(call.ToolId);
-                var adjustedLimit = _outputTracker.GetAdjustedLimit(call.ToolId, baseLimit);
-                var limitedOutput = ToolOutputLimits.LimitOutput(call.ToolId, outputStr, adjustedLimit);
-                _outputTracker.RecordOutput(call.ToolId, limitedOutput.Length);
-                _contextManager.AddToolExecution(call.ToolId, call.CallId, call.Params, limitedOutput);
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogWarning(ex, "Preload tool call failed: {Tool}", call.ToolId);
-            }
-        }
-    }
-
     /// <summary>
     /// Create LLM request with tool definitions
     /// </summary>
@@ -984,14 +895,10 @@ This is a basic C# console application that demonstrates fundamental concepts li
 
         // Add tool definitions to the request
         // The LLM needs these to know what tools are available
-        // Only add a few tools to avoid overwhelming the provider
         if (tools != null && tools.Any())
         {
-            // Limit to essential tools for now to avoid 400 errors
-            var essentialToolIds = new[] { "list_directory", "read_file", "bash_command", "search_files" };
-            var essentialTools = tools.Where(t => essentialToolIds.Contains(t.Metadata.Id)).Take(4);
-            
-            request.Tools = essentialTools.Select(t => new ToolDeclaration
+            // Declare all registered tools to the model
+            request.Tools = tools.Select(t => new ToolDeclaration
             {
                 Name = t.Metadata.Id,
                 Description = t.Metadata.Description,
@@ -1202,9 +1109,7 @@ This is a basic C# console application that demonstrates fundamental concepts li
 
         return request;
     }
-
-    // Removed BuildToolPrompt - tool definitions are in system prompt
-
+    
     /// <summary>
     /// Get LLM response with streaming support
     /// </summary>
@@ -1265,7 +1170,7 @@ This is a basic C# console application that demonstrates fundamental concepts li
         }
         catch (Exception ex)
         {
-            _feed.AddMarkdownRich($"**LLM Error:** {ex.Message}");
+            _logger?.LogWarning(ex, "LLM request failed; will attempt fallback if enabled.");
             return null;
         }
     }
@@ -1319,35 +1224,10 @@ This is a basic C# console application that demonstrates fundamental concepts li
                 // Then capture the response
                 var lastUserMessage = request.Messages.LastOrDefault(m => m.Role.ToString() == "User");
                 string prompt = "";
-                if (lastUserMessage != null)
+                if (lastUserMessage != null && lastUserMessage.Parts != null)
                 {
-                    // Try to get text from Parts if available
-                    if (lastUserMessage.Parts != null && lastUserMessage.Parts.Any())
-                    {
-                        var textPart = lastUserMessage.Parts.OfType<TextPart>().FirstOrDefault();
-                        if (textPart != null)
-                        {
-                            prompt = textPart.Text ?? "";
-                        }
-                        else
-                        {
-                            // Fallback: try to extract text from the first part
-                            try
-                            {
-                                var firstPart = lastUserMessage.Parts.FirstOrDefault();
-                                if (firstPart != null)
-                                {
-                                    // Use reflection or JSON serialization to get text content
-                                    var json = System.Text.Json.JsonSerializer.Serialize(firstPart);
-                                    prompt = json.Length > 100 ? json.Substring(0, 100) + "..." : json;
-                                }
-                            }
-                            catch
-                            {
-                                prompt = "[Unable to extract user message]";
-                            }
-                        }
-                    }
+                    var textPart = lastUserMessage.Parts.OfType<TextPart>().FirstOrDefault();
+                    if (textPart != null) prompt = textPart.Text ?? "";
                 }
                 await _diagnostic.CaptureRawResponse(prompt, content);
             }
@@ -1373,133 +1253,8 @@ This is a basic C# console application that demonstrates fundamental concepts li
         }
         catch (Exception ex)
         {
-            _feed.AddMarkdownRich($"**LLM Error:** {ex.Message}");
+            _logger?.LogWarning(ex, "LLM streaming failed; will attempt fallback if enabled.");
             return null;
-        }
-    }
-
-    // Tool call extraction now handled by AST compiler
-
-    // Tool result formatting and text extraction now handled by AST compiler
-
-    /// <summary>
-    /// Render text content while extracting code blocks from both proper and malformed code fences.
-    /// Supports triple-backtick fences and a common malformed variant: a single-backtick followed by a language token (`csharp ... `).
-    /// </summary>
-    private void RenderTextWithCodeExtraction(string text)
-    {
-        _logger?.LogDebug("RenderTextWithCodeExtraction called with text length: {Length}", text?.Length ?? 0);
-        if (string.IsNullOrEmpty(text)) 
-        {
-            _logger?.LogDebug("RenderTextWithCodeExtraction: text is null or empty, returning");
-            return;
-        }
-
-        var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
-
-        int i = 0;
-        while (i < normalized.Length)
-        {
-            int fenceStart = normalized.IndexOf("```", i, StringComparison.Ordinal);
-            int singleStart = normalized.IndexOf('\n', i) >= 0 ? normalized.IndexOf('\n', i) : int.MaxValue; // anchor for scanning
-
-            // Check for malformed single-backtick language marker at line start
-            int lineStart = i;
-            // Move to start of current line
-            int prevNl = normalized.LastIndexOf('\n', Math.Max(0, i - 1));
-            if (prevNl >= 0) lineStart = prevNl + 1;
-            bool hasSingleLang = false;
-            int singleMarkerIdx = lineStart;
-            string? singleLang = null;
-            if (lineStart < normalized.Length && normalized[lineStart] == '`' && !(lineStart + 2 < normalized.Length && normalized.Substring(lineStart, 3) == "```"))
-            {
-                // Collect language token after single backtick
-                int langEnd = normalized.IndexOf('\n', lineStart + 1);
-                if (langEnd < 0) langEnd = normalized.Length;
-                var langToken = normalized.Substring(lineStart + 1, langEnd - (lineStart + 1)).Trim();
-                if (!string.IsNullOrEmpty(langToken) && langToken.All(c => char.IsLetter(c) || c == '#'))
-                {
-                    hasSingleLang = true;
-                    singleLang = langToken.ToLowerInvariant();
-                    singleMarkerIdx = lineStart;
-                }
-            }
-
-            // If a proper triple fence appears earlier than the current line's single marker, handle that first
-            if (fenceStart >= 0 && (!hasSingleLang || fenceStart < singleMarkerIdx))
-            {
-                // Emit markdown preceding the code block
-                if (fenceStart > i)
-                {
-                    var md = normalized.Substring(i, fenceStart - i);
-                    if (!string.IsNullOrWhiteSpace(md)) RenderMarkdownOrInlineJson(md);
-                }
-                int langEnd = normalized.IndexOf('\n', fenceStart + 3);
-                string? lang = null;
-                int contentStart;
-                if (langEnd > fenceStart + 3)
-                {
-                    lang = normalized.Substring(fenceStart + 3, langEnd - (fenceStart + 3)).Trim();
-                    contentStart = langEnd + 1;
-                }
-                else
-                {
-                    contentStart = fenceStart + 3;
-                }
-                int fenceEnd = normalized.IndexOf("```", contentStart, StringComparison.Ordinal);
-                if (fenceEnd < 0) fenceEnd = normalized.Length;
-                var code = normalized.Substring(contentStart, fenceEnd - contentStart);
-                _feed.AddCode(code, lang);
-                i = Math.Min(normalized.Length, fenceEnd + 3);
-                continue;
-            }
-
-            if (hasSingleLang)
-            {
-                // Emit markdown before the single marker
-                if (singleMarkerIdx > i)
-                {
-                    var md = normalized.Substring(i, singleMarkerIdx - i);
-                    if (!string.IsNullOrWhiteSpace(md)) RenderMarkdownOrInlineJson(md);
-                }
-                // Find end marker: a line that is exactly "`" or end of text
-                int afterMarker = normalized.IndexOf('\n', singleMarkerIdx);
-                if (afterMarker < 0) afterMarker = singleMarkerIdx + 1;
-                int scanPos = afterMarker + 1;
-                int endIdx = normalized.IndexOf('\n', scanPos);
-                int codeEnd = normalized.Length;
-                while (endIdx >= 0)
-                {
-                    // Check if the line is a lone backtick
-                    int lineBegin = endIdx + 1;
-                    // Determine current line content
-                    int nextNl = normalized.IndexOf('\n', lineBegin);
-                    string line = nextNl >= 0 ? normalized.Substring(lineBegin, nextNl - lineBegin) : normalized.Substring(lineBegin);
-                    if (line.Trim() == "`")
-                    {
-                        codeEnd = lineBegin - 1; // end just before this line
-                        // Advance past closing line
-                        i = nextNl >= 0 ? nextNl + 1 : normalized.Length;
-                        break;
-                    }
-                    endIdx = nextNl;
-                }
-                if (endIdx < 0)
-                {
-                    // No explicit closing, take rest as code
-                    i = normalized.Length;
-                }
-                var codeStart = afterMarker + 1;
-                if (codeStart < 0 || codeStart > normalized.Length) codeStart = afterMarker;
-                var codeText = normalized.Substring(codeStart, Math.Max(0, codeEnd - codeStart));
-                _feed.AddCode(codeText, singleLang);
-                continue;
-            }
-
-            // No more code blocks found; emit remaining as markdown
-            var tail = normalized.Substring(i);
-            if (!string.IsNullOrWhiteSpace(tail)) RenderMarkdownOrInlineJson(tail);
-            break;
         }
     }
 
@@ -1539,66 +1294,7 @@ This is a basic C# console application that demonstrates fundamental concepts li
         
         return result;
     }
-    
-    private void RenderMarkdownOrInlineJson(string text)
-    {
-        // Split on lines; render any single-line valid JSON object as a code block with json language
-        var lines = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
-        foreach (var line in lines)
-        {
-            var t = line.Trim();
-            if (t.StartsWith("{") && t.EndsWith("}"))
-            {
-                try
-                {
-                    using var _ = System.Text.Json.JsonDocument.Parse(t);
-                    _feed.AddCode(t, "json");
-                    continue;
-                }
-                catch
-                {
-                    // fall through to markdown
-                }
-            }
-            if (!string.IsNullOrEmpty(line))
-                _feed.AddMarkdownRich(line);
-            else
-                _feed.AddMarkdownRich("");
-        }
-    }
 
-    /// <summary>
-    /// Update the system prompt
-    /// </summary>
-    public void UpdateSystemPrompt(string prompt)
-    {
-        _contextManager.UpdateSystemPrompt(prompt);
-    }
-
-    /// <summary>
-    /// Set the current model and provider for response interpretation
-    /// </summary>
-    public void SetModelInfo(string modelName, string providerName)
-    {
-        _currentModel = modelName ?? "";
-        _currentProvider = providerName ?? "";
-        _compiler = new LlmResponseCompiler(NormalizeProviderName(_currentProvider, _currentModel), _jsonRepair, null);
-    }
-
-    private string NormalizeProviderName(string providerName, string modelName)
-    {
-        var pn = providerName?.ToLowerInvariant() ?? "";
-        var mn = modelName?.ToLowerInvariant() ?? "";
-        // If model name indicates qwen, force provider to qwen for parsing behavior
-        if (mn.Contains("qwen")) return "qwen";
-        if (pn.Contains("openai")) return "openai";
-        if (pn.Contains("anthropic")) return "anthropic";
-        if (pn.Contains("google") || pn.Contains("gemini")) return "gemini";
-        if (pn.Contains("mistral")) return "mistral";
-        if (pn.Contains("meta") || mn.Contains("llama") || mn.Contains("lama")) return "llama";
-        return pn;
-    }
-    
     /// <summary>
     /// Convert tool parameters to JSON Schema format
     /// </summary>
@@ -1770,26 +1466,13 @@ This is a basic C# console application that demonstrates fundamental concepts li
         return json?.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = false }) ??
                System.Text.Json.JsonSerializer.Serialize(data);
     }
-
-    // Removed raw execution shim; using ExecuteToolAsync with ParameterMapper ensures compatibility across tools
-
+    
     /// <summary>
     /// Clear the conversation context
     /// </summary>
     public void ClearContext()
     {
         _contextManager.Clear();
-    }
-
-    /// <summary>
-    /// Generate diagnostic summary if available
-    /// </summary>
-    public async Task GenerateDiagnosticSummaryAsync()
-    {
-        if (_diagnostic != null)
-        {
-            await _diagnostic.GenerateSummaryReport();
-        }
     }
 
     /// <summary>
@@ -1800,19 +1483,6 @@ This is a basic C# console application that demonstrates fundamental concepts li
         return _contextManager.GetStats();
     }
 
-    /// <summary>
-    /// Sanitizes assistant text for display by handling escaping, unwanted characters, and hiding internal tool mentions
-    /// </summary>
-
-    /// <summary>
-    /// Internal tool call representation
-    /// </summary>
-    private class ToolCall
-    {
-        public string ToolId { get; set; } = "";
-        public Dictionary<string, object?> Parameters { get; set; } = new();
-    }
-    
     public void Dispose()
     {
         _contentPipeline?.Dispose();

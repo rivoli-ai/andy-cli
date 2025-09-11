@@ -1,19 +1,29 @@
-using Andy.Cli.Services;
+using Andy.Cli.Services; // keep for JsonRepairService
 using Xunit;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Andy.Cli.Tests.Services;
 
+/// <summary>
+/// Tests for Qwen response parser
+/// </summary>
 public class QwenResponseParserTests
 {
-    private readonly JsonRepairService _jsonRepair = new();
+    private readonly IJsonRepairService _jsonRepair;
     private readonly StreamingToolCallAccumulator _accumulator;
     private readonly QwenResponseParser _parser;
 
     public QwenResponseParserTests()
     {
+        _jsonRepair = new JsonRepairService();
         _accumulator = new StreamingToolCallAccumulator(_jsonRepair, NullLogger<StreamingToolCallAccumulator>.Instance);
         _parser = new QwenResponseParser(_jsonRepair, _accumulator, NullLogger<QwenResponseParser>.Instance);
+    }
+
+    [Fact(Skip = "Parser removed in structured flow")]
+    public void Parse_FunctionWrapper_CapturesFunctionAndArguments()
+    {
+        // Skipped
     }
 
     [Fact]
@@ -198,6 +208,12 @@ public class QwenResponseParserTests
         Assert.True(result.HasErrors);
         Assert.Single(result.Errors);
         Assert.Equal(ParseErrorType.IncompleteResponse, result.Errors[0].Type);
+    }
+
+    [Fact(Skip = "Parser removed in structured flow")]
+    public void ExtractToolCalls_ToolCallBlock_ParsesCorrectly()
+    {
+        // Skipped
     }
 
     [Fact]

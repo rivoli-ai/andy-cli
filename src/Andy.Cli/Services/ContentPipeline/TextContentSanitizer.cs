@@ -10,7 +10,7 @@ namespace Andy.Cli.Services.ContentPipeline;
 public class TextContentSanitizer : IContentSanitizer
 {
     // Redact internal tool disclosures
-    private static readonly Regex ToolJsonPattern = new(@"\{[^}]*""(?:tool|function|tool_call)""[^}]*\}", RegexOptions.Singleline | RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex ToolJsonPattern = new(@"\{[^}]*\""(?:tool|function|tool_call)\""[^}]*\}", RegexOptions.Singleline | RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly Regex ToolMentionPattern = new(@"(?i)\b(tool call|using (?:a|the) tool|call(?:ing)? a tool|invoke|invoking|function call|list_directory|read_file|bash_command|create_directory|codeindex)\b", RegexOptions.Compiled);
     private static readonly Regex EmptyJsonPattern = new(@"`json\s*\n\s*`", RegexOptions.Multiline | RegexOptions.Compiled);
     private static readonly Regex EmptyTripleJsonPattern = new(@"```json\s*\n\s*```", RegexOptions.Multiline | RegexOptions.Compiled);
@@ -71,11 +71,21 @@ public class TextContentSanitizer : IContentSanitizer
         if (string.IsNullOrEmpty(content)) return content;
         // Remove inline tool JSON objects
         var redacted = ToolJsonPattern.Replace(content, "");
-        // Drop any line that explicitly mentions tools
+        // Drop any line that explicitly mentions tools, except clear error notifications
         var lines = redacted.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
         var kept = new List<string>(lines.Length);
         foreach (var line in lines)
         {
+            var trimmed = line.TrimStart();
+            // Preserve explicit error lines for tool failures
+            if (trimmed.StartsWith("**Tool execution error:**", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.StartsWith("Tool execution failed:", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.StartsWith("Error executing tool:", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.StartsWith("Tool '", StringComparison.OrdinalIgnoreCase))
+            {
+                kept.Add(line);
+                continue;
+            }
             if (!ToolMentionPattern.IsMatch(line)) kept.Add(line);
         }
         return string.Join("\n", kept);

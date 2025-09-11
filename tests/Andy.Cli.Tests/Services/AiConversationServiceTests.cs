@@ -154,3 +154,82 @@ public class ToolExecutionResult : ToolResult
     public string? FullOutput { get; set; }
     public bool TruncatedForDisplay { get; set; }
 }
+
+public class AiConversationServiceTests_Summary
+{
+    [Fact]
+    public async Task WhatsInRepo_ShouldReturnSensibleText_NotBareBrace()
+    {
+        // Arrange
+        var feed = new FeedView();
+        var toolRegistry = new Mock<IToolRegistry>();
+        var toolExecutor = new Mock<IToolExecutor>();
+        var llmClient = new Mock<LlmClient>("test-key");
+        var jsonRepair = new JsonRepairService();
+
+        // Register minimal tools definitions (ids only)
+        toolRegistry.Setup(x => x.GetTools(It.IsAny<bool>())).Returns(new List<ToolRegistration>());
+        toolRegistry.Setup(x => x.GetTool(It.IsAny<string>())).Returns<string>(id => new ToolRegistration
+        {
+            Metadata = new ToolMetadata { Id = id, Name = id, Description = id, Category = "Test", Parameters = new List<ToolParameter>() }
+        });
+
+        // LLM replies with text plus a tool call JSON (to simulate behavior)
+        llmClient
+            .Setup(x => x.CompleteAsync(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LlmResponse { Content = "I'll list files and then summarize." });
+
+        // Streaming returns a tool call (list_directory) followed by completion
+        var chunks = GetChunks(new[]
+        {
+            new StreamChunk { TextDelta = "I'll list files and then summarize. ", IsComplete = false },
+            new StreamChunk { FunctionCall = new FunctionCall { Id = "call_1", Name = "list_directory", Arguments = new Dictionary<string, object?>{ {"path","."} } } },
+            new StreamChunk { IsComplete = true }
+        });
+        llmClient
+            .Setup(x => x.StreamCompleteAsync(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(chunks);
+
+        // Tool executor returns compact JSON data
+        toolExecutor
+            .Setup(x => x.ExecuteAsync("list_directory", It.IsAny<Dictionary<string, object?>>(), It.IsAny<ToolExecutionContext>()))
+            .ReturnsAsync(new Andy.Tools.Core.ToolExecutionResult
+            {
+                IsSuccessful = true,
+                Data = new { items = new[] { new { name = "README.md", type = "file" }, new { name = "src", type = "directory" } } }
+            });
+
+        var svc = new AiConversationService(
+            llmClient.Object,
+            toolRegistry.Object,
+            toolExecutor.Object,
+            feed,
+            new SystemPromptService().BuildSystemPrompt(new List<ToolRegistration>()),
+            jsonRepair,
+            NullLogger<AiConversationService>.Instance,
+            "llama-3.3-70b",
+            "cerebras");
+
+        // Act
+        var res = await svc.ProcessMessageAsync("what's in the current repo?", enableStreaming: true, CancellationToken.None);
+
+        // Assert
+        Assert.False(string.IsNullOrWhiteSpace(res));
+        Assert.NotEqual("}", res.Trim());
+    }
+
+    private static async IAsyncEnumerable<string> GetEmpty()
+    {
+        yield break;
+        await Task.CompletedTask;
+    }
+
+    private static async IAsyncEnumerable<StreamChunk> GetChunks(IEnumerable<StreamChunk> seq)
+    {
+        foreach (var c in seq)
+        {
+            yield return c;
+            await Task.Yield();
+        }
+    }
+}
