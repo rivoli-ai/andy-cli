@@ -252,6 +252,10 @@ public class AiConversationService : IDisposable
             var elapsed = DateTime.UtcNow - startTime;
             _tracer?.TraceLlmResponse(response, elapsed);
             
+            _logger?.LogInformation("[LLM RESPONSE] Iteration {Iteration}: Content length={Length}, Content preview: '{Preview}'",
+                iteration, response?.Content?.Length ?? 0, 
+                response?.Content?.Length > 100 ? response.Content.Substring(0, 100) + "..." : response?.Content ?? "(null)");
+            
             // LOG TO FILE - Response
             var responseLog = $"\n========== RESPONSE in {elapsed.TotalSeconds:F2}s ==========\n";
             responseLog += $"Content Length: {response?.Content?.Length ?? 0}\n";
@@ -357,7 +361,11 @@ public class AiConversationService : IDisposable
 
                 // Add assistant message with tool calls to context
                 // This is critical - the assistant message must include tool_calls
-                _contextManager.AddAssistantMessage(renderResult.TextContent ?? "", contextToolCalls);
+                // If there's no text content, use a placeholder that indicates tool execution
+                var assistantText = !string.IsNullOrWhiteSpace(renderResult.TextContent) 
+                    ? renderResult.TextContent 
+                    : "(Executing tools...)";
+                _contextManager.AddAssistantMessage(assistantText, contextToolCalls);
 
                 // Execute tools and collect results
                 var toolResults = new List<string>();
@@ -480,6 +488,7 @@ public class AiConversationService : IDisposable
                     consecutiveToolOnlyIterations = 0; // Reset counter if we displayed content
                 }
                 
+                _logger?.LogInformation("[TOOL PATH] Continuing to iteration {Next} after tool execution", iteration + 1);
                 continue; // Continue to next iteration, don't process as regular text
             }
             else
@@ -487,8 +496,8 @@ public class AiConversationService : IDisposable
                 // Regular text response - rendered content without tool calls
                 var content = renderResult.TextContent ?? "";
                 
-                _logger?.LogInformation("[TEXT RESPONSE PATH] Iteration {Iteration}, Content preview: '{Preview}'", 
-                    iteration, content.Length > 100 ? content.Substring(0, 100) + "..." : content);
+                _logger?.LogInformation("[TEXT RESPONSE PATH] Iteration {Iteration}, Content length: {Length}, Preview: '{Preview}'", 
+                    iteration, content.Length, content.Length > 100 ? content.Substring(0, 100) + "..." : content);
 
                 // Check if the response looks like a raw tool execution result (escaped JSON)
                 if (content.StartsWith("\"\\\"[Tool Execution:") || content.StartsWith("\"[Tool Execution:"))
@@ -553,7 +562,10 @@ public class AiConversationService : IDisposable
                             });
                         }
 
-                        _contextManager.AddAssistantMessage(renderResult.TextContent ?? string.Empty, contextToolCalls);
+                        var assistantTextFallback = !string.IsNullOrWhiteSpace(renderResult.TextContent) 
+                            ? renderResult.TextContent 
+                            : "(Executing tools...)";
+                        _contextManager.AddAssistantMessage(assistantTextFallback, contextToolCalls);
 
                         for (int i = 0; i < fallbackCalls.Count; i++)
                         {
@@ -621,11 +633,12 @@ public class AiConversationService : IDisposable
                     // Check if content is empty
                     if (string.IsNullOrWhiteSpace(content))
                     {
-                        _logger?.LogWarning("[EMPTY CONTENT] Received empty text response in iteration {Iteration}", iteration);
+                        _logger?.LogWarning("[EMPTY CONTENT] Received empty text response in iteration {Iteration}, raw response length: {RawLength}", 
+                            iteration, response.Content?.Length ?? 0);
                         // Try to use the raw response content if render result is empty
                         content = response.Content ?? "";
-                        _logger?.LogInformation("[USING RAW CONTENT] Fallback to raw response: '{Preview}'",
-                            content.Length > 100 ? content.Substring(0, 100) + "..." : content);
+                        _logger?.LogInformation("[USING RAW CONTENT] Fallback to raw response, length: {Length}, preview: '{Preview}'",
+                            content.Length, content.Length > 100 ? content.Substring(0, 100) + "..." : content);
                     }
                     
                     finalResponse.AppendLine(content);
@@ -649,7 +662,7 @@ public class AiConversationService : IDisposable
                     consecutiveToolOnlyIterations = 0; // Reset counter when we display content
                 }
 
-                _logger?.LogInformation("[CONVERSATION] Breaking from loop - no tool calls detected");
+                _logger?.LogInformation("[CONVERSATION] Breaking from loop - no tool calls detected, displayed={HasDisplayed}", hasDisplayedContent);
                 break; // No more tool calls, we're done
             }
         }
