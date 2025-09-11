@@ -318,10 +318,34 @@ public class AiConversationService : IDisposable
             // Render the AST for display and tool extraction
             var renderResult = _renderer.RenderForStreaming(compilationResult.Ast);
             
-            _logger?.LogInformation("[RENDER RESULT] Iteration {Iteration}: ToolCalls={ToolCount}, TextContent length={TextLength}, TextPreview='{Preview}'",
+            // CRITICAL FIX: Check if raw response contains both tool JSON and additional text
+            // This happens when LLM responds with: {"tool":"..."} followed by explanatory text
+            var rawContent = response.Content ?? "";
+            string? additionalText = null;
+            
+            if (renderResult.ToolCalls.Any() && rawContent.Length > 0)
+            {
+                // Try to find text after the tool call JSON
+                var toolJsonPattern = @"\{[^}]*""tool""\s*:\s*""[^""]+""[^}]*\}";
+                var match = System.Text.RegularExpressions.Regex.Match(rawContent, toolJsonPattern);
+                if (match.Success)
+                {
+                    // Get text after the JSON
+                    var afterJson = rawContent.Substring(match.Index + match.Length).Trim();
+                    if (!string.IsNullOrWhiteSpace(afterJson))
+                    {
+                        additionalText = afterJson;
+                        _logger?.LogInformation("[MIXED RESPONSE] Found text after tool call: '{Text}'", 
+                            afterJson.Length > 100 ? afterJson.Substring(0, 100) + "..." : afterJson);
+                    }
+                }
+            }
+            
+            _logger?.LogInformation("[RENDER RESULT] Iteration {Iteration}: ToolCalls={ToolCount}, TextContent length={TextLength}, AdditionalText length={AddLen}, TextPreview='{Preview}'",
                 iteration,
                 renderResult.ToolCalls.Count,
                 renderResult.TextContent?.Length ?? 0,
+                additionalText?.Length ?? 0,
                 renderResult.TextContent?.Length > 100 ? renderResult.TextContent.Substring(0, 100) + "..." : renderResult.TextContent ?? "(null)");
 
             if (renderResult.ToolCalls.Any())
@@ -331,15 +355,25 @@ public class AiConversationService : IDisposable
                 
                 // If there's text content along with tool calls, display it
                 // This handles cases where the LLM explains what it's about to do
-                if (!string.IsNullOrWhiteSpace(renderResult.TextContent))
+                var textToDisplay = additionalText ?? renderResult.TextContent;
+                if (!string.IsNullOrWhiteSpace(textToDisplay))
                 {
-                    var textWithoutTools = ExtractNonToolText(renderResult.TextContent);
+                    var textWithoutTools = ExtractNonToolText(textToDisplay);
                     if (!string.IsNullOrWhiteSpace(textWithoutTools))
                     {
-                        _logger?.LogInformation("[TOOL WITH TEXT] Displaying text before tool execution: '{Preview}'",
+                        _logger?.LogInformation("[TOOL WITH TEXT] Displaying text with tool execution: '{Preview}'",
                             textWithoutTools.Length > 100 ? textWithoutTools.Substring(0, 100) + "..." : textWithoutTools);
                         _contentPipeline.AddRawContent(textWithoutTools);
                         finalResponse.AppendLine(textWithoutTools);
+                        hasDisplayedContent = true;
+                    }
+                    else if (!string.IsNullOrWhiteSpace(additionalText))
+                    {
+                        // If ExtractNonToolText removed everything but we have additional text, use it directly
+                        _logger?.LogInformation("[TOOL WITH TEXT FALLBACK] Using additional text directly: '{Preview}'",
+                            additionalText.Length > 100 ? additionalText.Substring(0, 100) + "..." : additionalText);
+                        _contentPipeline.AddRawContent(additionalText);
+                        finalResponse.AppendLine(additionalText);
                         hasDisplayedContent = true;
                     }
                 }
