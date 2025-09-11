@@ -231,7 +231,7 @@ public class AiConversationService : IDisposable
                     Model = request.Model,
                     Temperature = request.Temperature,
                     MaxTokens = request.MaxTokens,
-                    SystemPrompt = request.SystemPrompt?.Substring(0, Math.Min(200, request.SystemPrompt?.Length ?? 0)) + (request.SystemPrompt?.Length > 200 ? "..." : "")
+                    SystemPrompt = request.SystemPrompt?.Substring(0, Math.Min(2000, request.SystemPrompt?.Length ?? 0)) + (request.SystemPrompt?.Length > 2000 ? "..." : "")
                 };
                 
                 var requestJson = System.Text.Json.JsonSerializer.Serialize(requestObj, new System.Text.Json.JsonSerializerOptions 
