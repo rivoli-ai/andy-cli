@@ -78,6 +78,7 @@ public class ToolHandler
                     }
                 };
                 toolResults.Add(errorResult);
+                ErrorPolicy.RethrowIfStrict(ex);
             }
         }
 

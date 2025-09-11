@@ -105,6 +105,11 @@ public class QwenResponseParser : IQwenResponseParser
         @"(\{[\s\S]*?""(?:tool_call|name|tool|function)""[\s\S]*?\})",
         RegexOptions.Singleline | RegexOptions.Compiled);
 
+    // New: helper to normalize unquoted keys common in tool call JSON
+    private static readonly Regex UnquotedKeyPattern = new(
+        @"(^|[\{\[,]\s*)(name|tool|function|parameters|arguments)\s*:",
+        RegexOptions.Multiline | RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     // New: explicit tool_call object matcher (multiple occurrences)
     private static readonly Regex ToolCallObjectPattern = new(
         @"\{\s*""tool_call""\s*:\s*\{[\s\S]*?\}\s*\}",
@@ -295,6 +300,9 @@ public class QwenResponseParser : IQwenResponseParser
         var toolCalls = new List<ModelToolCall>();
         var seenCalls = new HashSet<string>(); // Track unique tool calls to avoid duplicates
 
+        // Pre-normalize to quote common unquoted keys so regex detection works on JSON-ish blobs
+        string normalized = NormalizeUnquotedKeys(response);
+
         // 1. Try to extract from <tool_call> tags (Qwen's preferred format)
         var toolCallMatches = ToolCallTagPattern.Matches(response);
         foreach (Match match in toolCallMatches)
@@ -342,7 +350,7 @@ public class QwenResponseParser : IQwenResponseParser
         if (!toolCalls.Any())
         {
             // First, match explicit tool_call objects (most reliable and may appear multiple times)
-            var toolCallObjects = ToolCallObjectPattern.Matches(response);
+            var toolCallObjects = ToolCallObjectPattern.Matches(normalized);
             foreach (Match m in toolCallObjects)
             {
                 var toolCall = ParseToolCallJson(m.Value);
@@ -356,10 +364,10 @@ public class QwenResponseParser : IQwenResponseParser
                 }
             }
 
-            var directJsonMatches = DirectJsonPattern.Matches(response);
+            var directJsonMatches = DirectJsonPattern.Matches(normalized);
 
             // Special handling for Qwen's strange format with stray colon between objects and stray braces
-            var cleanedResponse = Regex.Replace(response, @"}\s*:\s*\{", "}{"); // Fix patterns like "}:\n{"
+            var cleanedResponse = Regex.Replace(normalized, @"}\s*:\s*\{", "}{"); // Fix patterns like "}:\n{"
             cleanedResponse = cleanedResponse.Replace("}\n{", "}{"); // Fix separated JSON objects
             cleanedResponse = Regex.Replace(cleanedResponse, @"^\s*}\s*$", "", RegexOptions.Multiline); // Remove standalone closing braces
 
@@ -419,33 +427,10 @@ public class QwenResponseParser : IQwenResponseParser
             int guard = 0;
             while (guard++ < 10)
             {
-                var json = remaining.ExtractToolCallJson();
-                if (string.IsNullOrWhiteSpace(json)) break;
-                if (json.IndexOf("tool_call", StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    // Already accounted for; remove and continue
-                    var rmIdx = remaining.IndexOf(json, StringComparison.Ordinal);
-                    remaining = rmIdx >= 0 ? remaining.Remove(rmIdx, json.Length) : remaining;
-                    continue;
-                }
-                var toolCall = ParseToolCallJson(json);
-                if (toolCall != null)
-                {
-                    var callKey = $"{toolCall.ToolId}:{CreateCanonicalParamsKey(toolCall.Parameters)}";
-                    if (seenCalls.Add(callKey))
-                    {
-                        toolCalls.Add(toolCall);
-                    }
-                }
-                var idx = remaining.IndexOf(json, StringComparison.Ordinal);
-                if (idx >= 0)
-                {
-                    remaining = remaining.Remove(idx, json.Length);
-                }
-                else
-                {
+                var json = RemoveJsonObjectsByKey(remaining, "tool_call");
+                if (json == remaining)
                     break;
-                }
+                remaining = json;
             }
         }
 
@@ -643,8 +628,11 @@ public class QwenResponseParser : IQwenResponseParser
     {
         var toolCalls = new List<ModelToolCall>();
 
+        // Normalize unquoted keys to improve detection in streaming chunks
+        var normalizedChunk = NormalizeUnquotedKeys(chunk);
+
         // Check for inline JSON patterns
-        var matches = DirectJsonPattern.Matches(chunk);
+        var matches = DirectJsonPattern.Matches(normalizedChunk);
         foreach (Match match in matches)
         {
             var toolCall = ParseToolCallJson(match.Groups[1].Value);
@@ -808,5 +796,23 @@ public class QwenResponseParser : IQwenResponseParser
             current = current.Remove(idx, toRemove.Length);
         }
         return current;
+    }
+
+    private static string NormalizeUnquotedKeys(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return text;
+        try
+        {
+            return UnquotedKeyPattern.Replace(text, m =>
+            {
+                var prefix = m.Groups[1].Value;
+                var key = m.Groups[2].Value;
+                return prefix + "\"" + key + "\":";
+            });
+        }
+        catch
+        {
+            return text;
+        }
     }
 }

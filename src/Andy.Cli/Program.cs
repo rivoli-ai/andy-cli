@@ -149,19 +149,14 @@ class Program
                 options.DefaultProvider = "cerebras"; // Use Cerebras as default
             });
 
-            // Register new Qwen parsing components
+            // JSON repair still available if needed elsewhere
             services.AddSingleton<IJsonRepairService, JsonRepairService>();
-            // JSON repair service for malformed responses
-            services.AddSingleton<IJsonRepairService, JsonRepairService>();
-
-            // Legacy parsers (kept for backward compatibility)
-            services.AddSingleton<StreamingToolCallAccumulator>();
-            services.AddSingleton<IQwenResponseParser, SimpleQwenParser>();
-            services.AddSingleton<IToolCallValidator, ToolCallValidator>();
-
-            // AST-based parser components (new architecture)
-            services.AddTransient<Andy.Cli.Parsing.Compiler.LlmResponseCompiler>();
-            services.AddTransient<Andy.Cli.Parsing.Rendering.AstRenderer>();
+            // Remove custom parsers/renderers; rely on andy-llm structured outputs
+            // services.AddSingleton<StreamingToolCallAccumulator>();
+            // services.AddSingleton<IQwenResponseParser, SimpleQwenParser>();
+            // services.AddSingleton<IToolCallValidator, ToolCallValidator>();
+            // services.AddTransient<Andy.Cli.Parsing.Compiler.LlmResponseCompiler>();
+            // services.AddTransient<Andy.Cli.Parsing.Rendering.AstRenderer>();
 
             // Configure Tool services - manually register to avoid HostedService requirement
             // Core services from AddAndyTools
@@ -226,6 +221,11 @@ class Program
             AiConversationService? aiService = null;
 
             // Build comprehensive system prompt
+            if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ANDY_STRICT_ERRORS")))
+            {
+                Environment.SetEnvironmentVariable("ANDY_STRICT_ERRORS", "1");
+            }
+
             var systemPromptService = new SystemPromptService();
             var availableTools = toolRegistry.GetTools(enabledOnly: true);
             var currentModel = modelCommand.GetCurrentModel();
@@ -1243,19 +1243,14 @@ class Program
             options.DefaultProvider = "cerebras";
         });
 
-        // Register new Qwen parsing components
+        // JSON repair still available if needed elsewhere
         services.AddSingleton<IJsonRepairService, JsonRepairService>();
-        // JSON repair service for malformed responses
-        services.AddSingleton<IJsonRepairService, JsonRepairService>();
-
-        // Legacy parsers (kept for backward compatibility)
-        services.AddSingleton<StreamingToolCallAccumulator>();
-        services.AddSingleton<IQwenResponseParser, SimpleQwenParser>();
-        services.AddSingleton<IToolCallValidator, ToolCallValidator>();
-
-        // AST-based parser components (new architecture)
-        services.AddTransient<Andy.Cli.Parsing.Compiler.LlmResponseCompiler>();
-        services.AddTransient<Andy.Cli.Parsing.Rendering.AstRenderer>();
+        // Remove custom parsers/renderers; rely on andy-llm structured outputs
+        // services.AddSingleton<StreamingToolCallAccumulator>();
+        // services.AddSingleton<IQwenResponseParser, SimpleQwenParser>();
+        // services.AddSingleton<IToolCallValidator, ToolCallValidator>();
+        // services.AddTransient<Andy.Cli.Parsing.Compiler.LlmResponseCompiler>();
+        // services.AddTransient<Andy.Cli.Parsing.Rendering.AstRenderer>();
 
         // Configure Tool services - manually register to avoid HostedService requirement
         // Core services from AddAndyTools

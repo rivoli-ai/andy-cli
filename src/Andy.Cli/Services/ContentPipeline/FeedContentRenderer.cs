@@ -44,6 +44,7 @@ public class FeedContentRenderer : IContentRenderer
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Error rendering block {BlockId}", block.Id);
+            ErrorPolicy.RethrowIfStrict(ex);
         }
     }
 

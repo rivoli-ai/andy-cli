@@ -39,7 +39,8 @@ public class AiConversationService : IDisposable
     private readonly IJsonRepairService _jsonRepair;
     private readonly ConversationTracer? _tracer;
     private readonly CumulativeOutputTracker _outputTracker = new();
-    private readonly ContentPipeline.ContentPipeline _contentPipeline;
+    private readonly List<FunctionCall> _pendingFunctionCalls = new();
+    private ContentPipeline.ContentPipeline _contentPipeline;
     private string _currentModel = "";
     private string _currentProvider = "";
     // Note: Avoid writing partial streaming chunks to the feed to prevent broken/partial lines
@@ -138,6 +139,14 @@ public class AiConversationService : IDisposable
         bool enableStreaming,
         CancellationToken cancellationToken = default)
     {
+        // Prefer streaming when tools might be used so we can consume structured FunctionCall items
+        var useStreaming = enableStreaming || !IsSimpleGreeting(userMessage);
+        // Recreate content pipeline for this request to avoid finalized state carrying over
+        _contentPipeline?.Dispose();
+        var processor = new ContentPipeline.MarkdownContentProcessor();
+        var sanitizer = new ContentPipeline.TextContentSanitizer();
+        var renderer = new ContentPipeline.FeedContentRenderer(_feed, _logger as ILogger<ContentPipeline.FeedContentRenderer>);
+        _contentPipeline = new ContentPipeline.ContentPipeline(processor, sanitizer, renderer, _logger as ILogger<ContentPipeline.ContentPipeline>);
         // Trace user message
         _tracer?.TraceUserMessage(userMessage);
         
@@ -257,7 +266,7 @@ public class AiConversationService : IDisposable
             }
             File.AppendAllText(logFile, requestLog);
             
-            var response = enableStreaming
+            var response = useStreaming
                 ? await GetLlmStreamingResponseAsync(request, cancellationToken)
                 : await GetLlmResponseAsync(request, cancellationToken);
             
@@ -288,7 +297,83 @@ public class AiConversationService : IDisposable
                 break;
             }
 
-            // Parse the response using the AST compiler
+            // If streaming provided structured function calls, handle them directly without custom parsing
+            if (useStreaming && _pendingFunctionCalls.Any())
+            {
+                _logger?.LogInformation("[STRUCTURED CALLS] Handling {Count} function calls from streaming", _pendingFunctionCalls.Count);
+
+                // Generate call IDs for each and add as assistant tool_calls
+                var contextToolCalls = new List<ContextToolCall>();
+                var callIdMap = new Dictionary<int, string>();
+                for (int i = 0; i < _pendingFunctionCalls.Count; i++)
+                {
+                    var fc = _pendingFunctionCalls[i];
+                    var generatedCallId = string.IsNullOrWhiteSpace(fc.Id) ? ("call_" + Guid.NewGuid().ToString("N")) : fc.Id;
+                    callIdMap[i] = generatedCallId;
+                    contextToolCalls.Add(new ContextToolCall
+                    {
+                        CallId = generatedCallId,
+                        ToolId = fc.Name,
+                        Parameters = fc.Arguments ?? new Dictionary<string, object?>()
+                    });
+                }
+
+                var assistantText = !string.IsNullOrWhiteSpace(response?.Content) ? response!.Content! : "(Executing tools...)";
+                _contextManager.AddAssistantMessage(assistantText, contextToolCalls);
+
+                // Execute tools
+                var toolResults = new List<string>();
+                for (int i = 0; i < _pendingFunctionCalls.Count; i++)
+                {
+                    var fc = _pendingFunctionCalls[i];
+                    var thisCallId = callIdMap[i];
+
+                    var toolId = fc.Name;
+                    var parameters = fc.Arguments ?? new Dictionary<string, object?>();
+
+                    var execResult = await _toolService.ExecuteToolAsync(toolId, parameters, cancellationToken);
+
+                    string outputStr;
+                    if (execResult.Data != null)
+                    {
+                        try
+                        {
+                            int maxChars = toolId == "list_directory" ? 5000 : 2000;
+                            outputStr = SerializeToolDataWithTruncation(execResult.Data, toolId, maxChars);
+                        }
+                        catch
+                        {
+                            outputStr = execResult.Data.ToString() ?? execResult.Message ?? execResult.ErrorMessage ?? "No output";
+                        }
+                    }
+                    else if (!string.IsNullOrEmpty(execResult.FullOutput))
+                    {
+                        outputStr = execResult.FullOutput!;
+                    }
+                    else
+                    {
+                        outputStr = execResult.Message ?? execResult.ErrorMessage ?? "No output";
+                    }
+
+                    var baseLimit = ToolOutputLimits.GetLimit(toolId);
+                    var adjustedLimit = _outputTracker.GetAdjustedLimit(toolId, baseLimit);
+                    var limitedOutput = ToolOutputLimits.LimitOutput(toolId, outputStr, adjustedLimit);
+                    _outputTracker.RecordOutput(toolId, limitedOutput.Length);
+
+                    _contextManager.AddToolExecution(toolId, thisCallId, parameters, limitedOutput);
+                    toolResults.Add(outputStr);
+                    allToolResults.Add((toolId, limitedOutput));
+                }
+
+                // Prepare for next iteration
+                _pendingFunctionCalls.Clear();
+                request = _contextManager.GetContext().CreateRequest(_currentModel);
+                request = FixEmptyMessageParts(request);
+                _logger?.LogInformation("[STRUCTURED CALLS] Continuing to next iteration after tool execution");
+                continue;
+            }
+
+            // Parse the response using the AST compiler (fallback path only)
             var compilerOptions = new CompilerOptions
             {
                 ModelProvider = NormalizeProviderName(_currentProvider, _currentModel),
@@ -713,10 +798,10 @@ public class AiConversationService : IDisposable
                                 limitedOutput);
                         }
 
-                        // We executed fallback tool calls; stop loop like normal text path
+                        // We executed fallback tool calls; continue to next iteration to get model's summary
                         request = _contextManager.GetContext().CreateRequest(_currentModel);
                         request = FixEmptyMessageParts(request);
-                        break;
+                        continue;
                     }
 
                     // Check if content is empty or seems incomplete
@@ -1053,8 +1138,36 @@ This is a basic C# console application that demonstrates fundamental concepts li
         for (int i = 0; i < request.Messages.Count; i++)
         {
             var message = request.Messages[i];
+
+            // Never mutate Tool messages into TextParts; ensure they carry ToolResponsePart
+            if (message.Role == Andy.Llm.Models.MessageRole.Tool)
+            {
+                var hasToolResponse = message.Parts != null && message.Parts.Any(p => p is ToolResponsePart);
+                if (!hasToolResponse)
+                {
+                    File.AppendAllText(debugLog, $"Message {i} (Tool) missing ToolResponsePart - attempting reconstruction from history\n");
+                    // Find the most recent matching tool history entry
+                    var toolEntry = history.LastOrDefault(h => h.Role == Andy.Cli.Services.MessageRole.Tool);
+                    if (toolEntry != null)
+                    {
+                        var responseText = toolEntry.ToolResult ?? toolEntry.Content;
+                        message.Parts = new List<MessagePart>
+                        {
+                            new ToolResponsePart
+                            {
+                                ToolName = toolEntry.ToolId ?? "tool",
+                                CallId = toolEntry.ToolCallId ?? ("call_" + Guid.NewGuid().ToString("N")),
+                                Response = responseText
+                            }
+                        };
+                        File.AppendAllText(debugLog, $"Reconstructed ToolResponsePart for message {i} from history (tool={toolEntry.ToolId}, callId={toolEntry.ToolCallId})\n");
+                    }
+                }
+                // Skip further fixing for Tool messages
+                continue;
+            }
             
-            // Check if Parts needs fixing
+            // For non-tool messages, check if Parts needs fixing
             bool needsFix = false;
             if (message.Parts == null || message.Parts.Count == 0)
             {
@@ -1062,33 +1175,40 @@ This is a basic C# console application that demonstrates fundamental concepts li
             }
             else
             {
-                // Check if all parts are null or empty
-                var hasValidContent = false;
+                // Consider ToolCallPart/ToolResponsePart inherently valid; for TextPart ensure non-empty
+                bool hasValidContent = false;
                 foreach (var part in message.Parts)
                 {
-                    if (part != null)
+                    switch (part)
                     {
-                        // Check if it's an empty object (serialized as {})
-                        var partType = part.GetType();
-                        if (part is TextPart textPart)
-                        {
+                        case TextPart textPart:
                             if (!string.IsNullOrEmpty(textPart.Text))
-                            {
                                 hasValidContent = true;
-                                break;
-                            }
-                        }
-                        else
-                        {
-                            // Check if the part has any actual content
-                            var json = System.Text.Json.JsonSerializer.Serialize(part);
-                            if (json != "{}" && json != "null")
+                            break;
+                        case ToolCallPart:
+                            hasValidContent = true;
+                            break;
+                        case ToolResponsePart trp:
                             {
-                                hasValidContent = true;
-                                break;
+                                bool responseHasContent = false;
+                                if (trp.Response is string sResp)
+                                {
+                                    responseHasContent = !string.IsNullOrWhiteSpace(sResp);
+                                }
+                                else if (trp.Response != null)
+                                {
+                                    responseHasContent = true;
+                                }
+                                if (responseHasContent) hasValidContent = true;
                             }
-                        }
+                            break;
+                        default:
+                            // Be conservative: treat unknown non-null parts as valid
+                            if (part != null)
+                                hasValidContent = true;
+                            break;
                     }
+                    if (hasValidContent) break;
                 }
                 needsFix = !hasValidContent;
             }
@@ -1097,40 +1217,35 @@ This is a basic C# console application that demonstrates fundamental concepts li
             {
                 File.AppendAllText(debugLog, $"Message {i} ({message.Role}) needs fixing - Parts are empty or invalid\n");
                 
-                // Find corresponding history entry
+                // Find corresponding history entry more robustly
                 ContextEntry? matchingEntry = null;
-                
-                // Try to match by index first (assuming messages and history are in same order)
+                // Try index match first
                 if (i < history.Count)
                 {
                     var candidate = history[i];
-                    // Verify role matches
-                    if (candidate.Role.ToString().Equals(message.Role.ToString(), StringComparison.OrdinalIgnoreCase))
+                    if (string.Equals(candidate.Role.ToString(), message.Role.ToString(), StringComparison.OrdinalIgnoreCase))
                     {
                         matchingEntry = candidate;
                     }
                 }
-                
-                // If index matching failed, try to find by role
+                // Fallback by role
                 if (matchingEntry == null)
                 {
-                    // For user messages, get the most recent user message
-                    if (message.Role.ToString() == "User")
+                    if (message.Role == Andy.Llm.Models.MessageRole.User)
                     {
-                        matchingEntry = history.LastOrDefault(h => h.Role == MessageRole.User);
+                        matchingEntry = history.LastOrDefault(h => h.Role == Andy.Cli.Services.MessageRole.User);
                     }
-                    // For assistant messages, get corresponding assistant message
-                    else if (message.Role.ToString() == "Assistant")
+                    else if (message.Role == Andy.Llm.Models.MessageRole.Assistant)
                     {
                         // Count how many assistant messages we've seen so far
-                        var assistantIndex = request.Messages.Take(i).Count(m => m.Role.ToString() == "Assistant");
-                        matchingEntry = history.Where(h => h.Role == MessageRole.Assistant)
+                        var assistantIndex = request.Messages.Take(i).Count(m => m.Role == Andy.Llm.Models.MessageRole.Assistant);
+                        matchingEntry = history.Where(h => h.Role == Andy.Cli.Services.MessageRole.Assistant)
                                               .Skip(assistantIndex)
                                               .FirstOrDefault();
                     }
                 }
                 
-                // Apply the fix
+                // Apply the fix using a minimal, valid TextPart only for User/Assistant
                 if (matchingEntry != null && !string.IsNullOrEmpty(matchingEntry.Content))
                 {
                     message.Parts = new List<MessagePart>
@@ -1144,8 +1259,7 @@ This is a basic C# console application that demonstrates fundamental concepts li
                 }
                 else
                 {
-                    // Last resort: provide a minimal message
-                    var fallbackText = message.Role.ToString() == "User" ? "Hello" : "I'm ready to help.";
+                    var fallbackText = message.Role == Andy.Llm.Models.MessageRole.User ? "Hello" : "I'm ready to help.";
                     message.Parts = new List<MessagePart>
                     {
                         new TextPart { Text = fallbackText }
@@ -1163,9 +1277,21 @@ This is a basic C# console application that demonstrates fundamental concepts li
             var msg = request.Messages[i];
             var partsInfo = msg.Parts == null ? "null" : msg.Parts.Count == 0 ? "empty" : $"{msg.Parts.Count} parts";
             File.AppendAllText(debugLog, $"  Message {i} ({msg.Role}): {partsInfo}\n");
-            if (msg.Parts != null && msg.Parts.Count > 0 && msg.Parts[0] is TextPart tp)
+            if (msg.Parts != null && msg.Parts.Count > 0)
             {
-                File.AppendAllText(debugLog, $"    Content: {tp.Text?.Substring(0, Math.Min(30, tp.Text?.Length ?? 0))}...\n");
+                if (msg.Parts[0] is TextPart tp)
+                {
+                    File.AppendAllText(debugLog, $"    Content: {tp.Text?.Substring(0, Math.Min(30, tp.Text?.Length ?? 0))}...\n");
+                }
+                else if (msg.Parts[0] is ToolResponsePart trp)
+                {
+                    var respStr = trp.Response as string ?? (trp.Response != null ? System.Text.Json.JsonSerializer.Serialize(trp.Response) : "");
+                    File.AppendAllText(debugLog, $"    ToolResponse: tool={trp.ToolName}, callId={trp.CallId}, len={respStr.Length}\n");
+                }
+                else if (msg.Parts[0] is ToolCallPart tcp)
+                {
+                    File.AppendAllText(debugLog, $"    ToolCall: name={tcp.ToolName}, id={tcp.CallId}\n");
+                }
             }
         }
 
@@ -1251,7 +1377,7 @@ This is a basic C# console application that demonstrates fundamental concepts li
             var fullContent = new StringBuilder();
             var isComplete = false;
             string? finishReason = null;
-            var functionCalls = new List<FunctionCall>();
+            _pendingFunctionCalls.Clear();
 
             // Accumulate the entire response during streaming
             // For Qwen models, tool calls are only valid when streaming is complete
@@ -1265,7 +1391,7 @@ This is a basic C# console application that demonstrates fundamental concepts li
                 // Accumulate function calls
                 if (chunk.FunctionCall != null)
                 {
-                    functionCalls.Add(chunk.FunctionCall);
+                    _pendingFunctionCalls.Add(chunk.FunctionCall);
                 }
 
                 // Check if streaming is complete

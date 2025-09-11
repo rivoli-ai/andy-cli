@@ -142,6 +142,7 @@ public class ToolExecutionService
         catch (Exception ex)
         {
             _feed.AddMarkdownRich($"**Tool execution error:** {ex.Message}");
+            ErrorPolicy.RethrowIfStrict(ex);
 
             return new ToolExecutionResult
             {
@@ -162,7 +163,21 @@ public class ToolExecutionService
         CancellationToken cancellationToken = default)
     {
         var context = new ToolExecutionContext { CancellationToken = cancellationToken };
-        var result = await _toolExecutor.ExecuteAsync(toolId, parameters, context);
+        var safeParams = parameters ?? new Dictionary<string, object?>();
+        var result = await _toolExecutor.ExecuteAsync(toolId, safeParams, context);
+
+        if (result == null)
+        {
+            return new ToolExecutionResult
+            {
+                IsSuccessful = false,
+                ErrorMessage = "Tool executor returned null result",
+                Message = null,
+                DurationMs = 0,
+                FullOutput = null,
+                TruncatedForDisplay = false
+            };
+        }
 
         return new ToolExecutionResult
         {

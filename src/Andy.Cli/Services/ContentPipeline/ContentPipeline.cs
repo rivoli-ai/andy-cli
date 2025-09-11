@@ -85,6 +85,7 @@ public class ContentPipeline : IDisposable
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Error processing raw content");
+            ErrorPolicy.RethrowIfStrict(ex);
         }
     }
 
@@ -183,6 +184,7 @@ public class ContentPipeline : IDisposable
             catch (Exception ex)
             {
                 _logger?.LogError(ex, "Error in processing queue");
+                ErrorPolicy.RethrowIfStrict(ex);
             }
         }
     }
@@ -212,6 +214,7 @@ public class ContentPipeline : IDisposable
             catch (Exception ex)
             {
                 _logger?.LogError(ex, "Error rendering block {BlockId}", block.Id);
+                ErrorPolicy.RethrowIfStrict(ex);
             }
         }
     }
@@ -226,6 +229,8 @@ public class ContentPipeline : IDisposable
         catch (Exception ex)
         {
             _logger?.LogWarning(ex, "Error waiting for processing task to complete");
+            // Rethrow only if strict to avoid dispose-time crashes in non-strict mode
+            ErrorPolicy.RethrowIfStrict(ex);
         }
         
         _cancellationTokenSource.Dispose();

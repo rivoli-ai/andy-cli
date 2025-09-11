@@ -607,7 +607,7 @@ public class ModelCommand : ICommand
                 MaxContextMessages = 1
             };
             testConversation.AddUserMessage(prompt);
-            var request = testConversation.CreateRequest();
+            var request = testConversation.CreateRequest(GetCurrentModel());
             request.MaxTokens = 100;
 
             var response = await _currentClient.CompleteAsync(request, cancellationToken);

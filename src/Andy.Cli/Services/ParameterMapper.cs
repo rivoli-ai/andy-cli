@@ -64,7 +64,8 @@ public static class ParameterMapper
             ["directory"] = "path",
             ["dir"] = "path",
             ["folder"] = "path",
-            ["location"] = "path"
+            ["location"] = "path",
+            ["directory_path"] = "path"
         },
         ["create_directory"] = new Dictionary<string, string>
         {
