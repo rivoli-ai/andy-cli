@@ -108,7 +108,7 @@ public class MessageProcessor
                 _logger?.LogWarning("Found message with null or empty Parts, adding placeholder");
                 message.Parts = new List<MessagePart>
                 {
-                    new TextPart { Text = " " }
+                    new TextPart { Text = "[placeholder]" }
                 };
             }
             else
@@ -119,7 +119,7 @@ public class MessageProcessor
                     if (string.IsNullOrEmpty(part.Text))
                     {
                         _logger?.LogWarning("Found TextPart with empty Text, adding placeholder");
-                        part.Text = " ";
+                        part.Text = "[placeholder]";
                     }
                 }
             }

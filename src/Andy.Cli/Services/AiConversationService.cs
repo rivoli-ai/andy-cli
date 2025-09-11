@@ -152,6 +152,13 @@ public class AiConversationService : IDisposable
         
         // Create the LLM request with tool definitions (if appropriate)
         var request = CreateRequestWithTools(availableTools);
+        // Explicitly set streaming flag expected by some providers/clients
+        request.Stream = useStreaming;
+        // Mirror Tools into Functions for providers that expect both collections
+        if (request.Tools != null && request.Tools.Any())
+        {
+            request.Functions = request.Tools.ToList();
+        }
         
         // DISABLED: Preloading causes issues with proper response generation
         // The LLM gets confused when it sees pre-executed tool results
@@ -231,7 +238,7 @@ public class AiConversationService : IDisposable
                     Model = request.Model,
                     Temperature = request.Temperature,
                     MaxTokens = request.MaxTokens,
-                    SystemPrompt = request.SystemPrompt?.Substring(0, Math.Min(2000, request.SystemPrompt?.Length ?? 0)) + (request.SystemPrompt?.Length > 2000 ? "..." : "")
+                    SystemPrompt = request.SystemPrompt?.Substring(0, Math.Min(200, request.SystemPrompt?.Length ?? 0)) + (request.SystemPrompt?.Length > 200 ? "..." : "")
                 };
                 
                 var requestJson = System.Text.Json.JsonSerializer.Serialize(requestObj, new System.Text.Json.JsonSerializerOptions 
@@ -242,9 +249,8 @@ public class AiConversationService : IDisposable
                 // Truncate if too long
                 if (requestJson.Length > 5000)
                 {
-                    requestJson = requestJson.Substring(0, 5000) + "\n... [truncated]";
+                    requestLog += requestJson.Substring(0, 5000) + "\n... [truncated]";
                 }
-                requestLog += requestJson;
             }
             catch (Exception ex)
             {
@@ -1182,8 +1188,18 @@ This is a basic C# console application that demonstrates fundamental concepts li
         LlmRequest request,
         CancellationToken cancellationToken)
     {
-        try
         {
+            // Dump request to diagnostics before streaming to reproduce provider errors
+            try
+            {
+                var dumpRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".andy", "diagnostics");
+                Directory.CreateDirectory(dumpRoot);
+                var dumpFile = Path.Combine(dumpRoot, $"stream_request_{DateTime.Now:yyyyMMdd_HHmmss_fff}.json");
+                var dumpJson = System.Text.Json.JsonSerializer.Serialize(request, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+                File.WriteAllText(dumpFile, dumpJson);
+            }
+            catch { /* best effort */ }
+
             var fullContent = new StringBuilder();
             var isComplete = false;
             string? finishReason = null;
@@ -1208,7 +1224,7 @@ This is a basic C# console application that demonstrates fundamental concepts li
                 if (chunk.IsComplete)
                 {
                     isComplete = true;
-                    finishReason = "stop";  // Set a default finish reason
+                    finishReason = "stop"; // Set a default finish reason
                 }
             }
 
@@ -1218,7 +1234,8 @@ This is a basic C# console application that demonstrates fundamental concepts li
             if (_diagnostic != null)
             {
                 // Log the full request first
-                var requestJson = System.Text.Json.JsonSerializer.Serialize(request, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+                var requestJson = System.Text.Json.JsonSerializer.Serialize(request,
+                    new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
                 await _diagnostic.CaptureRawRequest(requestJson);
 
                 // Then capture the response
@@ -1229,6 +1246,7 @@ This is a basic C# console application that demonstrates fundamental concepts li
                     var textPart = lastUserMessage.Parts.OfType<TextPart>().FirstOrDefault();
                     if (textPart != null) prompt = textPart.Text ?? "";
                 }
+
                 await _diagnostic.CaptureRawResponse(prompt, content);
             }
 
@@ -1250,11 +1268,6 @@ This is a basic C# console application that demonstrates fundamental concepts li
                 Content = content,
                 FinishReason = finishReason
             };
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "LLM streaming failed; will attempt fallback if enabled.");
-            return null;
         }
     }
 
