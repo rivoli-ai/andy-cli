@@ -466,11 +466,28 @@ public class AiConversationService : IDisposable
                     consecutiveToolOnlyIterations++;
                     if (consecutiveToolOnlyIterations >= maxConsecutiveToolIterations)
                     {
-                        _logger?.LogWarning("Breaking loop: {Count} consecutive tool-only iterations", consecutiveToolOnlyIterations);
+                        _logger?.LogWarning("Breaking loop: {Count} consecutive tool-only iterations, forcing text response", consecutiveToolOnlyIterations);
                         
-                        // Display accumulated tool results to the user
-                        if (allToolResults.Any())
+                        // Force the LLM to provide a text response by adding a user prompt
+                        _contextManager.AddUserMessage("Based on the information gathered, please provide a comprehensive answer.");
+                        
+                        // Get one more response without tools
+                        request = _contextManager.GetContext().CreateRequest();
+                        request = FixEmptyMessageParts(request);
+                        
+                        var forcedResponse = enableStreaming
+                            ? await GetLlmStreamingResponseAsync(request, cancellationToken)
+                            : await GetLlmResponseAsync(request, cancellationToken);
+                        
+                        if (!string.IsNullOrWhiteSpace(forcedResponse?.Content))
                         {
+                            _contentPipeline.AddRawContent(forcedResponse.Content);
+                            _contextManager.AddAssistantMessage(forcedResponse.Content);
+                            hasDisplayedContent = true;
+                        }
+                        else if (allToolResults.Any())
+                        {
+                            // Fallback: Display accumulated tool results to the user
                             var summary = new StringBuilder();
                             summary.AppendLine("I've completed the following operations:");
                             foreach (var (toolId, result) in allToolResults.TakeLast(5)) // Show last 5 tools
