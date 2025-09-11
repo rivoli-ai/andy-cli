@@ -267,9 +267,17 @@ public class LlmResponseCompiler
 
     private ILlmResponseParser CreateParserForModel(string modelProvider, IJsonRepairService jsonRepair, ILogger? logger)
     {
-        // For now, keep using QwenParser directly until we can properly integrate andy-llm
-        // TODO: Integrate HybridLlmParser properly when interface compatibility is resolved
-        return new QwenParser(jsonRepair, null);
+        var provider = modelProvider?.ToLowerInvariant() ?? "";
+        
+        // Use specific parsers for models with special formatting
+        if (provider.Contains("qwen"))
+        {
+            return new QwenParser(jsonRepair, logger as ILogger<QwenParser>);
+        }
+        
+        // For all other models (Llama, Mistral, GPT, Claude, etc.), use the generic parser
+        // These models typically return plain text or simple JSON tool calls
+        return new GenericParser(jsonRepair, logger as ILogger<GenericParser>);
     }
 
     private List<Diagnostic> ConvertLexicalErrors(List<LexicalError> errors)

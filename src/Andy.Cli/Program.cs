@@ -251,7 +251,9 @@ class Program
                     feed,
                     systemPrompt,
                     jsonRepair,
-                    logger);
+                    logger,
+                    currentModel,
+                    currentProvider);
 
                 // Get actual model and provider information from ModelCommand
                 // Set initial model info
@@ -349,7 +351,9 @@ class Program
                                         feed,
                                         systemPrompt,
                                         jsonRepair,
-                                        logger);
+                                        logger,
+                                        newModel,
+                                        newProvider);
                                     
                                     // Set model info for response interpretation
                                     aiService.UpdateModelInfo(
@@ -775,7 +779,9 @@ class Program
                                                     feed,
                                                     systemPrompt,
                                                     jsonRepair,
-                                                    logger);
+                                                    logger,
+                                                    newModel,
+                                                    newProvider);
 
                                                 // Set model info for response interpretation
                                                 aiService.UpdateModelInfo(
@@ -891,7 +897,7 @@ class Program
                                 conversation.AddUserMessage(cmd);
 
                                 // Create request with conversation context
-                                var request = conversation.CreateRequest();
+                                var request = conversation.CreateRequest(currentModel);
                                 
                                 // Debug: Check if Parts are properly populated
                                 var debugLog = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".andy", "logs", "parts-debug.log");

@@ -150,9 +150,19 @@ public class AiConversationService : IDisposable
         // Get available tools
         var availableTools = _toolRegistry.GetTools(enabledOnly: true).ToList();
 
-        // Create the LLM request with tool definitions
-        var request = CreateRequestWithTools(availableTools);
+        // For simple greetings, don't send tools to avoid overwhelming the LLM
+        // This also helps with providers that have issues with large tool lists
+        var shouldIncludeTools = !IsSimpleGreeting(userMessage);
+        
+        // Create the LLM request with tool definitions (if appropriate)
+        var request = shouldIncludeTools 
+            ? CreateRequestWithTools(availableTools)
+            : CreateRequestWithTools(new List<ToolRegistration>());
 
+        // DISABLED: Preloading causes issues with proper response generation
+        // The LLM gets confused when it sees pre-executed tool results
+        // and doesn't provide a proper summary of findings
+        /*
         // Heuristic: proactively explore repository structure for repo/content questions
         if (LooksLikeRepoExploration(userMessage))
         {
@@ -160,7 +170,7 @@ public class AiConversationService : IDisposable
             {
                 await PreloadRepoContextAsync(cancellationToken);
                 // Refresh request after preloading tool results
-                request = _contextManager.GetContext().CreateRequest();
+                request = _contextManager.GetContext().CreateRequest(_currentModel);
                 // Fix empty Parts issue in messages
                 request = FixEmptyMessageParts(request);
             }
@@ -169,6 +179,7 @@ public class AiConversationService : IDisposable
                 _logger?.LogWarning(ex, "PreloadRepoContextAsync failed");
             }
         }
+        */
 
         // Track the conversation loop
         var maxIterations = 12; // Allow deeper multi-step planning and execution
@@ -182,6 +193,7 @@ public class AiConversationService : IDisposable
         while (iteration < maxIterations)
         {
             iteration++;
+            _logger?.LogInformation("[ITERATION START] Beginning iteration {Iteration} of {Max}", iteration, maxIterations);
             _tracer?.TraceIteration(iteration, maxIterations);
 
             // Get LLM response with streaming if enabled
@@ -316,7 +328,29 @@ public class AiConversationService : IDisposable
             }
 
             // Render the AST for display and tool extraction
+            _logger?.LogInformation("[AST DEBUG] AST has {Count} children", compilationResult.Ast?.Children.Count ?? 0);
+            if (compilationResult.Ast != null)
+            {
+                foreach (var child in compilationResult.Ast.Children)
+                {
+                    if (child is TextNode textNode)
+                    {
+                        _logger?.LogInformation("[AST DEBUG] TextNode content: '{Content}'", 
+                            textNode.Content?.Length > 100 ? textNode.Content.Substring(0, 100) + "..." : textNode.Content);
+                    }
+                    else
+                    {
+                        _logger?.LogInformation("[AST DEBUG] Child type: {Type}", child.GetType().Name);
+                    }
+                }
+            }
+            
             var renderResult = _renderer.RenderForStreaming(compilationResult.Ast);
+            
+            _logger?.LogInformation("[RENDER RESULT] TextContent: '{Content}', HasContent: {HasContent}, HasToolCalls: {HasTools}", 
+                renderResult.TextContent?.Length > 100 ? renderResult.TextContent.Substring(0, 100) + "..." : renderResult.TextContent,
+                renderResult.HasContent, 
+                renderResult.HasToolCalls);
             
             // CRITICAL FIX: Check if raw response contains both tool JSON and additional text
             // This happens when LLM responds with: {"tool":"..."} followed by explanatory text
@@ -350,6 +384,9 @@ public class AiConversationService : IDisposable
 
             if (renderResult.ToolCalls.Any())
             {
+                _logger?.LogInformation("[TOOL CALLS FOUND] Found {Count} tool calls in iteration {Iteration}", 
+                    renderResult.ToolCalls.Count, iteration);
+                
                 // Trace tool calls found
                 _tracer?.TraceToolCalls(renderResult.ToolCalls.Select(tc => new TracedToolCall { ToolId = tc.ToolId, Parameters = tc.Parameters }).ToList());
                 
@@ -491,7 +528,7 @@ public class AiConversationService : IDisposable
                 // We'll display them if the LLM doesn't provide a follow-up response
                 
                 // Update request for next iteration
-                request = _contextManager.GetContext().CreateRequest();
+                request = _contextManager.GetContext().CreateRequest(_currentModel);
                 request = FixEmptyMessageParts(request);
                 
                 // Track consecutive tool-only iterations
@@ -506,7 +543,7 @@ public class AiConversationService : IDisposable
                         _contextManager.AddUserMessage("Based on the information gathered, please provide a comprehensive answer.");
                         
                         // Get one more response without tools
-                        request = _contextManager.GetContext().CreateRequest();
+                        request = _contextManager.GetContext().CreateRequest(_currentModel);
                         request = FixEmptyMessageParts(request);
                         
                         var forcedResponse = enableStreaming
@@ -540,6 +577,7 @@ public class AiConversationService : IDisposable
                 }
                 
                 _logger?.LogInformation("[TOOL PATH] Continuing to iteration {Next} after tool execution", iteration + 1);
+                _logger?.LogInformation("[TOOL PATH] Will request another LLM response with tool results in context");
                 continue; // Continue to next iteration, don't process as regular text
             }
             else
@@ -676,17 +714,19 @@ public class AiConversationService : IDisposable
                         }
 
                         // We executed fallback tool calls; stop loop like normal text path
-                        request = _contextManager.GetContext().CreateRequest();
+                        request = _contextManager.GetContext().CreateRequest(_currentModel);
                         request = FixEmptyMessageParts(request);
                         break;
                     }
 
-                    // Check if content is empty
-                    if (string.IsNullOrWhiteSpace(content))
+                    // Check if content is empty or seems incomplete
+                    if (string.IsNullOrWhiteSpace(content) || 
+                        (content.EndsWith(":") && content.Length < 50) || // Incomplete response like "No special action is required in this case:"
+                        (response.Content?.Length > content.Length * 2)) // Raw response is significantly longer
                     {
-                        _logger?.LogWarning("[EMPTY CONTENT] Received empty text response in iteration {Iteration}, raw response length: {RawLength}", 
-                            iteration, response.Content?.Length ?? 0);
-                        // Try to use the raw response content if render result is empty
+                        _logger?.LogWarning("[EMPTY/INCOMPLETE CONTENT] Rendered: '{Rendered}' (length {RenderLen}), raw response length: {RawLength}", 
+                            content, content.Length, response.Content?.Length ?? 0);
+                        // Try to use the raw response content if render result is empty or incomplete
                         content = response.Content ?? "";
                         _logger?.LogInformation("[USING RAW CONTENT] Fallback to raw response, length: {Length}, preview: '{Preview}'",
                             content.Length, content.Length > 100 ? content.Substring(0, 100) + "..." : content);
@@ -835,6 +875,17 @@ This is a basic C# console application that demonstrates fundamental concepts li
         return (s.Contains("what's in") || s.Contains("what is in") || s.Contains("contents") || s.Contains("list") || s.Contains("show files") || s.Contains("source code") || s.Contains("repo"))
                && (s.Contains("src") || s.Contains("repo") || s.Contains("code"));
     }
+    
+    private bool IsSimpleGreeting(string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage)) return false;
+        var s = userMessage.ToLowerInvariant().Trim();
+        // Common greetings that don't need tools
+        return s == "hello" || s == "hi" || s == "hey" || 
+               s == "good morning" || s == "good afternoon" || s == "good evening" ||
+               s.StartsWith("hello ") || s.StartsWith("hi ") || s.StartsWith("hey ") ||
+               s == "test" || s == "ping";
+    }
 
     private async Task PreloadRepoContextAsync(CancellationToken cancellationToken)
     {
@@ -916,7 +967,7 @@ This is a basic C# console application that demonstrates fundamental concepts li
     private LlmRequest CreateRequestWithTools(List<ToolRegistration> tools)
     {
         var context = _contextManager.GetContext();
-        var request = context.CreateRequest();
+        var request = context.CreateRequest(_currentModel);
         
         // Log the state of messages before fix
         if (request.Messages != null)
@@ -941,8 +992,22 @@ This is a basic C# console application that demonstrates fundamental concepts li
             }
         }
 
-        // Tool definitions are already in the system prompt from SystemPromptService
-        // Don't add them again to avoid duplication
+        // Add tool definitions to the request
+        // The LLM needs these to know what tools are available
+        // Only add a few tools to avoid overwhelming the provider
+        if (tools != null && tools.Any())
+        {
+            // Limit to essential tools for now to avoid 400 errors
+            var essentialToolIds = new[] { "list_directory", "read_file", "bash_command", "search_files" };
+            var essentialTools = tools.Where(t => essentialToolIds.Contains(t.Metadata.Id)).Take(4);
+            
+            request.Tools = essentialTools.Select(t => new ToolDeclaration
+            {
+                Name = t.Metadata.Id,
+                Description = t.Metadata.Description,
+                Parameters = ConvertParametersToSchema(t.Metadata.Parameters)
+            }).ToList();
+        }
 
         // Fix empty Parts issue in messages
         request = FixEmptyMessageParts(request);
@@ -1519,6 +1584,64 @@ This is a basic C# console application that demonstrates fundamental concepts li
         if (pn.Contains("mistral")) return "mistral";
         if (pn.Contains("meta") || mn.Contains("llama") || mn.Contains("lama")) return "llama";
         return pn;
+    }
+    
+    /// <summary>
+    /// Convert tool parameters to JSON Schema format
+    /// </summary>
+    private Dictionary<string, object> ConvertParametersToSchema(IList<ToolParameter> parameters)
+    {
+        var properties = new Dictionary<string, object>();
+        var required = new List<string>();
+        
+        foreach (var param in parameters)
+        {
+            var propSchema = new Dictionary<string, object>
+            {
+                ["type"] = ConvertTypeToJsonSchema(param.Type),
+                ["description"] = param.Description
+            };
+            
+            if (param.DefaultValue != null)
+            {
+                propSchema["default"] = param.DefaultValue;
+            }
+            
+            properties[param.Name] = propSchema;
+            
+            if (param.Required)
+            {
+                required.Add(param.Name);
+            }
+        }
+        
+        var schema = new Dictionary<string, object>
+        {
+            ["type"] = "object",
+            ["properties"] = properties
+        };
+        
+        if (required.Any())
+        {
+            schema["required"] = required;
+        }
+        
+        return schema;
+    }
+    
+    private string ConvertTypeToJsonSchema(string dotNetType)
+    {
+        return dotNetType?.ToLowerInvariant() switch
+        {
+            "string" => "string",
+            "int" or "int32" or "integer" => "integer",
+            "long" or "int64" => "integer",
+            "bool" or "boolean" => "boolean",
+            "double" or "float" or "decimal" => "number",
+            "array" or "list" => "array",
+            "dictionary" or "object" => "object",
+            _ => "string" // Default to string for unknown types
+        };
     }
 
     /// <summary>
