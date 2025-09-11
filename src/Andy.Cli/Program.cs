@@ -131,7 +131,16 @@ class Program
 
             // Initialize Andy.Llm and Andy.Tools services
             var services = new ServiceCollection();
-            services.AddLogging(); // Basic logging without console provider
+            services.AddLogging(builder =>
+            {
+                // Disable console logging to avoid UI interference
+                // To enable debugging, set environment variable ANDY_DEBUG=true
+                if (Environment.GetEnvironmentVariable("ANDY_DEBUG") == "true")
+                {
+                    builder.AddConsole();
+                    builder.SetMinimumLevel(LogLevel.Information);
+                }
+            }); // Conditional logging based on environment variable
 
             // Configure LLM services
             services.ConfigureLlmFromEnvironment();
@@ -883,6 +892,61 @@ class Program
 
                                 // Create request with conversation context
                                 var request = conversation.CreateRequest();
+                                
+                                // Debug: Check if Parts are properly populated
+                                var debugLog = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".andy", "logs", "parts-debug.log");
+                                Directory.CreateDirectory(Path.GetDirectoryName(debugLog)!);
+                                File.AppendAllText(debugLog, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] CreateRequest called for command: {cmd}\n");
+                                
+                                if (request.Messages != null)
+                                {
+                                    File.AppendAllText(debugLog, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] Request has {request.Messages.Count} messages\n");
+                                    
+                                    foreach (var msg in request.Messages)
+                                    {
+                                        if (msg.Parts == null || msg.Parts.Count == 0)
+                                        {
+                                            File.AppendAllText(debugLog, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] Empty Parts detected for {msg.Role} message!\n");
+                                            Console.WriteLine($"[DEBUG] Empty Parts detected for {msg.Role} message!");
+                                            // Fix it inline
+                                            if (msg.Role == Andy.Llm.Models.MessageRole.User)
+                                            {
+                                                msg.Parts = new List<MessagePart> { new TextPart { Text = cmd } };
+                                                File.AppendAllText(debugLog, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] Fixed User message with: {cmd}\n");
+                                            }
+                                        }
+                                        else
+                                        {
+                                            File.AppendAllText(debugLog, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] {msg.Role} message has {msg.Parts.Count} parts\n");
+                                            foreach (var part in msg.Parts)
+                                            {
+                                                if (part is TextPart textPart)
+                                                {
+                                                    if (string.IsNullOrEmpty(textPart.Text))
+                                                    {
+                                                        File.AppendAllText(debugLog, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] Empty TextPart.Text detected for {msg.Role} message!\n");
+                                                        Console.WriteLine($"[DEBUG] Empty TextPart detected for {msg.Role} message!");
+                                                        // Fix it inline
+                                                        if (msg.Role == Andy.Llm.Models.MessageRole.User)
+                                                        {
+                                                            textPart.Text = cmd;
+                                                            File.AppendAllText(debugLog, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] Fixed with: {cmd}\n");
+                                                        }
+                                                    }
+                                                    else
+                                                    {
+                                                        var preview = textPart.Text.Length > 50 ? textPart.Text.Substring(0, 50) + "..." : textPart.Text;
+                                                        File.AppendAllText(debugLog, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] TextPart has content: {preview}\n");
+                                                    }
+                                                }
+                                                else
+                                                {
+                                                    File.AppendAllText(debugLog, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] Part type: {part?.GetType().Name ?? "null"}\n");
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
 
                                 // Get response from Andy.Llm
                                 var response = await llmClient.CompleteAsync(request);
@@ -1155,7 +1219,16 @@ class Program
     {
         // Initialize services for command-line mode
         var services = new ServiceCollection();
-        services.AddLogging();
+        services.AddLogging(builder =>
+        {
+            // Disable console logging to avoid UI interference
+            // To enable debugging, set environment variable ANDY_DEBUG=true
+            if (Environment.GetEnvironmentVariable("ANDY_DEBUG") == "true")
+            {
+                builder.AddConsole();
+                builder.SetMinimumLevel(LogLevel.Information);
+            }
+        });
 
         // Configure LLM services
         services.ConfigureLlmFromEnvironment();
@@ -1220,7 +1293,14 @@ class Program
 
         // Route to appropriate command
         var commandName = args[0].ToLowerInvariant();
-        var commandArgs = args.Skip(1).ToArray();
+        
+        // Filter out common flags from the arguments before passing to command
+        var filteredArgs = args.Skip(1)
+            .Where(arg => !arg.StartsWith("--debug", StringComparison.OrdinalIgnoreCase) &&
+                          !arg.StartsWith("--verbose", StringComparison.OrdinalIgnoreCase) &&
+                          !arg.StartsWith("--quiet", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        var commandArgs = filteredArgs;
 
         ICommand? command = null;
 

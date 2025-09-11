@@ -88,6 +88,14 @@ public class ContextManager
     }
 
     /// <summary>
+    /// Get the message history
+    /// </summary>
+    public List<ContextEntry> GetHistory()
+    {
+        return new List<ContextEntry>(_history);
+    }
+
+    /// <summary>
     /// Get the current conversation context for LLM
     /// </summary>
     public ConversationContext GetContext()

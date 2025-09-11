@@ -367,33 +367,70 @@ public class ModelCommand : ICommand
         return CommandResult.CreateSuccess(result.ToString());
     }
 
-    private Task<CommandResult> SwitchModelAsync(string[] args, CancellationToken cancellationToken)
+    private async Task<CommandResult> SwitchModelAsync(string[] args, CancellationToken cancellationToken)
     {
         if (args.Length < 1)
         {
-            return Task.FromResult(CommandResult.Failure("Usage: /model switch <model-name>"));
+            return CommandResult.Failure("Usage: /model switch <model-name> OR /model switch <provider> <model-name>");
         }
 
-        var modelName = string.Join(" ", args).Trim();
+        string providerName = _currentProvider;
+        string modelName;
+
+        // Check if first arg is a known provider
+        if (args.Length >= 2 && IsKnownProvider(args[0].ToLowerInvariant()))
+        {
+            // Format: /model switch openai gpt-4
+            providerName = args[0].ToLowerInvariant();
+            modelName = string.Join(" ", args.Skip(1)).Trim();
+        }
+        else
+        {
+            // Format: /model switch gpt-4 (use current provider)
+            modelName = string.Join(" ", args).Trim();
+            
+            // First check if the model exists in the current provider
+            var currentProviderModels = await GetProviderModelsAsync(_currentProvider, cancellationToken);
+            if (!currentProviderModels.Any(m => m.Id.Equals(modelName, StringComparison.OrdinalIgnoreCase)))
+            {
+                // Model not in current provider, search other providers
+                var detectedProvider = await DetectProviderFromModelNameAsync(modelName, cancellationToken);
+                if (detectedProvider != null && detectedProvider != _currentProvider)
+                {
+                    // Model belongs to a different provider, auto-switch
+                    providerName = detectedProvider;
+                }
+            }
+        }
+
+        // Check if we need to switch providers
+        bool providerChanged = providerName != _currentProvider;
+
+        // Validate provider has API key
+        if (!HasApiKey(providerName) && providerName != "ollama")
+        {
+            return CommandResult.Failure(ConsoleColors.ErrorPrefix($"No API key found for {providerName}. Set {GetApiKeyName(providerName)} environment variable."));
+        }
 
         try
         {
-            // Update the model for the current provider
+            // Update current provider and model
+            _currentProvider = providerName;
             _currentModel = modelName;
-            _modelMemory.SetCurrent(_currentProvider, modelName);
+            _modelMemory.SetCurrent(providerName, modelName);
 
-            // Recreate services with new model
+            // Recreate services with new provider and model
             var services = new ServiceCollection();
             services.AddLogging();
             services.ConfigureLlmFromEnvironment();
 
             // Override the model in environment
-            Environment.SetEnvironmentVariable($"{_currentProvider.ToUpper()}_MODEL", modelName);
+            Environment.SetEnvironmentVariable($"{providerName.ToUpper()}_MODEL", modelName);
 
             services.AddLlmServices(options =>
             {
-                options.DefaultProvider = _currentProvider;
-                if (options.Providers.TryGetValue(_currentProvider, out var config))
+                options.DefaultProvider = providerName;
+                if (options.Providers.TryGetValue(providerName, out var config))
                 {
                     config.Model = modelName;
                 }
@@ -404,14 +441,35 @@ public class ModelCommand : ICommand
             _currentClient = newProvider.GetService<LlmClient>();
 
             var message = new StringBuilder();
-            message.AppendLine(ConsoleColors.SuccessPrefix($"Switched to model: {modelName}"));
-            message.AppendLine($"Provider: {_currentProvider} [{GetProviderUrl(_currentProvider)}]");
+            if (providerChanged)
+            {
+                // Check if this was an auto-switch (model not explicitly paired with provider)
+                if (args.Length == 1 || (args.Length > 1 && !IsKnownProvider(args[0].ToLowerInvariant())))
+                {
+                    // Auto-switched to the correct provider for this model
+                    message.AppendLine(ConsoleColors.SuccessPrefix($"Auto-switched to {providerName} provider for model: {modelName}"));
+                    message.AppendLine($"Provider URL: {GetProviderUrl(providerName)}");
+                }
+                else
+                {
+                    message.AppendLine(ConsoleColors.SuccessPrefix($"Switched to provider: {providerName}"));
+                    message.AppendLine($"Model: {modelName}");
+                    message.AppendLine($"Provider URL: {GetProviderUrl(providerName)}");
+                }
+                message.AppendLine();
+                message.AppendLine(ConsoleColors.NotePrefix("Conversation context reset for new provider"));
+            }
+            else
+            {
+                message.AppendLine(ConsoleColors.SuccessPrefix($"Switched to model: {modelName}"));
+                message.AppendLine($"Provider: {providerName} [{GetProviderUrl(providerName)}]");
+            }
 
-            return Task.FromResult(CommandResult.CreateSuccess(message.ToString()));
+            return CommandResult.CreateSuccess(message.ToString());
         }
         catch (Exception ex)
         {
-            return Task.FromResult(CommandResult.Failure(ConsoleColors.ErrorPrefix($"Failed to switch model: {ex.Message}")));
+            return CommandResult.Failure(ConsoleColors.ErrorPrefix($"Failed to switch model: {ex.Message}"));
         }
     }
 
@@ -642,6 +700,39 @@ public class ModelCommand : ICommand
             "ollama" => "llama2",
             _ => "unknown"
         };
+    }
+
+    private async Task<string?> DetectProviderFromModelNameAsync(string modelName, CancellationToken cancellationToken)
+    {
+        // Check all providers to see which one has this model
+        var providers = new[] { "cerebras", "openai", "anthropic", "gemini", "ollama" };
+        
+        foreach (var provider in providers)
+        {
+            // Skip providers without API keys (except ollama)
+            if (!HasApiKey(provider) && provider != "ollama")
+                continue;
+            
+            try
+            {
+                // Get models for this provider (from cache or API)
+                var models = await GetProviderModelsAsync(provider, cancellationToken);
+                
+                // Check if this provider has the requested model
+                if (models.Any(m => m.Id.Equals(modelName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return provider;
+                }
+            }
+            catch
+            {
+                // Continue checking other providers if this one fails
+                continue;
+            }
+        }
+        
+        // No provider found with this model
+        return null;
     }
 
     public LlmClient? GetCurrentClient() => _currentClient;

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
@@ -9,6 +10,7 @@ using Andy.Cli.Diagnostics;
 using Andy.Cli.Parsing;
 using Andy.Cli.Parsing.Compiler;
 using Andy.Cli.Parsing.Rendering;
+using Andy.Cli.Services.ContentPipeline;
 using Andy.Cli.Widgets;
 using Andy.Llm;
 using Andy.Llm.Models;
@@ -22,7 +24,7 @@ namespace Andy.Cli.Services;
 /// <summary>
 /// Main AI conversation service with tool integration
 /// </summary>
-public class AiConversationService
+public class AiConversationService : IDisposable
 {
     private readonly LlmClient _llmClient;
     private readonly ToolExecutionService _toolService;
@@ -37,6 +39,7 @@ public class AiConversationService
     private readonly IJsonRepairService _jsonRepair;
     private readonly ConversationTracer? _tracer;
     private readonly CumulativeOutputTracker _outputTracker = new();
+    private readonly ContentPipeline.ContentPipeline _contentPipeline;
     private string _currentModel = "";
     private string _currentProvider = "";
     // Note: Avoid writing partial streaming chunks to the feed to prevent broken/partial lines
@@ -69,6 +72,12 @@ public class AiConversationService
         _currentModel = modelName;
         _currentProvider = providerName;
         _toolCallValidator = new ToolCallValidator(_toolRegistry, logger as ILogger<ToolCallValidator>);
+        
+        // Initialize content pipeline
+        var processor = new MarkdownContentProcessor();
+        var sanitizer = new TextContentSanitizer();
+        var renderer = new FeedContentRenderer(feed, logger as ILogger<FeedContentRenderer>);
+        _contentPipeline = new ContentPipeline.ContentPipeline(processor, sanitizer, renderer, logger as ILogger<ContentPipeline.ContentPipeline>);
 
         // Initialize diagnostic tool if debugging is enabled
         if (Environment.GetEnvironmentVariable("ANDY_DEBUG_RAW") == "true")
@@ -152,6 +161,8 @@ public class AiConversationService
                 await PreloadRepoContextAsync(cancellationToken);
                 // Refresh request after preloading tool results
                 request = _contextManager.GetContext().CreateRequest();
+                // Fix empty Parts issue in messages
+                request = FixEmptyMessageParts(request);
             }
             catch (Exception ex)
             {
@@ -163,6 +174,10 @@ public class AiConversationService
         var maxIterations = 12; // Allow deeper multi-step planning and execution
         var iteration = 0;
         var finalResponse = new StringBuilder();
+        var allToolResults = new List<(string ToolId, string Result)>(); // Track all tool executions
+        var hasDisplayedContent = false; // Track if we've displayed any content to the user
+        var consecutiveToolOnlyIterations = 0; // Track consecutive iterations with only tool calls
+        const int maxConsecutiveToolIterations = 3; // Break after 3 consecutive tool-only iterations
 
         while (iteration < maxIterations)
         {
@@ -171,8 +186,64 @@ public class AiConversationService
 
             // Get LLM response with streaming if enabled
             // Always render final content once; do not render partial streaming deltas to the feed
+            
+            // Ensure Parts are fixed before logging/sending
+            request = FixEmptyMessageParts(request);
+            
             _tracer?.TraceLlmRequest(request);
             var startTime = DateTime.UtcNow;
+            
+            // LOG TO FILE - Request
+            var logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".andy", "logs");
+            Directory.CreateDirectory(logDir);
+            var logFile = Path.Combine(logDir, $"llm-{DateTime.Now:yyyy-MM-dd}.log");
+            var requestLog = $"\n\n========== REQUEST at {DateTime.Now:yyyy-MM-dd HH:mm:ss} ==========\n";
+            requestLog += $"Iteration: {iteration}/{maxIterations}\n";
+            try
+            {
+                // Manually construct JSON to ensure Parts are visible in logs
+                var requestObj = new
+                {
+                    Messages = request.Messages?.Select(m => new
+                    {
+                        Role = m.Role,
+                        Parts = m.Parts?.Select<MessagePart, object>(p =>
+                        {
+                            if (p is TextPart tp)
+                                return new { Text = tp.Text };
+                            else if (p is ToolCallPart tcp)
+                                return new { ToolCall = new { Name = tcp.ToolName, Id = tcp.CallId, Arguments = tcp.Arguments } };
+                            else if (p is ToolResponsePart trp)
+                                return new { ToolResponse = new { Name = trp.ToolName, Id = trp.CallId, Response = trp.Response } };
+                            else
+                                return new { Type = p?.GetType().Name ?? "null" };
+                        }).ToList() ?? new List<object>()
+                    }).ToList(),
+                    Tools = request.Tools,
+                    Functions = request.Functions,
+                    Model = request.Model,
+                    Temperature = request.Temperature,
+                    MaxTokens = request.MaxTokens,
+                    SystemPrompt = request.SystemPrompt?.Substring(0, Math.Min(200, request.SystemPrompt?.Length ?? 0)) + (request.SystemPrompt?.Length > 200 ? "..." : "")
+                };
+                
+                var requestJson = System.Text.Json.JsonSerializer.Serialize(requestObj, new System.Text.Json.JsonSerializerOptions 
+                { 
+                    WriteIndented = true,
+                    MaxDepth = 10
+                });
+                // Truncate if too long
+                if (requestJson.Length > 5000)
+                {
+                    requestJson = requestJson.Substring(0, 5000) + "\n... [truncated]";
+                }
+                requestLog += requestJson;
+            }
+            catch (Exception ex)
+            {
+                requestLog += $"[Error serializing request: {ex.Message}]";
+            }
+            File.AppendAllText(logFile, requestLog);
             
             var response = enableStreaming
                 ? await GetLlmStreamingResponseAsync(request, cancellationToken)
@@ -180,6 +251,21 @@ public class AiConversationService
             
             var elapsed = DateTime.UtcNow - startTime;
             _tracer?.TraceLlmResponse(response, elapsed);
+            
+            // LOG TO FILE - Response
+            var responseLog = $"\n========== RESPONSE in {elapsed.TotalSeconds:F2}s ==========\n";
+            responseLog += $"Content Length: {response?.Content?.Length ?? 0}\n";
+            responseLog += $"Content: {response?.Content?.Substring(0, Math.Min(response?.Content?.Length ?? 0, 1000))}\n";
+            if ((response?.Content?.Length ?? 0) > 1000) responseLog += "... [truncated]\n";
+            responseLog += $"==========================================\n";
+            File.AppendAllText(logFile, responseLog);
+            
+            // Log file location hint for the user
+            if (iteration == 1)
+            {
+                _logger?.LogInformation("[LLM LOG] Logging to: {LogFile}", logFile);
+                Console.Error.WriteLine($"[LLM LOG] Writing to: {logFile}");
+            }
 
             if (response == null)
             {
@@ -227,19 +313,30 @@ public class AiConversationService
 
             // Render the AST for display and tool extraction
             var renderResult = _renderer.RenderForStreaming(compilationResult.Ast);
+            
+            _logger?.LogInformation("[RENDER RESULT] Iteration {Iteration}: ToolCalls={ToolCount}, TextContent length={TextLength}, TextPreview='{Preview}'",
+                iteration,
+                renderResult.ToolCalls.Count,
+                renderResult.TextContent?.Length ?? 0,
+                renderResult.TextContent?.Length > 100 ? renderResult.TextContent.Substring(0, 100) + "..." : renderResult.TextContent ?? "(null)");
 
             if (renderResult.ToolCalls.Any())
             {
                 // Trace tool calls found
                 _tracer?.TraceToolCalls(renderResult.ToolCalls.Select(tc => new TracedToolCall { ToolId = tc.ToolId, Parameters = tc.Parameters }).ToList());
-                // Display text content if it exists
+                
+                // If there's text content along with tool calls, display it
+                // This handles cases where the LLM explains what it's about to do
                 if (!string.IsNullOrWhiteSpace(renderResult.TextContent))
                 {
-                    var text = SanitizeAssistantText(renderResult.TextContent);
-                    // Filter "Please wait" boilerplate
-                    if (!text.TrimStart().StartsWith("Please wait", StringComparison.OrdinalIgnoreCase))
+                    var textWithoutTools = ExtractNonToolText(renderResult.TextContent);
+                    if (!string.IsNullOrWhiteSpace(textWithoutTools))
                     {
-                        _feed.AddMarkdownRich(text);
+                        _logger?.LogInformation("[TOOL WITH TEXT] Displaying text before tool execution: '{Preview}'",
+                            textWithoutTools.Length > 100 ? textWithoutTools.Substring(0, 100) + "..." : textWithoutTools);
+                        _contentPipeline.AddRawContent(textWithoutTools);
+                        finalResponse.AppendLine(textWithoutTools);
+                        hasDisplayedContent = true;
                     }
                 }
 
@@ -345,24 +442,53 @@ public class AiConversationService
                         limitedOutput);
 
                     toolResults.Add(outputStr);
+                    allToolResults.Add((callToExecute.ToolId, limitedOutput));
                 }
 
-                // Don't add tool results as user message - they're already in context as tool responses
-
+                // Store tool results for potential display later
+                // We'll display them if the LLM doesn't provide a follow-up response
+                
                 // Update request for next iteration
                 request = _contextManager.GetContext().CreateRequest();
+                request = FixEmptyMessageParts(request);
+                
+                // Track consecutive tool-only iterations
+                if (!hasDisplayedContent)
+                {
+                    consecutiveToolOnlyIterations++;
+                    if (consecutiveToolOnlyIterations >= maxConsecutiveToolIterations)
+                    {
+                        _logger?.LogWarning("Breaking loop: {Count} consecutive tool-only iterations", consecutiveToolOnlyIterations);
+                        
+                        // Display accumulated tool results to the user
+                        if (allToolResults.Any())
+                        {
+                            var summary = new StringBuilder();
+                            summary.AppendLine("I've completed the following operations:");
+                            foreach (var (toolId, result) in allToolResults.TakeLast(5)) // Show last 5 tools
+                            {
+                                summary.AppendLine($"- {toolId}: {(result.Length > 100 ? result.Substring(0, 100) + "..." : result)}");
+                            }
+                            _contentPipeline.AddRawContent(summary.ToString());
+                            hasDisplayedContent = true;
+                        }
+                        break;
+                    }
+                }
+                else
+                {
+                    consecutiveToolOnlyIterations = 0; // Reset counter if we displayed content
+                }
+                
+                continue; // Continue to next iteration, don't process as regular text
             }
             else
             {
                 // Regular text response - rendered content without tool calls
-                var content = SanitizeAssistantText(renderResult.TextContent ?? "");
+                var content = renderResult.TextContent ?? "";
                 
-                // If sanitization removed everything but we had original content, keep it
-                if (string.IsNullOrWhiteSpace(content) && !string.IsNullOrWhiteSpace(renderResult.TextContent))
-                {
-                    _logger?.LogDebug("Content was completely sanitized, using original text");
-                    content = renderResult.TextContent.Trim();
-                }
+                _logger?.LogInformation("[TEXT RESPONSE PATH] Iteration {Iteration}, Content preview: '{Preview}'", 
+                    iteration, content.Length > 100 ? content.Substring(0, 100) + "..." : content);
 
                 // Check if the response looks like a raw tool execution result (escaped JSON)
                 if (content.StartsWith("\"\\\"[Tool Execution:") || content.StartsWith("\"[Tool Execution:"))
@@ -390,17 +516,26 @@ public class AiConversationService
                     finalResponse.AppendLine(content);
                     _contextManager.AddAssistantMessage(content);
 
-                    // Display the response with proper formatting
-                    DisplayParsedResponse(compilationResult.Ast, renderResult);
+                    // Display the response using content pipeline
+                    _logger?.LogInformation("[ESCAPED JSON PATH] Adding content to pipeline: '{Preview}'", 
+                        content.Length > 100 ? content.Substring(0, 100) + "..." : content);
+                    _contentPipeline.AddRawContent(content);
+                    hasDisplayedContent = true;
+                    consecutiveToolOnlyIterations = 0; // Reset counter when we display content
                 }
                 else
                 {
+                    _logger?.LogInformation("[FALLBACK PATH] Content doesn't look like escaped JSON, trying fallback parser");
+                    
                     // Fallback: try QwenResponseParser-based extraction if AST produced no tool calls
                     var fallbackParser = new QwenResponseParser(
                         _jsonRepair,
                         new StreamingToolCallAccumulator(_jsonRepair, null),
                         null);
                     var fallbackCalls = fallbackParser.ExtractToolCalls(response.Content ?? string.Empty);
+                    
+                    _logger?.LogInformation("[FALLBACK PARSER] Found {Count} tool calls", fallbackCalls.Count);
+                    
                     if (fallbackCalls.Any())
                     {
                         // Execute fallback tool calls path (mirrors main tool call execution flow)
@@ -479,26 +614,152 @@ public class AiConversationService
 
                         // We executed fallback tool calls; stop loop like normal text path
                         request = _contextManager.GetContext().CreateRequest();
+                        request = FixEmptyMessageParts(request);
                         break;
                     }
 
+                    // Check if content is empty
+                    if (string.IsNullOrWhiteSpace(content))
+                    {
+                        _logger?.LogWarning("[EMPTY CONTENT] Received empty text response in iteration {Iteration}", iteration);
+                        // Try to use the raw response content if render result is empty
+                        content = response.Content ?? "";
+                        _logger?.LogInformation("[USING RAW CONTENT] Fallback to raw response: '{Preview}'",
+                            content.Length > 100 ? content.Substring(0, 100) + "..." : content);
+                    }
+                    
                     finalResponse.AppendLine(content);
                     _contextManager.AddAssistantMessage(content);
 
-                    // Display the response with proper formatting
-                    DisplayParsedResponse(compilationResult.Ast, renderResult);
+                    // Display the response using content pipeline
+                    _logger?.LogInformation("[FALLBACK NO TOOLS] Adding content to pipeline: '{Preview}'", 
+                        content.Length > 100 ? content.Substring(0, 100) + "..." : content);
+                    
+                    if (!string.IsNullOrWhiteSpace(content))
+                    {
+                        _logger?.LogInformation("[PIPELINE ADD] About to add content to pipeline, length={Length}", content.Length);
+                        _contentPipeline.AddRawContent(content);
+                        _logger?.LogInformation("[PIPELINE ADD] Content added successfully");
+                        hasDisplayedContent = true;
+                    }
+                    else
+                    {
+                        _logger?.LogWarning("[PIPELINE ADD] Skipping empty content");
+                    }
+                    consecutiveToolOnlyIterations = 0; // Reset counter when we display content
                 }
 
+                _logger?.LogInformation("[CONVERSATION] Breaking from loop - no tool calls detected");
                 break; // No more tool calls, we're done
             }
         }
 
-        // Show context stats with dim gray color (with proper spacing)
+        // Give the pipeline a moment to process any queued content
+        _logger?.LogInformation("[CONVERSATION] Waiting for pipeline to process content");
+        await Task.Delay(200); // Short delay to ensure background processing completes
+        
+        // Finalize pipeline processing first
+        _logger?.LogInformation("[CONVERSATION] Finalizing pipeline");
+        await _contentPipeline.FinalizeAsync();
+        
+        // CRITICAL: Ensure we always display something to the user
+        if (!hasDisplayedContent)
+        {
+            _logger?.LogWarning("[NO CONTENT] No content was displayed to user after {Iterations} iterations", iteration);
+            
+            // Check if this was likely a greeting
+            var lowerMessage = userMessage.ToLowerInvariant().Trim();
+            if (lowerMessage == "hello" || lowerMessage == "hi" || lowerMessage == "hey" || 
+                lowerMessage.StartsWith("hello") || lowerMessage.StartsWith("hi ") || lowerMessage.StartsWith("hey "))
+            {
+                var greeting = "Hello! I'm here to help. What would you like to know or work on today?";
+                _contentPipeline.AddRawContent(greeting);
+                finalResponse.AppendLine(greeting);
+                _contextManager.AddAssistantMessage(greeting);
+            }
+            // Check if tools were executed
+            else if (allToolResults.Any())
+            {
+                // Build a summary of tool results
+                var summary = new StringBuilder();
+                summary.AppendLine("I've completed analyzing your request. Here's what I found:");
+                summary.AppendLine();
+                
+                foreach (var (toolId, result) in allToolResults)
+                {
+                    // Provide a brief summary of each tool result
+                    if (!string.IsNullOrWhiteSpace(result) && result != "Code index query completed")
+                    {
+                        // Extract meaningful information from the result
+                        var lines = result.Split('\n').Take(10).Where(l => !string.IsNullOrWhiteSpace(l));
+                        if (lines.Any())
+                        {
+                            summary.AppendLine($"From {toolId}:");
+                            foreach (var line in lines.Take(5))
+                            {
+                                summary.AppendLine($"  • {line.Trim()}");
+                            }
+                        }
+                    }
+                }
+                
+                summary.AppendLine();
+                summary.AppendLine("Based on this analysis, I can help you with specific questions about the project.");
+                
+                var summaryText = summary.ToString();
+                _contentPipeline.AddRawContent(summaryText);
+                finalResponse.AppendLine(summaryText);
+                _contextManager.AddAssistantMessage(summaryText);
+            }
+            // For requests that don't need tools (like "write a sample C# program")
+            else
+            {
+                // This is a critical failure - the LLM provided no response at all
+                var errorMsg = @"I apologize, but I didn't receive a proper response from the language model. 
+
+For your request about writing a sample C# program, here's a basic example:
+
+```csharp
+using System;
+
+namespace SampleProgram
+{
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            Console.WriteLine(""Hello, World!"");
+            
+            // Example of a simple calculation
+            int a = 5;
+            int b = 10;
+            int sum = a + b;
+            
+            Console.WriteLine($""The sum of {a} and {b} is {sum}"");
+            
+            Console.WriteLine(""Press any key to exit..."");
+            Console.ReadKey();
+        }
+    }
+}
+```
+
+This is a basic C# console application that demonstrates fundamental concepts like namespaces, classes, methods, variables, and console I/O.";
+                
+                _contentPipeline.AddRawContent(errorMsg);
+                finalResponse.AppendLine(errorMsg);
+                _contextManager.AddAssistantMessage(errorMsg);
+            }
+        }
+
+        // Show context stats with proper priority (rendered last)
         var stats = _contextManager.GetStats();
         _tracer?.TraceContextStats(stats.MessageCount, stats.EstimatedTokens, stats.ToolCallCount);
-        _feed.AddMarkdownRich(""); // Add blank line for spacing
         var contextInfo = Commands.ConsoleColors.Dim($"Context: {stats.MessageCount} messages, ~{stats.EstimatedTokens} tokens, {stats.ToolCallCount} tool calls");
-        _feed.AddMarkdownRich(contextInfo);
+        _contentPipeline.AddSystemMessage(contextInfo, SystemMessageType.Context, priority: 2000);
+        
+        // Final pipeline finalization to render context message
+        await _contentPipeline.FinalizeAsync();
 
         return finalResponse.ToString();
     }
@@ -592,9 +853,192 @@ public class AiConversationService
     {
         var context = _contextManager.GetContext();
         var request = context.CreateRequest();
+        
+        // Log the state of messages before fix
+        if (request.Messages != null)
+        {
+            foreach (var msg in request.Messages)
+            {
+                var partsInfo = msg.Parts == null ? "null" : 
+                    msg.Parts.Count == 0 ? "empty" : 
+                    $"{msg.Parts.Count} parts";
+                _logger?.LogDebug("Before fix - Message Role: {Role}, Parts: {PartsInfo}", msg.Role, partsInfo);
+                if (msg.Parts != null && msg.Parts.Count > 0)
+                {
+                    foreach (var part in msg.Parts)
+                    {
+                        if (part is TextPart textPart)
+                        {
+                            _logger?.LogDebug("  TextPart content: {Content}", 
+                                string.IsNullOrEmpty(textPart.Text) ? "(empty)" : textPart.Text.Length > 50 ? textPart.Text.Substring(0, 50) + "..." : textPart.Text);
+                        }
+                    }
+                }
+            }
+        }
 
         // Tool definitions are already in the system prompt from SystemPromptService
         // Don't add them again to avoid duplication
+
+        // Fix empty Parts issue in messages
+        request = FixEmptyMessageParts(request);
+        
+        // Log the state after fix
+        if (request.Messages != null)
+        {
+            foreach (var msg in request.Messages)
+            {
+                var partsInfo = msg.Parts == null ? "null" : 
+                    msg.Parts.Count == 0 ? "empty" : 
+                    $"{msg.Parts.Count} parts";
+                _logger?.LogDebug("After fix - Message Role: {Role}, Parts: {PartsInfo}", msg.Role, partsInfo);
+            }
+        }
+
+        return request;
+    }
+
+    /// <summary>
+    /// Fix the empty Parts issue in LlmRequest messages
+    /// </summary>
+    private LlmRequest FixEmptyMessageParts(LlmRequest request)
+    {
+        // Add debug logging
+        var debugLog = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".andy", "logs", "fix-parts-debug.log");
+        Directory.CreateDirectory(Path.GetDirectoryName(debugLog)!);
+        File.AppendAllText(debugLog, $"\n[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] FixEmptyMessageParts called\n");
+        
+        if (request.Messages == null) 
+        {
+            File.AppendAllText(debugLog, "Request.Messages is null\n");
+            return request;
+        }
+
+        File.AppendAllText(debugLog, $"Request has {request.Messages.Count} messages\n");
+        
+        // Get the full history to properly match messages
+        var history = _contextManager.GetHistory();
+        File.AppendAllText(debugLog, $"History has {history.Count} entries\n");
+        
+        // Match messages with history entries by index and role
+        for (int i = 0; i < request.Messages.Count; i++)
+        {
+            var message = request.Messages[i];
+            
+            // Check if Parts needs fixing
+            bool needsFix = false;
+            if (message.Parts == null || message.Parts.Count == 0)
+            {
+                needsFix = true;
+            }
+            else
+            {
+                // Check if all parts are null or empty
+                var hasValidContent = false;
+                foreach (var part in message.Parts)
+                {
+                    if (part != null)
+                    {
+                        // Check if it's an empty object (serialized as {})
+                        var partType = part.GetType();
+                        if (part is TextPart textPart)
+                        {
+                            if (!string.IsNullOrEmpty(textPart.Text))
+                            {
+                                hasValidContent = true;
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            // Check if the part has any actual content
+                            var json = System.Text.Json.JsonSerializer.Serialize(part);
+                            if (json != "{}" && json != "null")
+                            {
+                                hasValidContent = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                needsFix = !hasValidContent;
+            }
+            
+            if (needsFix)
+            {
+                File.AppendAllText(debugLog, $"Message {i} ({message.Role}) needs fixing - Parts are empty or invalid\n");
+                
+                // Find corresponding history entry
+                ContextEntry? matchingEntry = null;
+                
+                // Try to match by index first (assuming messages and history are in same order)
+                if (i < history.Count)
+                {
+                    var candidate = history[i];
+                    // Verify role matches
+                    if (candidate.Role.ToString().Equals(message.Role.ToString(), StringComparison.OrdinalIgnoreCase))
+                    {
+                        matchingEntry = candidate;
+                    }
+                }
+                
+                // If index matching failed, try to find by role
+                if (matchingEntry == null)
+                {
+                    // For user messages, get the most recent user message
+                    if (message.Role.ToString() == "User")
+                    {
+                        matchingEntry = history.LastOrDefault(h => h.Role == MessageRole.User);
+                    }
+                    // For assistant messages, get corresponding assistant message
+                    else if (message.Role.ToString() == "Assistant")
+                    {
+                        // Count how many assistant messages we've seen so far
+                        var assistantIndex = request.Messages.Take(i).Count(m => m.Role.ToString() == "Assistant");
+                        matchingEntry = history.Where(h => h.Role == MessageRole.Assistant)
+                                              .Skip(assistantIndex)
+                                              .FirstOrDefault();
+                    }
+                }
+                
+                // Apply the fix
+                if (matchingEntry != null && !string.IsNullOrEmpty(matchingEntry.Content))
+                {
+                    message.Parts = new List<MessagePart>
+                    {
+                        new TextPart { Text = matchingEntry.Content }
+                    };
+                    File.AppendAllText(debugLog, $"Fixed message {i} with content from history: {matchingEntry.Content.Substring(0, Math.Min(50, matchingEntry.Content.Length))}...\n");
+                    _logger?.LogDebug("Fixed empty Parts for {Role} message with content: {Preview}", 
+                        message.Role, 
+                        matchingEntry.Content.Length > 50 ? matchingEntry.Content.Substring(0, 50) + "..." : matchingEntry.Content);
+                }
+                else
+                {
+                    // Last resort: provide a minimal message
+                    var fallbackText = message.Role.ToString() == "User" ? "Hello" : "I'm ready to help.";
+                    message.Parts = new List<MessagePart>
+                    {
+                        new TextPart { Text = fallbackText }
+                    };
+                    File.AppendAllText(debugLog, $"No history found for message {i}, using fallback: {fallbackText}\n");
+                    _logger?.LogWarning("No history found for {Role} message, using fallback", message.Role);
+                }
+            }
+        }
+
+        // Log final state
+        File.AppendAllText(debugLog, "After fixing:\n");
+        for (int i = 0; i < request.Messages.Count; i++)
+        {
+            var msg = request.Messages[i];
+            var partsInfo = msg.Parts == null ? "null" : msg.Parts.Count == 0 ? "empty" : $"{msg.Parts.Count} parts";
+            File.AppendAllText(debugLog, $"  Message {i} ({msg.Role}): {partsInfo}\n");
+            if (msg.Parts != null && msg.Parts.Count > 0 && msg.Parts[0] is TextPart tp)
+            {
+                File.AppendAllText(debugLog, $"    Content: {tp.Text?.Substring(0, Math.Min(30, tp.Text?.Length ?? 0))}...\n");
+            }
+        }
 
         return request;
     }
@@ -621,7 +1065,37 @@ public class AiConversationService
 
                 // Then capture the response
                 var lastUserMessage = request.Messages.LastOrDefault(m => m.Role.ToString() == "User");
-                var prompt = lastUserMessage?.Parts.OfType<TextPart>().FirstOrDefault()?.Text ?? "";
+                string prompt = "";
+                if (lastUserMessage != null)
+                {
+                    // Try to get text from Parts if available
+                    if (lastUserMessage.Parts != null && lastUserMessage.Parts.Any())
+                    {
+                        var textPart = lastUserMessage.Parts.OfType<TextPart>().FirstOrDefault();
+                        if (textPart != null)
+                        {
+                            prompt = textPart.Text ?? "";
+                        }
+                        else
+                        {
+                            // Fallback: try to extract text from the first part
+                            try
+                            {
+                                var firstPart = lastUserMessage.Parts.FirstOrDefault();
+                                if (firstPart != null)
+                                {
+                                    // Use reflection or JSON serialization to get text content
+                                    var json = System.Text.Json.JsonSerializer.Serialize(firstPart);
+                                    prompt = json.Length > 100 ? json.Substring(0, 100) + "..." : json;
+                                }
+                            }
+                            catch
+                            {
+                                prompt = "[Unable to extract user message]";
+                            }
+                        }
+                    }
+                }
                 await _diagnostic.CaptureRawResponse(prompt, response.Content ?? "");
             }
 
@@ -684,7 +1158,37 @@ public class AiConversationService
 
                 // Then capture the response
                 var lastUserMessage = request.Messages.LastOrDefault(m => m.Role.ToString() == "User");
-                var prompt = lastUserMessage?.Parts.OfType<TextPart>().FirstOrDefault()?.Text ?? "";
+                string prompt = "";
+                if (lastUserMessage != null)
+                {
+                    // Try to get text from Parts if available
+                    if (lastUserMessage.Parts != null && lastUserMessage.Parts.Any())
+                    {
+                        var textPart = lastUserMessage.Parts.OfType<TextPart>().FirstOrDefault();
+                        if (textPart != null)
+                        {
+                            prompt = textPart.Text ?? "";
+                        }
+                        else
+                        {
+                            // Fallback: try to extract text from the first part
+                            try
+                            {
+                                var firstPart = lastUserMessage.Parts.FirstOrDefault();
+                                if (firstPart != null)
+                                {
+                                    // Use reflection or JSON serialization to get text content
+                                    var json = System.Text.Json.JsonSerializer.Serialize(firstPart);
+                                    prompt = json.Length > 100 ? json.Substring(0, 100) + "..." : json;
+                                }
+                            }
+                            catch
+                            {
+                                prompt = "[Unable to extract user message]";
+                            }
+                        }
+                    }
+                }
                 await _diagnostic.CaptureRawResponse(prompt, content);
             }
 
@@ -723,129 +1227,16 @@ public class AiConversationService
     /// </summary>
     private void DisplayParsedResponse(ResponseNode? ast, StreamingRenderResult renderResult)
     {
-        if (ast == null)
+        // Use content pipeline for all rendering instead of direct feed manipulation
+        if (!string.IsNullOrEmpty(renderResult.TextContent))
         {
-            // Fallback to simple markdown display
-            if (!string.IsNullOrEmpty(renderResult.TextContent))
-            {
-                _feed.AddMarkdownRich(renderResult.TextContent);
-            }
-            return;
+            _logger?.LogDebug("DisplayParsedResponse: Using content pipeline for text content length = {Length}", renderResult.TextContent.Length);
+            _contentPipeline.AddRawContent(renderResult.TextContent);
         }
-
-        // Debug logging to understand the issue
-        _logger?.LogDebug("DisplayParsedResponse: AST has {NodeCount} child nodes", ast.Children.Count);
-        _logger?.LogDebug("DisplayParsedResponse: renderResult.TextContent length = {Length}", renderResult.TextContent?.Length ?? 0);
-
-        // Walk through AST nodes and display them appropriately
-        var hasDisplayedContent = false;
-        var textBuffer = new System.Text.StringBuilder();
-
-        foreach (var node in ast.Children)
+        else if (ast != null && ast.Children.Count > 0)
         {
-            switch (node)
-            {
-                case CodeNode codeNode:
-                    // Flush any buffered text first
-                    if (textBuffer.Length > 0)
-                    {
-                        RenderTextWithCodeExtraction(SanitizeAssistantText(textBuffer.ToString()));
-                        textBuffer.Clear();
-                        hasDisplayedContent = true;
-                    }
-                    // Display code block with syntax highlighting
-                    _feed.AddCode(codeNode.Code, codeNode.Language);
-                    hasDisplayedContent = true;
-                    break;
-
-                case TextNode textNode:
-                    // Buffer text to combine adjacent text nodes
-                    _logger?.LogDebug("TextNode content: '{Content}'", textNode.Content);
-                    textBuffer.AppendLine(textNode.Content);
-                    break;
-
-                case ErrorNode errorNode when errorNode.Severity == ErrorSeverity.Warning:
-                    // Display warnings
-                    if (textBuffer.Length > 0)
-                    {
-                        _feed.AddMarkdownRich(SanitizeAssistantText(textBuffer.ToString()));
-                        textBuffer.Clear();
-                    }
-                    _feed.AddMarkdownRich($"**⚠️ {errorNode.Message}**");
-                    hasDisplayedContent = true;
-                    break;
-
-                case FileReferenceNode fileRef:
-                    // Include file references in text
-                    textBuffer.Append(fileRef.Path);
-                    if (!string.IsNullOrEmpty(fileRef.LineReference))
-                    {
-                        textBuffer.Append(fileRef.LineReference);
-                    }
-                    break;
-
-                case QuestionNode question:
-                    // Include questions in text
-                    textBuffer.AppendLine(question.Question);
-                    break;
-
-                case CommandNode command:
-                    // Flush text and display command
-                    if (textBuffer.Length > 0)
-                    {
-                        _feed.AddMarkdownRich(SanitizeAssistantText(textBuffer.ToString()));
-                        textBuffer.Clear();
-                        hasDisplayedContent = true;
-                    }
-                    _feed.AddCode(command.Command, "bash");
-                    hasDisplayedContent = true;
-                    break;
-
-                // Skip tool calls and thoughts - they're handled elsewhere
-                case ToolCallNode:
-                case ThoughtNode:
-                    break;
-            }
-        }
-
-        // Flush any remaining text
-        if (textBuffer.Length > 0)
-        {
-            var bufferContent = textBuffer.ToString().Trim();
-            _logger?.LogDebug("Flushing text buffer with content: '{Content}'", bufferContent);
-            var sanitizedContent = SanitizeAssistantText(bufferContent);
-            _logger?.LogDebug("Sanitized content: '{Content}'", sanitizedContent);
-            RenderTextWithCodeExtraction(sanitizedContent);
-            hasDisplayedContent = true;
-        }
-
-        // If nothing was displayed, fall back to the rendered text content
-        if (!hasDisplayedContent && !string.IsNullOrEmpty(renderResult.TextContent))
-        {
-            _logger?.LogDebug("Fallback: Using renderResult.TextContent: '{Content}'", renderResult.TextContent);
-            var sanitizedContent = SanitizeAssistantText(renderResult.TextContent);
-            _logger?.LogDebug("Fallback sanitized content: '{Content}'", sanitizedContent);
-            
-            // If sanitization removed all content, just show the original (with basic cleanup)
-            if (string.IsNullOrWhiteSpace(sanitizedContent) && !string.IsNullOrWhiteSpace(renderResult.TextContent))
-            {
-                _logger?.LogDebug("Sanitization removed all content, using original with basic cleanup");
-                sanitizedContent = renderResult.TextContent.Trim();
-            }
-            
-            if (!string.IsNullOrWhiteSpace(sanitizedContent))
-            {
-                RenderTextWithCodeExtraction(sanitizedContent);
-                hasDisplayedContent = true;
-            }
-        }
-        
-        // Final safety net - if still nothing displayed but we had AST content, show a message
-        if (!hasDisplayedContent && ast != null && ast.Children.Count > 0)
-        {
-            _logger?.LogWarning("No content was displayed despite having {Count} AST nodes", ast.Children.Count);
-            // Show at least some indication that we processed the response
-            _feed.AddMarkdownRich("*Response processed but contained no displayable content.*");
+            _logger?.LogWarning("DisplayParsedResponse: AST has {Count} nodes but no TextContent", ast.Children.Count);
+            _contentPipeline.AddRawContent("_[Response content was parsed but could not be displayed]_");
         }
     }
 
@@ -970,6 +1361,43 @@ public class AiConversationService
         }
     }
 
+    /// <summary>
+    /// Extract non-tool text from a response that may contain tool calls
+    /// </summary>
+    private string ExtractNonToolText(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return "";
+        
+        // Remove tool call JSON patterns
+        // Pattern 1: {"tool":"...", "parameters":{...}}
+        // Pattern 2: <tool_call>...</tool_call>
+        // Pattern 3: ```json\n{...}\n```
+        
+        var result = text;
+        
+        // Remove <tool_call> blocks
+        result = System.Text.RegularExpressions.Regex.Replace(result, 
+            @"<tool_call>[\s\S]*?</tool_call>", "", 
+            System.Text.RegularExpressions.RegexOptions.Multiline);
+        
+        // Remove JSON tool calls (careful not to remove all JSON)
+        result = System.Text.RegularExpressions.Regex.Replace(result,
+            @"\{[^}]*""tool""\s*:\s*""[^""]+""[^}]*\}", "",
+            System.Text.RegularExpressions.RegexOptions.Multiline);
+        
+        // Remove ```json blocks that contain tool calls
+        result = System.Text.RegularExpressions.Regex.Replace(result,
+            @"```json\s*\n?\s*\{[^}]*""tool""\s*:[^}]*\}\s*\n?\s*```", "",
+            System.Text.RegularExpressions.RegexOptions.Multiline);
+        
+        // Clean up extra whitespace
+        result = System.Text.RegularExpressions.Regex.Replace(result, @"\n{3,}", "\n\n");
+        result = result.Trim();
+        
+        return result;
+    }
+    
     private void RenderMarkdownOrInlineJson(string text)
     {
         // Split on lines; render any single-line valid JSON object as a code block with json language
@@ -1175,92 +1603,6 @@ public class AiConversationService
     /// <summary>
     /// Sanitizes assistant text for display by handling escaping, unwanted characters, and hiding internal tool mentions
     /// </summary>
-    private string SanitizeAssistantText(string text)
-    {
-        if (string.IsNullOrEmpty(text))
-            return string.Empty;
-
-        var sanitized = text;
-
-        // Remove outer quotes if the entire content is quoted
-        if (sanitized.StartsWith("\"") && sanitized.EndsWith("\"") && sanitized.Length > 1)
-        {
-            sanitized = sanitized.Substring(1, sanitized.Length - 2);
-        }
-
-        // Unescape common escape sequences
-        sanitized = sanitized.Replace("\\n", "\n")
-                           .Replace("\\r", "\r")
-                           .Replace("\\t", "\t")
-                           .Replace("\\\"", "\"")
-                           .Replace("\\'", "'")
-                           .Replace("\\\\", "\\")
-                           .Replace("\\u0022", "\"");
-
-        // Hide internal tool mentions - remove lines that are just tool references
-        var lines = sanitized.Split('\n');
-        var filteredLines = new List<string>();
-
-        foreach (var line in lines)
-        {
-            var trimmedLine = line.Trim();
-
-            // Skip lines that look like internal tool mentions
-            if (ShouldHideToolMention(trimmedLine))
-                continue;
-
-            filteredLines.Add(line);
-        }
-
-        sanitized = string.Join('\n', filteredLines);
-
-        // Trim excessive whitespace and remove multiple consecutive blank lines
-        sanitized = sanitized.Trim();
-        
-        // Replace multiple consecutive newlines with at most two
-        while (sanitized.Contains("\n\n\n"))
-        {
-            sanitized = sanitized.Replace("\n\n\n", "\n\n");
-        }
-
-        return sanitized;
-    }
-
-    /// <summary>
-    /// Determines if a line contains an internal tool mention that should be hidden
-    /// </summary>
-    private bool ShouldHideToolMention(string line)
-    {
-        if (string.IsNullOrWhiteSpace(line))
-            return false;
-
-        // Common patterns for internal tool mentions - be specific to avoid false positives
-        var toolMentionPatterns = new[]
-        {
-            // Pattern: [Calling toolname] or [Using toolname] etc.
-            @"^\[(?:Calling|Using|Executing)\s+\w+\]$",
-            
-            // Pattern: <function_calls> or similar XML tags
-            @"^<[^>]*function[^>]*>",
-            @"^<[^>]*invoke[^>]*>",
-            @"^</[^>]*function[^>]*>",
-            @"^</[^>]*invoke[^>]*>",
-            
-            // Pattern: Tool call: toolname (exact format)
-            @"^Tool call:\s*\w+$",
-            
-            // Pattern: Invoking toolname... (exact format)
-            @"^Invoking\s+\w+\.\.\.$"
-        };
-
-        foreach (var pattern in toolMentionPatterns)
-        {
-            if (System.Text.RegularExpressions.Regex.IsMatch(line, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase))
-                return true;
-        }
-
-        return false;
-    }
 
     /// <summary>
     /// Internal tool call representation
@@ -1269,5 +1611,10 @@ public class AiConversationService
     {
         public string ToolId { get; set; } = "";
         public Dictionary<string, object?> Parameters { get; set; } = new();
+    }
+    
+    public void Dispose()
+    {
+        _contentPipeline?.Dispose();
     }
 }

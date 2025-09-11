@@ -207,6 +207,21 @@ public class SystemPromptService
     private void AddCriticalInstructions(string? modelName, string? providerName)
     {
         _prompt.AppendLine("## CRITICAL: How to Use Tools");
+        
+        // Universal tool usage rules for ALL models
+        _prompt.AppendLine();
+        _prompt.AppendLine("### WHEN NOT TO USE TOOLS:");
+        _prompt.AppendLine("❌ For greetings like 'hello', 'hi', 'hey' - just respond conversationally");
+        _prompt.AppendLine("❌ For general questions that don't require file access or searches");
+        _prompt.AppendLine("❌ For explaining concepts you already know");
+        _prompt.AppendLine("❌ When the user is just chatting or making small talk");
+        _prompt.AppendLine();
+        _prompt.AppendLine("### WHEN TO USE TOOLS:");
+        _prompt.AppendLine("✓ When user asks to see/read/explore files or code");
+        _prompt.AppendLine("✓ When user asks about the current project structure");
+        _prompt.AppendLine("✓ When user needs current information from the web");
+        _prompt.AppendLine("✓ When user asks to search for something specific");
+        _prompt.AppendLine();
 
         // Check if this is a Qwen model
         bool isQwenModel = modelName?.ToLowerInvariant().Contains("qwen") ?? false;
@@ -236,6 +251,8 @@ public class SystemPromptService
         }
         else
         {
+            _prompt.AppendLine("IMPORTANT: Only use tools when necessary!");
+            _prompt.AppendLine();
             _prompt.AppendLine("To execute a tool, you MUST respond with ONLY this JSON format:");
             _prompt.AppendLine("```json");
             _prompt.AppendLine("{\"tool\":\"tool_id\",\"parameters\":{\"param_name\":\"value\"}}");

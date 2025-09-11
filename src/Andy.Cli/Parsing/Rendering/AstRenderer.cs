@@ -53,14 +53,32 @@ public class AstRenderer : IAstVisitor<string>
             }
         }
 
-        // Extract tool calls for execution
+        // Extract tool calls for execution, filtering out likely false positives
         foreach (var toolCall in toolCalls)
         {
-            result.ToolCalls.Add(new ModelToolCall
+            // Check if this tool call appears to be in a code example
+            // Heuristic: If the tool call is nested inside a code block, skip it
+            bool isInCodeBlock = IsInsideCodeBlock(toolCall);
+            
+            // Also check if the tool name looks suspicious (e.g., contains special characters)
+            bool hasValidToolName = !string.IsNullOrEmpty(toolCall.ToolName) && 
+                                   !toolCall.ToolName.Contains("```") && 
+                                   !toolCall.ToolName.Contains("json") &&
+                                   !toolCall.ToolName.StartsWith("//") &&
+                                   !toolCall.ToolName.StartsWith("#");
+            
+            if (!isInCodeBlock && hasValidToolName)
             {
-                ToolId = toolCall.ToolName,
-                Parameters = toolCall.Arguments
-            });
+                result.ToolCalls.Add(new ModelToolCall
+                {
+                    ToolId = toolCall.ToolName,
+                    Parameters = toolCall.Arguments
+                });
+            }
+            else
+            {
+                _logger?.LogDebug("Filtered out potential false positive tool call: {ToolName}", toolCall.ToolName);
+            }
         }
 
         result.HasContent = !string.IsNullOrWhiteSpace(result.TextContent);
@@ -72,6 +90,21 @@ public class AstRenderer : IAstVisitor<string>
     private string RenderNode(AstNode node)
     {
         return node.Accept(this);
+    }
+
+    /// <summary>
+    /// Check if a node is nested inside a code block
+    /// </summary>
+    private bool IsInsideCodeBlock(AstNode node)
+    {
+        var parent = node.Parent;
+        while (parent != null)
+        {
+            if (parent is CodeNode)
+                return true;
+            parent = parent.Parent;
+        }
+        return false;
     }
 
     public string VisitResponse(ResponseNode node)
