@@ -342,15 +342,7 @@ public class ContextManager
 
         return summary.ToString();
     }
-
-    /// <summary>
-    /// Format tool execution for context
-    /// </summary>
-    private string FormatToolExecution(string toolId, Dictionary<string, object?> parameters, string result)
-    {
-        // Deprecated wrapper retained for compatibility; now we return raw result per grounding policy
-        return result;
-    }
+    
 
     /// <summary>
     /// Estimate token count (rough approximation)
