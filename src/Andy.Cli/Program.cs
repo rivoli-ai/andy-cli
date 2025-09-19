@@ -17,6 +17,7 @@ using Andy.Tools.Core;
 using Andy.Tools.Execution;
 using Andy.Tools.Library;
 using Andy.Tools.Framework;
+using Andy.Tools.Registry;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using DL = Andy.Tui.DisplayList;
@@ -146,7 +147,10 @@ class Program
             services.ConfigureLlmFromEnvironment();
             services.AddLlmServices(options =>
             {
-                options.DefaultProvider = "cerebras"; // Use Cerebras as default
+                // Auto-detect the default provider based on environment variables
+                var detectionService = new ProviderDetectionService();
+                var detectedProvider = detectionService.DetectDefaultProvider();
+                options.DefaultProvider = detectedProvider ?? "cerebras"; // Fallback to Cerebras if none detected
             });
 
             // JSON repair still available if needed elsewhere
@@ -226,11 +230,10 @@ class Program
                 Environment.SetEnvironmentVariable("ANDY_STRICT_ERRORS", "1");
             }
 
-            var systemPromptService = new SystemPromptService();
             var availableTools = toolRegistry.GetTools(enabledOnly: true);
             var currentModel = modelCommand.GetCurrentModel();
             var currentProvider = modelCommand.GetCurrentProvider();
-            var systemPrompt = systemPromptService.BuildSystemPrompt(availableTools, currentModel, currentProvider);
+            var systemPrompt = BuildSystemPrompt(availableTools, currentModel, currentProvider);
 
             var conversation = new ConversationContext
             {
@@ -335,7 +338,7 @@ class Program
                                 // Rebuild system prompt for the new model
                                 var newModel = modelCommand.GetCurrentModel();
                                 var newProvider = modelCommand.GetCurrentProvider();
-                                systemPrompt = systemPromptService.BuildSystemPrompt(availableTools, newModel, newProvider);
+                                systemPrompt = BuildSystemPrompt(availableTools, newModel, newProvider);
                                 conversation.SystemInstruction = systemPrompt;
                                 
                                 // Update AI service with new client
@@ -763,7 +766,7 @@ class Program
                                             // Rebuild system prompt for the new model
                                             var newModel = modelCommand.GetCurrentModel();
                                             var newProvider = modelCommand.GetCurrentProvider();
-                                            systemPrompt = systemPromptService.BuildSystemPrompt(availableTools, newModel, newProvider);
+                                            systemPrompt = BuildSystemPrompt(availableTools, newModel, newProvider);
                                             conversation.SystemInstruction = systemPrompt;
 
                                             // Update AI service with new client
@@ -1240,7 +1243,10 @@ class Program
         services.ConfigureLlmFromEnvironment();
         services.AddLlmServices(options =>
         {
-            options.DefaultProvider = "cerebras";
+            // Auto-detect the default provider based on environment variables
+            var detectionService = new ProviderDetectionService();
+            var detectedProvider = detectionService.DetectDefaultProvider();
+            options.DefaultProvider = detectedProvider ?? "cerebras"; // Fallback to Cerebras if none detected
         });
 
         // JSON repair still available if needed elsewhere
@@ -1346,6 +1352,27 @@ class Program
                 Environment.Exit(1);
             }
         }
+    }
+
+    private static string BuildSystemPrompt(IEnumerable<ToolRegistration> availableTools, string currentModel, string currentProvider)
+    {
+        var prompt = new StringBuilder();
+        prompt.AppendLine("You are an AI assistant with access to the following tools:");
+        prompt.AppendLine();
+
+        foreach (var tool in availableTools)
+        {
+            prompt.AppendLine($"- {tool.Metadata.Name}: {tool.Metadata.Description}");
+        }
+
+        prompt.AppendLine();
+        prompt.AppendLine($"Current configuration:");
+        prompt.AppendLine($"- Model: {currentModel}");
+        prompt.AppendLine($"- Provider: {currentProvider}");
+        prompt.AppendLine();
+        prompt.AppendLine("Provide helpful, accurate responses. When using tools, explain what you're doing.");
+
+        return prompt.ToString();
     }
 }
 

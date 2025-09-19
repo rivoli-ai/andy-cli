@@ -44,37 +44,45 @@ public class ModelCommand : ICommand
         _currentClient = serviceProvider.GetService<LlmClient>();
         _modelMemory = new ModelMemoryService();
 
-        // Try to get the configured default provider from options
+        // First priority: Check for configured default provider from options
         var options = serviceProvider.GetService<IOptions<LlmOptions>>();
         var hasConfiguredProvider = options?.Value != null && !string.IsNullOrEmpty(options.Value.DefaultProvider);
         if (hasConfiguredProvider)
         {
             _currentProvider = options.Value.DefaultProvider!;
         }
-
-        // Load last used provider and model
-        var current = _modelMemory.GetCurrent();
-        if (current.HasValue && !hasConfiguredProvider)
+        else
         {
-            // Only use the saved provider if it has a valid API key and no provider was explicitly configured
-            if (HasApiKey(current.Value.Provider))
+            // Second priority: Auto-detect based on environment variables
+            var detectionService = new ProviderDetectionService();
+            var detectedProvider = detectionService.DetectDefaultProvider();
+
+            if (!string.IsNullOrEmpty(detectedProvider))
             {
-                _currentProvider = current.Value.Provider;
-                _currentModel = current.Value.Model;
+                _currentProvider = detectedProvider;
             }
             else
             {
-                // Use default model for the current provider
-                _currentModel = GetDefaultModel(_currentProvider);
+                // Third priority: Load last used provider
+                var current = _modelMemory.GetCurrent();
+                if (current.HasValue && HasApiKey(current.Value.Provider))
+                {
+                    _currentProvider = current.Value.Provider;
+                    _currentModel = current.Value.Model;
+                }
             }
         }
-        else if (current.HasValue && _currentProvider == current.Value.Provider)
+
+        // Load last used model for the current provider
+        var savedConfig = _modelMemory.GetCurrent();
+        if (savedConfig.HasValue && _currentProvider == savedConfig.Value.Provider)
         {
-            // If saved provider matches current provider (from options), use the saved model
-            _currentModel = current.Value.Model;
+            // If saved provider matches current provider, use the saved model
+            _currentModel = savedConfig.Value.Model;
         }
         else
         {
+            // Otherwise use default model for the provider
             _currentModel = GetDefaultModel(_currentProvider);
         }
     }
@@ -97,6 +105,7 @@ public class ModelCommand : ICommand
             "info" or "current" => await ShowModelInfoAsync(cancellationToken),
             "test" => await TestModelAsync(subArgs, cancellationToken),
             "refresh" => await RefreshModelsAsync(cancellationToken),
+            "detect" or "diagnostics" => ShowProviderDiagnostics(),
             _ => CommandResult.Failure($"Unknown subcommand: {subcommand}")
         };
     }
@@ -337,6 +346,22 @@ public class ModelCommand : ICommand
 
         // Return empty list if we can't fetch models
         return new List<ModelInfo>();
+    }
+
+    private CommandResult ShowProviderDiagnostics()
+    {
+        var detectionService = new ProviderDetectionService();
+        var diagnostics = detectionService.GetDiagnosticInfo();
+
+        var result = new StringBuilder();
+        result.AppendLine();
+        result.AppendLine(diagnostics);
+        result.AppendLine();
+        result.AppendLine("Current Settings:");
+        result.AppendLine($"  Active Provider: {_currentProvider}");
+        result.AppendLine($"  Active Model: {_currentModel}");
+
+        return CommandResult.CreateSuccess(result.ToString());
     }
 
     private async Task<CommandResult> RefreshModelsAsync(CancellationToken cancellationToken)
