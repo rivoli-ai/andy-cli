@@ -113,14 +113,46 @@ public class ToolAdapter : Andy.Model.Tooling.ITool
         };
     }
 
+    private object? ConvertJsonElement(object? value)
+    {
+        if (value is not JsonElement element)
+            return value;
+
+        return element.ValueKind switch
+        {
+            JsonValueKind.String => element.GetString(),
+            JsonValueKind.Number => element.TryGetInt32(out var intVal) ? (object)intVal : element.GetDouble(),
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Null => null,
+            JsonValueKind.Array => element.EnumerateArray().Select(e => ConvertJsonElement(e)).ToArray(),
+            JsonValueKind.Object => element.EnumerateObject().ToDictionary(
+                prop => prop.Name,
+                prop => ConvertJsonElement(prop.Value)
+            ),
+            _ => element.ToString()
+        };
+    }
+
     public async Task<Andy.Model.Model.ToolResult> ExecuteAsync(Andy.Model.Model.ToolCall call, CancellationToken ct = default)
     {
         try
         {
             // Parse arguments from JSON
-            var parameters = string.IsNullOrEmpty(call.ArgumentsJson)
+            var rawParameters = string.IsNullOrEmpty(call.ArgumentsJson)
                 ? new Dictionary<string, object?>()
                 : JsonSerializer.Deserialize<Dictionary<string, object?>>(call.ArgumentsJson) ?? new Dictionary<string, object?>();
+
+            // Convert JsonElement values to their actual types
+            var parameters = new Dictionary<string, object?>();
+            foreach (var kvp in rawParameters)
+            {
+                parameters[kvp.Key] = ConvertJsonElement(kvp.Value);
+            }
+
+            // Log what we received for debugging
+            _logger?.LogDebug("Tool {ToolId} called with arguments: {Arguments}", _toolId, call.ArgumentsJson);
+            _logger?.LogDebug("Parsed parameters: {Parameters}", JsonSerializer.Serialize(parameters));
 
             // Execute using Andy.Tools
             var context = new Andy.Tools.Core.ToolExecutionContext
