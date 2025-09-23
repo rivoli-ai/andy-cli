@@ -158,7 +158,8 @@ public class AssistantService : IDisposable
                     lastMessage = message;
                 }
 
-                assistantResponse = lastMessage ?? new Message { Role = Role.Assistant, Content = contentBuilder.ToString() };
+                // Use the accumulated content from contentBuilder, not the lastMessage
+                assistantResponse = new Message { Role = Role.Assistant, Content = contentBuilder.ToString() };
             }
             else
             {
