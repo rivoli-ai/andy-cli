@@ -81,6 +81,12 @@ public class ToolAdapter : Andy.Model.Tooling.ITool
                 };
             }
 
+            // Add enum values if specified
+            if (param.AllowedValues != null && param.AllowedValues.Any())
+            {
+                propSchema["enum"] = param.AllowedValues.ToArray();
+            }
+
             if (param.DefaultValue != null)
             {
                 propSchema["default"] = param.DefaultValue;
