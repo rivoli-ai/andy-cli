@@ -10,8 +10,9 @@ using Andy.Cli.Commands;
 using Andy.Cli.Services;
 using Andy.Cli.Tools;
 using Andy.Llm;
-using Andy.Llm.Models;
 using Andy.Llm.Extensions;
+using Andy.Model.Model;
+using Andy.Model.Orchestration;
 using Andy.Tools;
 using Andy.Tools.Core;
 using Andy.Tools.Execution;
@@ -153,6 +154,9 @@ class Program
                 options.DefaultProvider = detectedProvider ?? "cerebras"; // Fallback to Cerebras if none detected
             });
 
+            // Add the provider factory if not already added
+            services.AddSingleton<Andy.Llm.Providers.ILlmProviderFactory, Andy.Llm.Providers.LlmProviderFactory>();
+
             // JSON repair still available if needed elsewhere
             services.AddSingleton<IJsonRepairService, JsonRepairService>();
             // Remove custom parsers/renderers; rely on andy-llm structured outputs
@@ -221,8 +225,8 @@ class Program
             var toolsCommand = new ToolsCommand(serviceProvider);
             var commandPalette = new CommandPalette();
 
-            LlmClient? llmClient = null;
-            AiConversationService? aiService = null;
+            Andy.Model.Llm.ILlmProvider? llmProvider = null;
+            AssistantService? aiService = null;
 
             // Build comprehensive system prompt
             if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ANDY_STRICT_ERRORS")))
@@ -235,25 +239,30 @@ class Program
             var currentProvider = modelCommand.GetCurrentProvider();
             var systemPrompt = BuildSystemPrompt(availableTools, currentModel, currentProvider);
 
-            var conversation = new ConversationContext
-            {
-                SystemInstruction = systemPrompt,
-                MaxContextMessages = 20
-            };
+            // Conversation will be managed internally by AssistantService
 
             try
             {
-                llmClient = serviceProvider.GetRequiredService<LlmClient>();
+                // Get the appropriate provider based on configuration
+                var providerFactory = serviceProvider.GetService<Andy.Llm.Providers.ILlmProviderFactory>();
+                if (providerFactory != null)
+                {
+                    llmProvider = providerFactory.CreateProvider(currentProvider);
+                }
+
+                if (llmProvider == null)
+                {
+                    throw new InvalidOperationException($"Could not create LLM provider for {currentProvider}");
+                }
+
                 var toolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
-                var jsonRepair = serviceProvider.GetRequiredService<IJsonRepairService>();
-                var logger = serviceProvider.GetService<ILogger<AiConversationService>>();
-                aiService = new AiConversationService(
-                    llmClient,
+                var logger = serviceProvider.GetService<ILogger<AssistantService>>();
+                aiService = new AssistantService(
+                    llmProvider,
                     toolRegistry,
                     toolExecutor,
                     feed,
                     systemPrompt,
-                    jsonRepair,
                     logger,
                     currentModel,
                     currentProvider);
@@ -274,10 +283,14 @@ class Program
                 }
                 feed.AddMarkdownRich(ConsoleColors.NotePrefix("Set CEREBRAS_API_KEY to enable AI responses"));
 
-                // Try to at least get the LLM client without tools for basic chat
+                // Try to at least get the LLM provider without tools for basic chat
                 try
                 {
-                    llmClient = serviceProvider.GetService<LlmClient>();
+                    var factory = serviceProvider.GetService<Andy.Llm.Providers.ILlmProviderFactory>();
+                    if (factory != null)
+                    {
+                        llmProvider = factory.CreateProvider(currentProvider);
+                    }
                 }
                 catch
                 {
@@ -331,29 +344,31 @@ class Program
                             feed.AddMarkdownRich(result.Message);
                             if (result.Success)
                             {
-                                // Update the LLM client and reset conversation context
-                                llmClient = modelCommand.GetCurrentClient();
-                                conversation.Clear();
-                                
+                                // Get new provider from factory
+                                var providerFactory = serviceProvider.GetService<Andy.Llm.Providers.ILlmProviderFactory>();
+                                if (providerFactory != null)
+                                {
+                                    var newProviderName = modelCommand.GetCurrentProvider();
+                                    llmProvider = providerFactory.CreateProvider(newProviderName);
+                                }
+
                                 // Rebuild system prompt for the new model
                                 var newModel = modelCommand.GetCurrentModel();
                                 var newProvider = modelCommand.GetCurrentProvider();
                                 systemPrompt = BuildSystemPrompt(availableTools, newModel, newProvider);
-                                conversation.SystemInstruction = systemPrompt;
+                                // System prompt will be managed by the new AssistantService
                                 
-                                // Update AI service with new client
-                                if (llmClient != null)
+                                // Update AI service with new provider
+                                if (llmProvider != null)
                                 {
                                     var toolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
-                                    var jsonRepair = serviceProvider.GetRequiredService<IJsonRepairService>();
-                                    var logger = serviceProvider.GetService<ILogger<AiConversationService>>();
-                                    aiService = new AiConversationService(
-                                        llmClient,
+                                    var logger = serviceProvider.GetService<ILogger<AssistantService>>();
+                                    aiService = new AssistantService(
+                                        llmProvider,
                                         toolRegistry,
                                         toolExecutor,
                                         feed,
                                         systemPrompt,
-                                        jsonRepair,
                                         logger,
                                         newModel,
                                         newProvider);
@@ -484,7 +499,7 @@ class Program
                     Aliases = new[] { "clear", "reset" },
                     Action = args =>
                     {
-                        conversation.Clear();
+                        // Recreate AssistantService to clear context
                         if (aiService != null)
                         {
                             aiService.ClearContext();
@@ -759,29 +774,31 @@ class Program
                                         feed.AddMarkdownRich(result.Message);
                                         if (result.Success && args.Length > 0 && (args[0] == "switch" || args[0] == "sw"))
                                         {
-                                            // Update the LLM client and reset conversation context
-                                            llmClient = modelCommand.GetCurrentClient();
-                                            conversation.Clear();
+                                            // Get new provider from factory
+                                            var providerFactory = serviceProvider.GetService<Andy.Llm.Providers.ILlmProviderFactory>();
+                                            if (providerFactory != null)
+                                            {
+                                                var newProviderName = modelCommand.GetCurrentProvider();
+                                                llmProvider = providerFactory.CreateProvider(newProviderName);
+                                            }
 
                                             // Rebuild system prompt for the new model
                                             var newModel = modelCommand.GetCurrentModel();
                                             var newProvider = modelCommand.GetCurrentProvider();
                                             systemPrompt = BuildSystemPrompt(availableTools, newModel, newProvider);
-                                            conversation.SystemInstruction = systemPrompt;
+                                            // System prompt will be managed by the new AssistantService
 
-                                            // Update AI service with new client
-                                            if (llmClient != null)
+                                            // Update AI service with new provider
+                                            if (llmProvider != null)
                                             {
                                                 var toolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
-                                                var jsonRepair = serviceProvider.GetRequiredService<IJsonRepairService>();
-                                                var logger = serviceProvider.GetService<ILogger<AiConversationService>>();
-                                                aiService = new AiConversationService(
-                                                    llmClient,
+                                                var logger = serviceProvider.GetService<ILogger<AssistantService>>();
+                                                aiService = new AssistantService(
+                                                    llmProvider,
                                                     toolRegistry,
                                                     toolExecutor,
                                                     feed,
                                                     systemPrompt,
-                                                    jsonRepair,
                                                     logger,
                                                     newModel,
                                                     newProvider);
@@ -848,7 +865,7 @@ class Program
                                 }
                                 else if (commandName == "clear")
                                 {
-                                    conversation.Clear();
+                                    // Recreate AssistantService to clear context
                                     if (aiService != null)
                                     {
                                         aiService.ClearContext();
@@ -889,99 +906,35 @@ class Program
                                 statusMessage.SetMessage("Error occurred", animated: false);
                             }
                         }
-                        else if (llmClient is not null)
+                        else if (llmProvider is not null)
                         {
                             // Fallback to non-tool-aware conversation
                             try
                             {
                                 statusMessage.SetMessage("Thinking", animated: true);
 
-                                // Add user message to conversation context
-                                conversation.AddUserMessage(cmd);
-
-                                // Create request with conversation context
-                                var request = conversation.CreateRequest(currentModel);
+                                // For fallback non-tool-aware conversation, create a basic assistant
+                                // without tools and run a single turn
+                                var fallbackConversation = new Conversation
+                                {
+                                    Id = Guid.NewGuid().ToString(),
+                                    CreatedAt = DateTime.UtcNow
+                                };
+                                var emptyToolRegistry = new Andy.Model.Tooling.ToolRegistry();
+                                var fallbackAssistant = new Assistant(fallbackConversation, emptyToolRegistry, llmProvider);
                                 
-                                // Debug: Check if Parts are properly populated
-                                var debugLog = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".andy", "logs", "parts-debug.log");
-                                Directory.CreateDirectory(Path.GetDirectoryName(debugLog)!);
-                                File.AppendAllText(debugLog, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] CreateRequest called for command: {cmd}\n");
-                                
-                                if (request.Messages != null)
-                                {
-                                    File.AppendAllText(debugLog, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] Request has {request.Messages.Count} messages\n");
-                                    
-                                    foreach (var msg in request.Messages)
-                                    {
-                                        if (msg.Parts == null || msg.Parts.Count == 0)
-                                        {
-                                            File.AppendAllText(debugLog, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] Empty Parts detected for {msg.Role} message!\n");
-                                            Console.WriteLine($"[DEBUG] Empty Parts detected for {msg.Role} message!");
-                                            // Fix it inline
-                                            if (msg.Role == Andy.Llm.Models.MessageRole.User)
-                                            {
-                                                msg.Parts = new List<MessagePart> { new TextPart { Text = cmd } };
-                                                File.AppendAllText(debugLog, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] Fixed User message with: {cmd}\n");
-                                            }
-                                        }
-                                        else
-                                        {
-                                            File.AppendAllText(debugLog, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] {msg.Role} message has {msg.Parts.Count} parts\n");
-                                            foreach (var part in msg.Parts)
-                                            {
-                                                if (part is TextPart textPart)
-                                                {
-                                                    if (string.IsNullOrEmpty(textPart.Text))
-                                                    {
-                                                        File.AppendAllText(debugLog, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] Empty TextPart.Text detected for {msg.Role} message!\n");
-                                                        Console.WriteLine($"[DEBUG] Empty TextPart detected for {msg.Role} message!");
-                                                        // Fix it inline
-                                                        if (msg.Role == Andy.Llm.Models.MessageRole.User)
-                                                        {
-                                                            textPart.Text = cmd;
-                                                            File.AppendAllText(debugLog, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] Fixed with: {cmd}\n");
-                                                        }
-                                                    }
-                                                    else
-                                                    {
-                                                        var preview = textPart.Text.Length > 50 ? textPart.Text.Substring(0, 50) + "..." : textPart.Text;
-                                                        File.AppendAllText(debugLog, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] TextPart has content: {preview}\n");
-                                                    }
-                                                }
-                                                else
-                                                {
-                                                    File.AppendAllText(debugLog, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] Part type: {part?.GetType().Name ?? "null"}\n");
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                                // Get response using the fallback assistant
+                                var response = await fallbackAssistant.RunTurnAsync(cmd, CancellationToken.None);
 
-                                // Get response from Andy.Llm
-                                var response = await llmClient.CompleteAsync(request);
-
-                                // Extract token usage if available
-                                int inputTokens = 0;
-                                int outputTokens = 0;
-                                if (response.TokensUsed.HasValue)
-                                {
-                                    // For now, estimate token distribution (Andy.Llm may provide more detailed info in future)
-                                    inputTokens = (int)(response.TokensUsed.Value * 0.3); // Rough estimate
-                                    outputTokens = (int)(response.TokensUsed.Value * 0.7);
-                                }
-                                else
-                                {
-                                    // Fallback estimation
-                                    inputTokens = cmd.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length * 2;
-                                    outputTokens = (response.Content ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries).Length * 2;
-                                }
+                                // Estimate token usage since Message doesn't provide it
+                                int inputTokens = cmd.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length * 2;
+                                int outputTokens = (response.Content ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries).Length * 2;
 
                                 tokenCounter.AddTokens(inputTokens, outputTokens);
 
                                 AddReplyToFeed(feed, response.Content ?? string.Empty, inputTokens, outputTokens);
 
-                                // Add assistant response to conversation context
-                                conversation.AddAssistantMessage(response.Content ?? string.Empty);
+                                // Note: Without persistent conversation, each request is independent
 
                                 statusMessage.SetMessage("Ready for next question", animated: false);
                             }

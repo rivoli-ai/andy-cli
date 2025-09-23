@@ -1,22 +1,14 @@
-using System;
-using System.Linq;
-using System.Net.Http;
 using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
-using System.Collections.Generic;
-using Andy.Llm;
-using Andy.Llm.Models;
-using Andy.Llm.Extensions;
-using Andy.Llm.Services;
-using Andy.Llm.Configuration;
-using Andy.Llm.Abstractions;
-using Andy.Llm.Providers;
+
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Andy.Cli.Widgets;
 using Andy.Cli.Services;
+using Andy.Llm;
+using Andy.Llm.Configuration;
+using Andy.Llm.Extensions;
+using Andy.Llm.Providers;
+using Andy.Model.Llm;
 
 namespace Andy.Cli.Commands;
 
@@ -29,8 +21,8 @@ public class ModelCommand : ICommand
     private readonly TimeSpan _cacheExpiry = TimeSpan.FromMinutes(10);
     private readonly Dictionary<string, string> _lastProviderErrors = new();
 
-    private LlmClient? _currentClient;
-    private string _currentProvider = "cerebras";
+    private ILlmProvider? _currentProviderInstance;
+    private string _currentProviderName = "cerebras";
     private string _currentModel = "";
     private IServiceProvider? _currentServiceProvider;
 
@@ -41,7 +33,11 @@ public class ModelCommand : ICommand
     public ModelCommand(IServiceProvider serviceProvider)
     {
         _serviceProvider = serviceProvider;
-        _currentClient = serviceProvider.GetService<LlmClient>();
+        var providerFactory = serviceProvider.GetService<ILlmProviderFactory>();
+        if (providerFactory != null)
+        {
+            _currentProviderInstance = providerFactory.CreateProvider(_currentProviderName);
+        }
         _modelMemory = new ModelMemoryService();
 
         // First priority: Check for configured default provider from options
@@ -49,7 +45,7 @@ public class ModelCommand : ICommand
         var hasConfiguredProvider = options?.Value != null && !string.IsNullOrEmpty(options.Value.DefaultProvider);
         if (hasConfiguredProvider)
         {
-            _currentProvider = options.Value.DefaultProvider!;
+            _currentProviderName = options.Value.DefaultProvider!;
         }
         else
         {
@@ -59,7 +55,7 @@ public class ModelCommand : ICommand
 
             if (!string.IsNullOrEmpty(detectedProvider))
             {
-                _currentProvider = detectedProvider;
+                _currentProviderName = detectedProvider;
             }
             else
             {
@@ -67,7 +63,7 @@ public class ModelCommand : ICommand
                 var current = _modelMemory.GetCurrent();
                 if (current.HasValue && HasApiKey(current.Value.Provider))
                 {
-                    _currentProvider = current.Value.Provider;
+                    _currentProviderName = current.Value.Provider;
                     _currentModel = current.Value.Model;
                 }
             }
@@ -75,7 +71,7 @@ public class ModelCommand : ICommand
 
         // Load last used model for the current provider
         var savedConfig = _modelMemory.GetCurrent();
-        if (savedConfig.HasValue && _currentProvider == savedConfig.Value.Provider)
+        if (savedConfig.HasValue && _currentProviderName == savedConfig.Value.Provider)
         {
             // If saved provider matches current provider, use the saved model
             _currentModel = savedConfig.Value.Model;
@@ -83,7 +79,7 @@ public class ModelCommand : ICommand
         else
         {
             // Otherwise use default model for the provider
-            _currentModel = GetDefaultModel(_currentProvider);
+            _currentModel = GetDefaultModel(_currentProviderName);
         }
     }
 
@@ -123,7 +119,7 @@ public class ModelCommand : ICommand
         foreach (var provider in providers)
         {
             var hasApiKey = HasApiKey(provider);
-            var isCurrentProvider = provider == _currentProvider;
+            var isCurrentProvider = provider == _currentProviderName;
             var url = GetProviderUrl(provider);
             var rememberedModel = rememberedModels.TryGetValue(provider, out var m) ? m : null;
             var currentModel = isCurrentProvider ? _currentModel : rememberedModel;
@@ -358,7 +354,7 @@ public class ModelCommand : ICommand
         result.AppendLine(diagnostics);
         result.AppendLine();
         result.AppendLine("Current Settings:");
-        result.AppendLine($"  Active Provider: {_currentProvider}");
+        result.AppendLine($"  Active Provider: {_currentProviderName}");
         result.AppendLine($"  Active Model: {_currentModel}");
 
         return CommandResult.CreateSuccess(result.ToString());
@@ -399,7 +395,7 @@ public class ModelCommand : ICommand
             return CommandResult.Failure("Usage: /model switch <model-name> OR /model switch <provider> <model-name>");
         }
 
-        string providerName = _currentProvider;
+        string providerName = _currentProviderName;
         string modelName;
 
         // Check if first arg is a known provider
@@ -415,12 +411,12 @@ public class ModelCommand : ICommand
             modelName = string.Join(" ", args).Trim();
             
             // First check if the model exists in the current provider
-            var currentProviderModels = await GetProviderModelsAsync(_currentProvider, cancellationToken);
+            var currentProviderModels = await GetProviderModelsAsync(_currentProviderName, cancellationToken);
             if (!currentProviderModels.Any(m => m.Id.Equals(modelName, StringComparison.OrdinalIgnoreCase)))
             {
                 // Model not in current provider, search other providers
                 var detectedProvider = await DetectProviderFromModelNameAsync(modelName, cancellationToken);
-                if (detectedProvider != null && detectedProvider != _currentProvider)
+                if (detectedProvider != null && detectedProvider != _currentProviderName)
                 {
                     // Model belongs to a different provider, auto-switch
                     providerName = detectedProvider;
@@ -429,7 +425,7 @@ public class ModelCommand : ICommand
         }
 
         // Check if we need to switch providers
-        bool providerChanged = providerName != _currentProvider;
+        bool providerChanged = providerName != _currentProviderName;
 
         // Validate provider has API key
         if (!HasApiKey(providerName) && providerName != "ollama")
@@ -440,7 +436,7 @@ public class ModelCommand : ICommand
         try
         {
             // Update current provider and model
-            _currentProvider = providerName;
+            _currentProviderName = providerName;
             _currentModel = modelName;
             _modelMemory.SetCurrent(providerName, modelName);
 
@@ -463,7 +459,11 @@ public class ModelCommand : ICommand
 
             var newProvider = services.BuildServiceProvider();
             _currentServiceProvider = newProvider;
-            _currentClient = newProvider.GetService<LlmClient>();
+            var providerFactory = newProvider.GetService<ILlmProviderFactory>();
+            if (providerFactory != null)
+            {
+                _currentProviderInstance = providerFactory.CreateProvider(_currentProviderName);
+            }
 
             var message = new StringBuilder();
             if (providerChanged)
@@ -537,7 +537,7 @@ public class ModelCommand : ICommand
             var modelName = _modelMemory.GetLastModel(provider) ?? GetDefaultModel(provider);
 
             // Update current provider and model
-            _currentProvider = provider;
+            _currentProviderName = provider;
             _currentModel = modelName;
             _modelMemory.SetCurrent(provider, modelName);
 
@@ -552,7 +552,11 @@ public class ModelCommand : ICommand
 
             var newProvider = services.BuildServiceProvider();
             _currentServiceProvider = newProvider;
-            _currentClient = newProvider.GetService<LlmClient>();
+            var providerFactory = newProvider.GetService<ILlmProviderFactory>();
+            if (providerFactory != null)
+            {
+                _currentProviderInstance = providerFactory.CreateProvider(_currentProviderName);
+            }
 
             var message = new StringBuilder();
             message.AppendLine(ConsoleColors.SuccessPrefix($"Switched to provider: {provider}"));
@@ -574,14 +578,14 @@ public class ModelCommand : ICommand
         info.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         info.AppendLine();
 
-        info.AppendLine($"Provider: {_currentProvider}");
-        info.AppendLine($"URL: {GetProviderUrl(_currentProvider)}");
+        info.AppendLine($"Provider: {_currentProviderName}");
+        info.AppendLine($"URL: {GetProviderUrl(_currentProviderName)}");
         info.AppendLine($"Model: {_currentModel}");
-        info.AppendLine($"Status: {(_currentClient != null ? "Connected" : "Not connected")}");
+        info.AppendLine($"Status: {(_currentProviderInstance != null ? "Connected" : "Not connected")}");
         info.AppendLine();
 
         // Try to get current model info
-        var models = await GetProviderModelsAsync(_currentProvider, cancellationToken);
+        var models = await GetProviderModelsAsync(_currentProviderName, cancellationToken);
         var currentModelInfo = models.FirstOrDefault(m => m.Id == _currentModel);
         if (currentModelInfo != null && !string.IsNullOrEmpty(currentModelInfo.Description))
         {
@@ -613,7 +617,7 @@ public class ModelCommand : ICommand
 
     private async Task<CommandResult> TestModelAsync(string[] args, CancellationToken cancellationToken)
     {
-        if (_currentClient == null)
+        if (_currentProviderInstance == null)
         {
             return CommandResult.Failure(ConsoleColors.ErrorPrefix("No model client available. Please switch to a valid model first."));
         }
@@ -625,31 +629,44 @@ public class ModelCommand : ICommand
         try
         {
             var startTime = DateTime.UtcNow;
-            // Create a simple conversation context for testing
-            var testConversation = new ConversationContext
+            // Create a simple test request
+            var request = new Andy.Model.Llm.LlmRequest
             {
-                SystemInstruction = "You are a helpful assistant. Respond briefly.",
-                MaxContextMessages = 1
+                Messages = new[]
+                {
+                    new Andy.Model.Model.Message
+                    {
+                        Role = Andy.Model.Model.Role.System,
+                        Content = "You are a helpful assistant. Respond briefly."
+                    },
+                    new Andy.Model.Model.Message
+                    {
+                        Role = Andy.Model.Model.Role.User,
+                        Content = prompt
+                    }
+                },
+                Config = new Andy.Model.Llm.LlmClientConfig
+                {
+                    MaxTokens = 100,
+                    Model = _currentModel
+                }
             };
-            testConversation.AddUserMessage(prompt);
-            var request = testConversation.CreateRequest(GetCurrentModel());
-            request.MaxTokens = 100;
 
-            var response = await _currentClient.CompleteAsync(request, cancellationToken);
+            var response = await _currentProviderInstance.CompleteAsync(request, cancellationToken);
             var elapsed = DateTime.UtcNow - startTime;
 
             var result = new StringBuilder();
             result.AppendLine("Model Test Results:");
             result.AppendLine();
-            result.AppendLine($"Provider: {_currentProvider} [{GetProviderUrl(_currentProvider)}]");
+            result.AppendLine($"Provider: {_currentProviderName} [{GetProviderUrl(_currentProviderName)}]");
             result.AppendLine($"Model: {_currentModel}");
             result.AppendLine($"Prompt: {prompt}");
-            result.AppendLine($"Response: {response.Content}");
+            result.AppendLine($"Response: {response.AssistantMessage?.Content ?? "No response"}");
             result.AppendLine($"Response Time: {elapsed.TotalMilliseconds:F0}ms");
 
-            if (response.TokensUsed.HasValue)
+            if (response.Usage != null)
             {
-                result.AppendLine($"Tokens Used: {response.TokensUsed.Value}");
+                result.AppendLine($"Tokens Used: {response.Usage.TotalTokens}");
             }
 
             return CommandResult.CreateSuccess(result.ToString());
@@ -760,13 +777,13 @@ public class ModelCommand : ICommand
         return null;
     }
 
-    public LlmClient? GetCurrentClient() => _currentClient;
-    public string GetCurrentProvider() => _currentProvider;
+    public ILlmProvider? GetCurrentProviderInstance() => _currentProviderInstance;
+    public string GetCurrentProvider() => _currentProviderName;
     public string GetCurrentModel() => _currentModel;
 
     public async Task<ModelListItem> CreateModelListItemAsync(CancellationToken cancellationToken = default)
     {
-        var item = new ModelListItem($"Models - {_currentProvider}: {_currentModel}");
+        var item = new ModelListItem($"Models - {_currentProviderName}: {_currentModel}");
 
         // Get all available providers
         var providerNames = new[] { "cerebras", "openai", "anthropic", "gemini", "ollama" };
@@ -774,7 +791,7 @@ public class ModelCommand : ICommand
         foreach (var provider in providerNames)
         {
             var hasApiKey = HasApiKey(provider);
-            var isCurrentProvider = provider == _currentProvider;
+            var isCurrentProvider = provider == _currentProviderName;
             var url = GetProviderUrl(provider);
             var status = !hasApiKey && provider != "ollama" ? " (no key)" : isCurrentProvider ? " ← current" : "";
 

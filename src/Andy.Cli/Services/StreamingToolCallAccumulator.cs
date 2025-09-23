@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using Microsoft.Extensions.Logging;
-using Andy.Llm.Models;
+using Andy.Model.Model;
 
 namespace Andy.Cli.Services;
 

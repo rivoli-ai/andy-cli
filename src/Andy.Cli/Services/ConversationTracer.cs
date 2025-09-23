@@ -4,7 +4,8 @@ using System.Text;
 using System.Text.Json;
 using System.Collections.Generic;
 using System.Linq;
-using Andy.Llm.Models;
+using Andy.Model.Model;
+using Andy.Model.Llm;
 
 namespace Andy.Cli.Services;
 
