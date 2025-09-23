@@ -70,14 +70,26 @@ public class FeedContentRenderer : IContentRenderer
 
     private void RenderSystemMessageBlock(SystemMessageBlock block)
     {
+        // Handle empty messages as spacers
         if (string.IsNullOrWhiteSpace(block.Message))
+        {
+            _feedView.AddMarkdownRich(" "); // Add a space for vertical separation
             return;
+        }
 
-        // All system messages use AddMarkdownRich for now
-        // Future enhancement: could add different rendering based on type
-        _feedView.AddMarkdownRich(block.Message);
-        
-        _logger?.LogTrace("Rendered system message block {BlockId} of type {Type}", 
+        // Render context messages with subdued formatting
+        if (block.Type == SystemMessageType.Context)
+        {
+            // Use markdown italics for context info to make it less prominent
+            _feedView.AddMarkdownRich($"_{block.Message}_");
+        }
+        else
+        {
+            // All other system messages use normal rendering
+            _feedView.AddMarkdownRich(block.Message);
+        }
+
+        _logger?.LogTrace("Rendered system message block {BlockId} of type {Type}",
             block.Id, block.Type);
     }
 }

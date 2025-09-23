@@ -312,9 +312,11 @@ public class AssistantService : IDisposable
                 }
             }
 
-            // Show context stats
+            // Show context stats with proper spacing
             var stats = GetContextStats();
-            var contextInfo = Commands.ConsoleColors.Dim($"Context: {stats.MessageCount} messages, ~{stats.EstimatedTokens} tokens, {stats.ToolCallCount} tool calls");
+            // Add a blank line before context info to prevent overlap
+            pipeline.AddSystemMessage("", SystemMessageType.Context, priority: 1999);
+            var contextInfo = $"Context: {stats.MessageCount} messages, ~{stats.EstimatedTokens} tokens, {stats.ToolCallCount} tool calls";
             pipeline.AddSystemMessage(contextInfo, SystemMessageType.Context, priority: 2000);
 
             await pipeline.FinalizeAsync();
