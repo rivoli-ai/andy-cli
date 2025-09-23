@@ -462,7 +462,7 @@ public class ModelCommand : ICommand
             var providerFactory = newProvider.GetService<ILlmProviderFactory>();
             if (providerFactory != null)
             {
-                _currentProviderInstance = providerFactory.CreateProvider(_currentProviderName);
+                _currentProviderInstance = providerFactory.CreateProvider(providerName);
             }
 
             var message = new StringBuilder();
@@ -555,7 +555,7 @@ public class ModelCommand : ICommand
             var providerFactory = newProvider.GetService<ILlmProviderFactory>();
             if (providerFactory != null)
             {
-                _currentProviderInstance = providerFactory.CreateProvider(_currentProviderName);
+                _currentProviderInstance = providerFactory.CreateProvider(provider);
             }
 
             var message = new StringBuilder();

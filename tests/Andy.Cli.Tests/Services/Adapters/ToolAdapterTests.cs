@@ -143,6 +143,98 @@ public class ToolAdapterTests
         Assert.DoesNotContain("scope", required);
     }
 
+    [Fact]
+    public void ToolRegistryAdapter_LimitsToolsForCerebrasProvider()
+    {
+        // Arrange
+        var mockRegistry = new Mock<IToolRegistry>();
+        var mockExecutor = new Mock<IToolExecutor>();
+        var mockLogger = new Mock<ILogger<ToolRegistryAdapter>>();
+
+        // Create a variety of tools, some essential and some not
+        var allTools = new List<ITool>
+        {
+            new TestTool("list_directory"),
+            new TestTool("read_file"),
+            new TestTool("bash_command"),
+            new TestTool("search_files"),
+            new TestTool("write_file"),     // Not essential for Cerebras
+            new TestTool("code_index"),     // Not essential for Cerebras
+            new TestTool("system_info")     // Not essential for Cerebras
+        };
+
+        mockRegistry.Setup(r => r.GetTools(true)).Returns(allTools);
+
+        // Act - Create adapter with Cerebras provider
+        var adapter = new ToolRegistryAdapter(mockRegistry.Object, mockExecutor.Object, mockLogger.Object, "cerebras");
+        var registry = adapter.GetToolRegistry();
+
+        // Assert - Only 4 essential tools should be registered
+        var registeredTools = registry.GetAllTools();
+        Assert.Equal(4, registeredTools.Count);
+
+        // Verify only essential tools are present
+        var toolNames = registeredTools.Select(t => t.Definition.Name).ToHashSet();
+        Assert.Contains("list_directory", toolNames);
+        Assert.Contains("read_file", toolNames);
+        Assert.Contains("bash_command", toolNames);
+        Assert.Contains("search_files", toolNames);
+        Assert.DoesNotContain("write_file", toolNames);
+        Assert.DoesNotContain("code_index", toolNames);
+        Assert.DoesNotContain("system_info", toolNames);
+    }
+
+    [Fact]
+    public void ToolRegistryAdapter_IncludesAllToolsForNonCerebrasProvider()
+    {
+        // Arrange
+        var mockRegistry = new Mock<IToolRegistry>();
+        var mockExecutor = new Mock<IToolExecutor>();
+
+        var allTools = new List<ITool>
+        {
+            new TestTool("list_directory"),
+            new TestTool("read_file"),
+            new TestTool("write_file"),
+            new TestTool("code_index"),
+            new TestTool("system_info")
+        };
+
+        mockRegistry.Setup(r => r.GetTools(true)).Returns(allTools);
+
+        // Act - Create adapter with OpenAI provider
+        var adapter = new ToolRegistryAdapter(mockRegistry.Object, mockExecutor.Object, null, "openai");
+        var registry = adapter.GetToolRegistry();
+
+        // Assert - All tools should be registered
+        var registeredTools = registry.GetAllTools();
+        Assert.Equal(5, registeredTools.Count);
+    }
+
+    // Helper test tool class for provider-specific tests
+    private class TestTool : ToolBase
+    {
+        private readonly string _id;
+
+        public TestTool(string id)
+        {
+            _id = id;
+        }
+
+        public override ToolMetadata Metadata => new()
+        {
+            Id = _id,
+            Name = _id,
+            Description = $"Test tool {_id}",
+            Parameters = new ToolParameter[] { }
+        };
+
+        protected override Task<ToolResult> ExecuteInternalAsync(Dictionary<string, object?> parameters, ToolExecutionContext context)
+        {
+            return Task.FromResult(ToolResult.Success("Test execution"));
+        }
+    }
+
     // Test tool classes
     private class TestToolWithEnum : ToolBase
     {

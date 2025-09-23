@@ -44,8 +44,8 @@ public class AssistantService : IDisposable
         _modelName = modelName;
         _providerName = providerName;
 
-        // Create tool registry adapter
-        var toolRegistryAdapter = new ToolRegistryAdapter(toolRegistry, toolExecutor, logger as ILogger<ToolRegistryAdapter>);
+        // Create tool registry adapter with provider name for provider-specific tool filtering
+        var toolRegistryAdapter = new ToolRegistryAdapter(toolRegistry, toolExecutor, logger as ILogger<ToolRegistryAdapter>, providerName);
 
         // Initialize conversation with system prompt
         _conversation = new Conversation
@@ -180,6 +180,14 @@ public class AssistantService : IDisposable
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Failed to process message");
+
+            // Log full error details for debugging
+            if (ex.Message.Contains("Cerebras") || _providerName.Contains("cerebras", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger?.LogError("Cerebras error details: {Message}", ex.Message);
+                _logger?.LogError("Inner exception: {Inner}", ex.InnerException?.Message);
+            }
+
             _feed.AddMarkdownRich($"❌ Error: {ex.Message}");
             return $"Error: {ex.Message}";
         }

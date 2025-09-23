@@ -203,12 +203,23 @@ public class ToolRegistryAdapter
     private readonly IToolExecutor _toolExecutor;
     private readonly ILogger<ToolRegistryAdapter>? _logger;
     private readonly Andy.Model.Tooling.ToolRegistry _modelToolRegistry;
+    private readonly string? _providerName;
 
-    public ToolRegistryAdapter(IToolRegistry toolRegistry, IToolExecutor toolExecutor, ILogger<ToolRegistryAdapter>? logger = null)
+    // Essential tools for Cerebras (limited to 4 to avoid 400 errors)
+    private static readonly HashSet<string> CerebrasEssentialTools = new()
+    {
+        "list_directory",
+        "read_file",
+        "bash_command",
+        "search_files"
+    };
+
+    public ToolRegistryAdapter(IToolRegistry toolRegistry, IToolExecutor toolExecutor, ILogger<ToolRegistryAdapter>? logger = null, string? providerName = null)
     {
         _toolRegistry = toolRegistry;
         _toolExecutor = toolExecutor;
         _logger = logger;
+        _providerName = providerName;
         _modelToolRegistry = new Andy.Model.Tooling.ToolRegistry();
         InitializeTools();
     }
@@ -219,6 +230,13 @@ public class ToolRegistryAdapter
     {
         // Get all enabled tools and create adapters for them
         var enabledTools = _toolRegistry.GetTools(enabledOnly: true);
+
+        // For Cerebras, limit to essential tools to avoid 400 Bad Request errors
+        if (_providerName?.Contains("cerebras", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            enabledTools = enabledTools.Where(t => CerebrasEssentialTools.Contains(t.Metadata.Id)).ToList();
+            _logger?.LogInformation("Limiting tools for Cerebras provider to: {Tools}", string.Join(", ", enabledTools.Select(t => t.Metadata.Id)));
+        }
 
         foreach (var tool in enabledTools)
         {
