@@ -144,7 +144,14 @@ public class CodeIndexTool : ToolBase
                 ["query_type"] = queryType,
                 ["data"] = result
             };
-            return ToolResult.Success("Code index query completed", resultDict);
+
+            // Return ToolResult with Data property properly set
+            return new ToolResult
+            {
+                IsSuccessful = true,
+                Data = resultDict,
+                Message = "Code index query completed"
+            };
         }
         catch (Exception ex)
         {
