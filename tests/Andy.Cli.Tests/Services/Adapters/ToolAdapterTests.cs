@@ -170,11 +170,11 @@ public class ToolAdapterTests
         var registry = adapter.GetToolRegistry();
 
         // Assert - Only 4 essential tools should be registered
-        var registeredTools = registry.GetAllTools();
-        Assert.Equal(4, registeredTools.Count);
+        var registeredToolNames = registry.GetRegisteredToolNames();
+        Assert.Equal(4, registeredToolNames.Count);
 
         // Verify only essential tools are present
-        var toolNames = registeredTools.Select(t => t.Definition.Name).ToHashSet();
+        var toolNames = registeredToolNames.ToHashSet();
         Assert.Contains("list_directory", toolNames);
         Assert.Contains("read_file", toolNames);
         Assert.Contains("bash_command", toolNames);
@@ -207,8 +207,8 @@ public class ToolAdapterTests
         var registry = adapter.GetToolRegistry();
 
         // Assert - All tools should be registered
-        var registeredTools = registry.GetAllTools();
-        Assert.Equal(5, registeredTools.Count);
+        var registeredToolNames = registry.GetRegisteredToolNames();
+        Assert.Equal(5, registeredToolNames.Count);
     }
 
     // Helper test tool class for provider-specific tests

@@ -481,6 +481,15 @@ public class ModelCommand : ICommand
                     message.AppendLine($"Model: {modelName}");
                     message.AppendLine($"Provider URL: {GetProviderUrl(providerName)}");
                 }
+
+                // Show tool limitations for specific providers
+                if (providerName.Contains("cerebras", StringComparison.OrdinalIgnoreCase))
+                {
+                    message.AppendLine();
+                    message.AppendLine(ConsoleColors.NotePrefix("Cerebras provider limited to 4 essential tools to prevent API errors"));
+                    message.AppendLine("  Available tools: list_directory, read_file, bash_command, search_files");
+                }
+
                 message.AppendLine();
                 message.AppendLine(ConsoleColors.NotePrefix("Conversation context reset for new provider"));
             }

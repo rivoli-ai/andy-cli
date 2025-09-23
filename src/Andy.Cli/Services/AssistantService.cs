@@ -44,8 +44,17 @@ public class AssistantService : IDisposable
         _modelName = modelName;
         _providerName = providerName;
 
+        // Log initialization details
+        _logger?.LogInformation("Initializing AssistantService with provider: {Provider}, model: {Model}",
+            providerName, modelName);
+
         // Create tool registry adapter with provider name for provider-specific tool filtering
         var toolRegistryAdapter = new ToolRegistryAdapter(toolRegistry, toolExecutor, logger as ILogger<ToolRegistryAdapter>, providerName);
+
+        // Log tool registry information
+        var registeredToolNames = toolRegistryAdapter.GetToolRegistry().GetRegisteredToolNames();
+        _logger?.LogInformation("Tool registry initialized with {ToolCount} tools: {Tools}",
+            registeredToolNames.Count, string.Join(", ", registeredToolNames));
 
         // Initialize conversation with system prompt
         _conversation = new Conversation
@@ -65,41 +74,145 @@ public class AssistantService : IDisposable
 
     private void SubscribeToEvents()
     {
+        // Turn lifecycle events
         _assistant.TurnStarted += (sender, e) =>
         {
             _logger?.LogInformation("Turn {TurnNumber} started for conversation {ConversationId}",
                 e.TurnNumber, e.ConversationId);
+            _feed.AddMarkdownRich($"[TURN {e.TurnNumber}] Started");
         };
 
+        _assistant.TurnCompleted += (sender, e) =>
+        {
+            _logger?.LogInformation("Turn completed for conversation {ConversationId} with {ToolCallCount} tool calls",
+                e.ConversationId, e.ToolCallsExecuted);
+            var toolInfo = e.ToolCallsExecuted > 0 ? $" | {e.ToolCallsExecuted} tools executed" : "";
+            _feed.AddMarkdownRich($"[TURN] Completed in {e.Duration.TotalMilliseconds:N0}ms{toolInfo}");
+        };
+
+        // LLM request/response events
+        _assistant.LlmRequestStarted += (sender, e) =>
+        {
+            _logger?.LogInformation("LLM request started: {MessageCount} messages, {ToolCount} tools available",
+                e.MessageCount, e.ToolCount);
+            var retryInfo = e.IsRetryAfterTools ? " | retry after tools" : "";
+            _feed.AddMarkdownRich($"[LLM] Sending: {e.MessageCount} messages, {e.ToolCount} tools available{retryInfo}");
+        };
+
+        _assistant.LlmResponseReceived += (sender, e) =>
+        {
+            var usage = e.Usage;
+            var tokenInfo = usage != null ? $"{usage.TotalTokens} tokens" : "tokens unknown";
+            var toolInfo = e.HasToolCalls ? " | contains tool calls" : "";
+            _logger?.LogInformation("LLM response received: {TokenInfo}, HasToolCalls: {HasToolCalls}",
+                tokenInfo, e.HasToolCalls);
+            _feed.AddMarkdownRich($"[LLM] Response: {tokenInfo}{toolInfo}");
+        };
+
+        // Streaming events
+        _assistant.StreamingTokenReceived += (sender, e) =>
+        {
+            _logger?.LogDebug("Streaming delta received, complete: {IsComplete}", e.IsComplete);
+            // Don't display each token to avoid flooding the UI
+        };
+
+        // Tool execution events
         _assistant.ToolExecutionStarted += (sender, e) =>
         {
-            _feed.AddMarkdownRich($"🔧 Executing tool: **{e.ToolName}**");
+            _logger?.LogInformation("Tool execution started: {ToolName} (ID: {CallId})",
+                e.ToolName, e.ToolCall.Id);
+            _feed.AddMarkdownRich($"[TOOL] Executing: {e.ToolName}");
+
+            // Display tool arguments if available and not too large
+            if (!string.IsNullOrWhiteSpace(e.ToolCall.ArgumentsJson) && e.ToolCall.ArgumentsJson.Length < 200)
+            {
+                try
+                {
+                    var args = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(e.ToolCall.ArgumentsJson);
+                    // Show inline for simple arguments
+                    if (e.ToolCall.ArgumentsJson.Length < 100)
+                    {
+                        _feed.AddMarkdownRich($"       Args: {e.ToolCall.ArgumentsJson}");
+                    }
+                    else
+                    {
+                        var prettyArgs = System.Text.Json.JsonSerializer.Serialize(args, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+                        _feed.AddMarkdownRich($"       Args:\n```json\n{prettyArgs}\n```");
+                    }
+                }
+                catch
+                {
+                    _feed.AddMarkdownRich($"       Args: {e.ToolCall.ArgumentsJson}");
+                }
+            }
         };
 
         _assistant.ToolExecutionCompleted += (sender, e) =>
         {
             if (e.IsError)
             {
-                _feed.AddMarkdownRich($"❌ Tool **{e.ToolCall.Name}** failed: {e.Result.ResultJson}");
+                _logger?.LogError("Tool {ToolName} failed: {Error}",
+                    e.ToolCall.Name, e.Result.ResultJson);
+                _feed.AddMarkdownRich($"[TOOL] FAILED: {e.ToolCall.Name}");
+                _feed.AddMarkdownRich($"       Error: {e.Result.ResultJson}");
             }
             else
             {
-                _logger?.LogDebug("Tool {ToolName} completed in {Duration}ms",
+                _logger?.LogInformation("Tool {ToolName} completed in {Duration}ms",
                     e.ToolCall.Name, e.Duration.TotalMilliseconds);
+                _feed.AddMarkdownRich($"[TOOL] Complete: {e.ToolCall.Name} ({e.Duration.TotalMilliseconds:N0}ms)");
+
+                // Display compact tool result if available
+                if (!string.IsNullOrWhiteSpace(e.Result.ResultJson) && e.Result.ResultJson.Length < 200)
+                {
+                    try
+                    {
+                        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(e.Result.ResultJson);
+                        if (result.ValueKind == System.Text.Json.JsonValueKind.Object && result.TryGetProperty("message", out var msg))
+                        {
+                            _feed.AddMarkdownRich($"       Result: {msg.GetString()}");
+                        }
+                        else if (e.Result.ResultJson.Length < 100)
+                        {
+                            _feed.AddMarkdownRich($"       Result: {e.Result.ResultJson}");
+                        }
+                    }
+                    catch
+                    {
+                        // Don't show result if parsing fails
+                    }
+                }
             }
         };
 
+        // Tool validation events
+        _assistant.ToolValidationFailed += (sender, e) =>
+        {
+            var errors = string.Join(", ", e.ValidationErrors);
+            _logger?.LogWarning("Tool validation failed: {ToolName} - {ValidationErrors}",
+                e.ToolCall.Name, errors);
+            _feed.AddMarkdownRich($"[TOOL] Validation failed: {e.ToolCall.Name}");
+            _feed.AddMarkdownRich($"       Errors: {errors}");
+        };
+
+        // Error events
         _assistant.ErrorOccurred += (sender, e) =>
         {
             _logger?.LogError(e.Exception, "Error in conversation {ConversationId}: {Context}",
                 e.ConversationId, e.Context);
-            _feed.AddMarkdownRich($"❌ Error: {e.Exception.Message}");
+            _feed.AddMarkdownRich($"[ERROR] {e.Context}: {e.Exception.Message}");
+
+            // Show more details for debugging
+            if (e.Exception.InnerException != null)
+            {
+                _feed.AddMarkdownRich($"        Inner: {e.Exception.InnerException.Message}");
+            }
         };
 
         _assistant.ToolNotFound += (sender, e) =>
         {
             _logger?.LogWarning("Tool not found: {ToolName} for call {CallId}", e.ToolName, e.CallId);
-            _feed.AddMarkdownRich($"⚠️ Tool not found: **{e.ToolName}**");
+            _feed.AddMarkdownRich($"[WARNING] Tool not found: {e.ToolName}");
         };
     }
 
@@ -184,11 +297,24 @@ public class AssistantService : IDisposable
             // Log full error details for debugging
             if (ex.Message.Contains("Cerebras") || _providerName.Contains("cerebras", StringComparison.OrdinalIgnoreCase))
             {
-                _logger?.LogError("Cerebras error details: {Message}", ex.Message);
-                _logger?.LogError("Inner exception: {Inner}", ex.InnerException?.Message);
+                _logger?.LogError("Cerebras provider error - Message: {Message}", ex.Message);
+                _logger?.LogError("Cerebras provider error - Inner: {Inner}", ex.InnerException?.Message);
+                _logger?.LogError("Cerebras provider error - Stack: {Stack}", ex.StackTrace);
             }
 
-            _feed.AddMarkdownRich($"❌ Error: {ex.Message}");
+            _feed.AddMarkdownRich($"[ERROR] {ex.Message}");
+
+            // Show more details for provider-specific errors
+            if (_providerName.Contains("cerebras", StringComparison.OrdinalIgnoreCase))
+            {
+                _feed.AddMarkdownRich($"        Provider: {_providerName}");
+                _feed.AddMarkdownRich($"        Model: {_modelName}");
+                if (ex.InnerException != null)
+                {
+                    _feed.AddMarkdownRich($"        Details: {ex.InnerException.Message}");
+                }
+            }
+
             return $"Error: {ex.Message}";
         }
     }
