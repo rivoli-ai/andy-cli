@@ -897,7 +897,7 @@ class Program
                             {
                                 statusMessage.SetMessage("Thinking", animated: true);
 
-                                // Process message with tool support (streaming disabled for stability)
+                                // Process message with tool support (streaming disabled until properly implemented)
                                 var response = await aiService.ProcessMessageAsync(cmd, enableStreaming: false);
 
                                 // Get context stats for token counting

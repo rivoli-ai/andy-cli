@@ -103,10 +103,18 @@ public class AssistantService : IDisposable
         {
             var usage = e.Usage;
             var tokenInfo = usage != null ? $"{usage.TotalTokens} tokens" : "tokens unknown";
-            var toolInfo = e.HasToolCalls ? " | contains tool calls" : "";
+
+            if (e.HasToolCalls)
+            {
+                _feed.AddMarkdownRich($"[LLM] Response: {tokenInfo} | executing tools...");
+            }
+            else
+            {
+                _feed.AddMarkdownRich($"[LLM] Response: {tokenInfo} | generating response");
+            }
+
             _logger?.LogInformation("LLM response received: {TokenInfo}, HasToolCalls: {HasToolCalls}",
                 tokenInfo, e.HasToolCalls);
-            _feed.AddMarkdownRich($"[LLM] Response: {tokenInfo}{toolInfo}");
         };
 
         // Streaming events
@@ -259,25 +267,31 @@ public class AssistantService : IDisposable
                     if (!string.IsNullOrWhiteSpace(message.Content))
                     {
                         contentBuilder.Append(message.Content);
-                        // For streaming, we could update the UI incrementally here
-                        // but for now we'll just accumulate the content
+                        // For now, we accumulate content and display at the end
+                        // TODO: Implement proper streaming display that updates a single content block
                     }
                     lastMessage = message;
                 }
 
                 // Use the accumulated content from contentBuilder, not the lastMessage
                 assistantResponse = new Message { Role = Role.Assistant, Content = contentBuilder.ToString() };
+
+                // Display the complete response after streaming completes
+                if (!string.IsNullOrWhiteSpace(assistantResponse.Content))
+                {
+                    pipeline.AddRawContent(assistantResponse.Content);
+                }
             }
             else
             {
                 // Use non-streaming for complete responses
                 assistantResponse = await _assistant.RunTurnAsync(userMessage, cancellationToken);
-            }
 
-            // Display the assistant's response
-            if (!string.IsNullOrWhiteSpace(assistantResponse.Content))
-            {
-                pipeline.AddRawContent(assistantResponse.Content);
+                // Display the assistant's response
+                if (!string.IsNullOrWhiteSpace(assistantResponse.Content))
+                {
+                    pipeline.AddRawContent(assistantResponse.Content);
+                }
             }
 
             // Show context stats
