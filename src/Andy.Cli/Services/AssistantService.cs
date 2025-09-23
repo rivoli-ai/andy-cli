@@ -27,6 +27,8 @@ public class AssistantService : IDisposable
     private readonly ILogger<AssistantService>? _logger;
     private readonly string _modelName;
     private readonly string _providerName;
+    private readonly string _systemPrompt;
+    private bool _isFirstMessage = true;
     private readonly CumulativeOutputTracker _outputTracker = new();
 
     public AssistantService(
@@ -43,6 +45,7 @@ public class AssistantService : IDisposable
         _logger = logger;
         _modelName = modelName;
         _providerName = providerName;
+        _systemPrompt = systemPrompt;
 
         // Log initialization details
         _logger?.LogInformation("Initializing AssistantService with provider: {Provider}, model: {Model}",
@@ -56,7 +59,7 @@ public class AssistantService : IDisposable
         _logger?.LogInformation("Tool registry initialized with {ToolCount} tools: {Tools}",
             registeredToolNames.Count, string.Join(", ", registeredToolNames));
 
-        // Initialize conversation with system prompt
+        // Initialize conversation
         _conversation = new Conversation
         {
             Id = Guid.NewGuid().ToString(),
@@ -110,11 +113,17 @@ public class AssistantService : IDisposable
             }
             else
             {
-                _feed.AddMarkdownRich($"[LLM] Response: {tokenInfo} | generating response");
+                _feed.AddMarkdownRich($"[LLM] Response: {tokenInfo} | content received");
+
+                // Display the response content immediately when no tools are called
+                if (e.Response?.Content != null)
+                {
+                    _feed.AddMarkdownRich(e.Response.Content);
+                }
             }
 
-            _logger?.LogInformation("LLM response received: {TokenInfo}, HasToolCalls: {HasToolCalls}",
-                tokenInfo, e.HasToolCalls);
+            _logger?.LogInformation("LLM response received: {TokenInfo}, HasToolCalls: {HasToolCalls}, HasContent: {HasContent}",
+                tokenInfo, e.HasToolCalls, !string.IsNullOrEmpty(e.Response?.Content));
         };
 
         // Streaming events
@@ -254,6 +263,15 @@ public class AssistantService : IDisposable
                 return msg;
             }
 
+            // Include system prompt with first message
+            string messageToSend = userMessage;
+            if (_isFirstMessage && !string.IsNullOrWhiteSpace(_systemPrompt))
+            {
+                // Prepend system prompt to the first user message
+                messageToSend = $"{_systemPrompt}\n\n{userMessage}";
+                _isFirstMessage = false;
+            }
+
             Message assistantResponse;
 
             if (enableStreaming)
@@ -262,7 +280,7 @@ public class AssistantService : IDisposable
                 var contentBuilder = new StringBuilder();
                 Message? lastMessage = null;
 
-                await foreach (var message in _assistant.RunTurnStreamAsync(userMessage, cancellationToken))
+                await foreach (var message in _assistant.RunTurnStreamAsync(messageToSend, cancellationToken))
                 {
                     if (!string.IsNullOrWhiteSpace(message.Content))
                     {
@@ -285,7 +303,7 @@ public class AssistantService : IDisposable
             else
             {
                 // Use non-streaming for complete responses
-                assistantResponse = await _assistant.RunTurnAsync(userMessage, cancellationToken);
+                assistantResponse = await _assistant.RunTurnAsync(messageToSend, cancellationToken);
 
                 // Display the assistant's response
                 if (!string.IsNullOrWhiteSpace(assistantResponse.Content))

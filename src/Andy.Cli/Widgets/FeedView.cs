@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using DL = Andy.Tui.DisplayList;
 using L = Andy.Tui.Layout;
 
@@ -12,6 +13,7 @@ namespace Andy.Cli.Widgets
     public sealed class FeedView
     {
         private readonly List<IFeedItem> _items = new();
+        private readonly object _itemsLock = new(); // Thread-safety for _items collection
         private int _scrollOffset; // lines from bottom; 0 = bottom
         private bool _followTail = true;
         private bool _focused;
@@ -26,7 +28,16 @@ namespace Andy.Cli.Widgets
         /// <summary>Set animation speed in lines per frame.</summary>
         public void SetAnimationSpeed(int linesPerFrame) { _animSpeed = Math.Max(0, linesPerFrame); }
         /// <summary>Append a new item to the feed.</summary>
-        public void AddItem(IFeedItem item) { if (item is not null) _items.Add(item); }
+        public void AddItem(IFeedItem item)
+        {
+            if (item is not null)
+            {
+                lock (_itemsLock)
+                {
+                    _items.Add(item);
+                }
+            }
+        }
         /// <summary>Convenience: append markdown item.</summary>
         public void AddMarkdown(string md) => AddItem(new MarkdownItem(md));
         /// <summary>Convenience: append markdown using Andy.Tui.Widgets.MarkdownRenderer to better handle inline formatting.</summary>
@@ -114,10 +125,17 @@ namespace Andy.Cli.Widgets
                 b.DrawRect(new DL.Rect(x, y, 1, h, bar));
             }
 
+            // Thread-safe snapshot of items for rendering
+            IFeedItem[] itemsSnapshot;
+            lock (_itemsLock)
+            {
+                itemsSnapshot = _items.ToArray();
+            }
+
             // Measure all items at current width
-            var lineCounts = new int[_items.Count];
+            var lineCounts = new int[itemsSnapshot.Length];
             int total = 0;
-            for (int i = 0; i < _items.Count; i++) { int lc = _items[i].MeasureLineCount(w - 2); lineCounts[i] = lc; total += lc; }
+            for (int i = 0; i < itemsSnapshot.Length; i++) { int lc = itemsSnapshot[i].MeasureLineCount(w - 2); lineCounts[i] = lc; total += lc; }
 
             // Update animation on growth
             if (_followTail && _scrollOffset == 0 && total > _prevTotalLines)
@@ -142,7 +160,7 @@ namespace Andy.Cli.Widgets
 
             // Walk items and render slices
             int cursor = 0; // line cursor into content
-            for (int i = 0; i < _items.Count && drawn < h; i++)
+            for (int i = 0; i < itemsSnapshot.Length && drawn < h; i++)
             {
                 int itemLines = lineCounts[i];
                 int itemStart = cursor;
@@ -164,7 +182,7 @@ namespace Andy.Cli.Widgets
                     if (maxLines <= 0) break;
                 }
 
-                _items[i].RenderSlice(x + 1, cy, w - 2, sliceStart, maxLines, baseDl, b);
+                itemsSnapshot[i].RenderSlice(x + 1, cy, w - 2, sliceStart, maxLines, baseDl, b);
                 cy += maxLines;
                 drawn += maxLines;
             }

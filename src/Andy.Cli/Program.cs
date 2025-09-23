@@ -123,6 +123,7 @@ class Program
             var statusMessage = new StatusMessage();
             var status = new StatusLine(); status.Set("Idle", spinner: false);
             var prompt = new PromptLine();
+            bool isProcessingMessage = false; // Track if we're processing a message
             prompt.SetBorder(true);
             prompt.SetShowCaret(true);
             prompt.SetFocused(true);
@@ -750,7 +751,7 @@ class Program
 
                     // Avoid mapping regular alphanumeric keys to actions
                     var submitted = prompt.OnKey(k);
-                    if (submitted is string cmd && !string.IsNullOrWhiteSpace(cmd))
+                    if (submitted is string cmd && !string.IsNullOrWhiteSpace(cmd) && !isProcessingMessage)
                     {
                         // Check for slash commands
                         if (cmd.StartsWith("/"))
@@ -893,24 +894,33 @@ class Program
                         feed.AddUserMessage(cmd);
                         if (aiService != null)
                         {
-                            try
+                            // Run the assistant processing on a background task so UI can update
+                            isProcessingMessage = true;
+                            _ = Task.Run(async () =>
                             {
-                                statusMessage.SetMessage("Thinking", animated: true);
+                                try
+                                {
+                                    statusMessage.SetMessage("Thinking", animated: true);
 
-                                // Process message with tool support (streaming disabled until properly implemented)
-                                var response = await aiService.ProcessMessageAsync(cmd, enableStreaming: false);
+                                    // Process message with tool support (streaming disabled until properly implemented)
+                                    var response = await aiService.ProcessMessageAsync(cmd, enableStreaming: false);
 
-                                // Get context stats for token counting
-                                var stats = aiService.GetContextStats();
-                                tokenCounter.AddTokens(stats.EstimatedTokens / 2, stats.EstimatedTokens / 2);
+                                    // Get context stats for token counting
+                                    var stats = aiService.GetContextStats();
+                                    tokenCounter.AddTokens(stats.EstimatedTokens / 2, stats.EstimatedTokens / 2);
 
-                                statusMessage.SetMessage("Ready for next question", animated: false);
-                            }
-                            catch (Exception ex)
-                            {
-                                feed.AddMarkdownRich(ConsoleColors.ErrorPrefix(ex.Message));
-                                statusMessage.SetMessage("Error occurred", animated: false);
-                            }
+                                    statusMessage.SetMessage("Ready for next question", animated: false);
+                                }
+                                catch (Exception ex)
+                                {
+                                    feed.AddMarkdownRich(ConsoleColors.ErrorPrefix(ex.Message));
+                                    statusMessage.SetMessage("Error occurred", animated: false);
+                                }
+                                finally
+                                {
+                                    isProcessingMessage = false;
+                                }
+                            });
                         }
                         else if (llmProvider is not null)
                         {
