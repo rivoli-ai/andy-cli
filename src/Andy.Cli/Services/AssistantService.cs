@@ -25,7 +25,6 @@ public class AssistantService : IDisposable
     private readonly Conversation _conversation;
     private readonly FeedView _feed;
     private readonly ILogger<AssistantService>? _logger;
-    private readonly ContentPipeline.ContentPipeline _contentPipeline;
     private readonly string _modelName;
     private readonly string _providerName;
     private readonly CumulativeOutputTracker _outputTracker = new();
@@ -61,11 +60,7 @@ public class AssistantService : IDisposable
         // Subscribe to assistant events for UI updates
         SubscribeToEvents();
 
-        // Initialize content pipeline
-        var processor = new MarkdownContentProcessor();
-        var sanitizer = new TextContentSanitizer();
-        var renderer = new FeedContentRenderer(feed, logger as ILogger<FeedContentRenderer>);
-        _contentPipeline = new ContentPipeline.ContentPipeline(processor, sanitizer, renderer, logger as ILogger<ContentPipeline.ContentPipeline>);
+        // Content pipeline will be created per message in ProcessMessageAsync
     }
 
     private void SubscribeToEvents()
@@ -121,8 +116,7 @@ public class AssistantService : IDisposable
             // Reset output tracker for new message
             _outputTracker.Reset();
 
-            // Recreate content pipeline for this request
-            _contentPipeline?.Dispose();
+            // Create new content pipeline for this request (don't reuse _contentPipeline)
             var processor = new MarkdownContentProcessor();
             var sanitizer = new TextContentSanitizer();
             var renderer = new FeedContentRenderer(_feed, _logger as ILogger<FeedContentRenderer>);
@@ -262,6 +256,7 @@ public class AssistantService : IDisposable
 
     public void Dispose()
     {
-        _contentPipeline?.Dispose();
+        // Nothing to dispose currently
+        // Content pipelines are created and disposed per message
     }
 }

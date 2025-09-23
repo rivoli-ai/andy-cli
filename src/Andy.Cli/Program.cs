@@ -361,6 +361,9 @@ class Program
                                 // Update AI service with new provider
                                 if (llmProvider != null)
                                 {
+                                    // Dispose old service before creating new one
+                                    aiService?.Dispose();
+
                                     var toolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
                                     var logger = serviceProvider.GetService<ILogger<AssistantService>>();
                                     aiService = new AssistantService(
@@ -791,6 +794,9 @@ class Program
                                             // Update AI service with new provider
                                             if (llmProvider != null)
                                             {
+                                                // Dispose old service before creating new one
+                                                aiService?.Dispose();
+
                                                 var toolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
                                                 var logger = serviceProvider.GetService<ILogger<AssistantService>>();
                                                 aiService = new AssistantService(
