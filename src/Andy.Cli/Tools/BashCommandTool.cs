@@ -77,7 +77,7 @@ public class BashCommandTool : ITool
         _logger = logger;
     }
 
-    public async Task<ToolResult> ExecuteAsync(
+    public Task<ToolResult> ExecuteAsync(
         Dictionary<string, object?> parameters,
         ToolExecutionContext context)
     {
@@ -89,11 +89,11 @@ public class BashCommandTool : ITool
 
             if (string.IsNullOrWhiteSpace(command))
             {
-                return new ToolResult
+                return Task.FromResult(new ToolResult
                 {
                     IsSuccessful = false,
                     ErrorMessage = "Command parameter is required"
-                };
+                });
             }
 
             _logger?.LogDebug("Captured bash command: {Command}", command);
@@ -109,21 +109,21 @@ public class BashCommandTool : ITool
 
             // Return success with the command info
             var jsonOutput = JsonSerializer.Serialize(response, new JsonSerializerOptions { WriteIndented = true });
-            return new ToolResult
+            return Task.FromResult(new ToolResult
             {
                 IsSuccessful = true,
                 Data = response,
                 Message = "Command captured successfully"
-            };
+            });
         }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Error capturing bash command");
-            return new ToolResult
+            return Task.FromResult(new ToolResult
             {
                 IsSuccessful = false,
                 ErrorMessage = $"Failed to capture command: {ex.Message}"
-            };
+            });
         }
     }
 

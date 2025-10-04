@@ -65,14 +65,14 @@ public class EngineAssistantService : IDisposable
                 Temperature = 0.0, // Deterministic for CLI usage
                 MaxTokens = 4096
             })
-            .WithLogger(logger as ILogger<Agent>)
+            .WithLogger(logger as ILogger<Agent> ?? throw new ArgumentNullException(nameof(logger)))
             .Build();
 
         // Create user interface adapter for FeedView
         var userInterface = new FeedUserInterface(feed, logger as ILogger<FeedUserInterface>);
 
         // Build the interactive agent wrapper
-        _interactiveAgent = InteractiveAgentBuilder.Create()
+        var interactiveBuilder = InteractiveAgentBuilder.Create()
             .WithDefaults(llmProvider, toolRegistry, toolExecutor)
             .WithUserInterface(userInterface)
             .WithOptions(new InteractiveAgentOptions
@@ -86,10 +86,16 @@ public class EngineAssistantService : IDisposable
                 ShowInitialHelp = false,
                 WelcomeMessage = "",
                 GoodbyeMessage = ""
-            })
-            .WithLogger(logger as ILogger<InteractiveAgent>)
-            .WithAgentLogger(logger as ILogger<Agent>)
-            .Build();
+            });
+
+        if (logger != null)
+        {
+            interactiveBuilder = interactiveBuilder
+                .WithLogger(logger as ILogger<InteractiveAgent> ?? throw new ArgumentException("Invalid logger type"))
+                .WithAgentLogger(logger as ILogger<Agent> ?? throw new ArgumentException("Invalid logger type"));
+        }
+
+        _interactiveAgent = interactiveBuilder.Build();
 
         // Subscribe to agent events for UI updates
         SubscribeToEvents();

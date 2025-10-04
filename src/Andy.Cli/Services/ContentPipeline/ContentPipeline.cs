@@ -55,7 +55,7 @@ public class ContentPipeline : IDisposable
 
         try
         {
-            var blocks = _processor.Process(content, blockIdPrefix);
+            var blocks = _processor.Process(content!, blockIdPrefix);
             _logger?.LogInformation("[PIPELINE] Processor returned {Count} blocks", blocks.Count());
             foreach (var block in blocks)
             {
@@ -189,7 +189,7 @@ public class ContentPipeline : IDisposable
         }
     }
 
-    private async Task RenderAllPendingBlocks()
+    private Task RenderAllPendingBlocks()
     {
         // Get all completed blocks and sort by priority
         var blocksToRender = _completedBlocks.Values
@@ -217,6 +217,8 @@ public class ContentPipeline : IDisposable
                 ErrorPolicy.RethrowIfStrict(ex);
             }
         }
+
+        return Task.CompletedTask;
     }
 
     public void Dispose()

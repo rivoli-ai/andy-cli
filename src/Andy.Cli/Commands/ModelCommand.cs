@@ -45,7 +45,7 @@ public class ModelCommand : ICommand
         var hasConfiguredProvider = options?.Value != null && !string.IsNullOrEmpty(options.Value.DefaultProvider);
         if (hasConfiguredProvider)
         {
-            _currentProviderName = options.Value.DefaultProvider!;
+            _currentProviderName = options!.Value.DefaultProvider!;
         }
         else
         {
