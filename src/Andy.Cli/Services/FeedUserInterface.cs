@@ -80,6 +80,14 @@ public class FeedUserInterface : IUserInterface
         if (message.StartsWith("Turn") && message.Contains("completed"))
             return Task.CompletedTask;
 
+        // Enhance tool execution messages
+        if (message.StartsWith("Using tool:"))
+        {
+            var toolName = message.Replace("Using tool:", "").Trim();
+            _feed.AddMarkdownRich($"🔧 **Tool**: {toolName}");
+            return Task.CompletedTask;
+        }
+
         var prefix = isComplete ? "[DONE] " : "[...] ";
         _feed.AddMarkdownRich($"{prefix}{message}");
 

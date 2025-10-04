@@ -165,6 +165,9 @@ public class EngineAssistantService : IDisposable
                 _isFirstMessage = false;
             }
 
+            // Show loading indicator
+            _feed.AddMarkdownRich($"[...] Processing request...");
+
             // Process message through interactive agent
             var result = await _interactiveAgent.ProcessMessageAsync(messageToSend, cancellationToken);
 
