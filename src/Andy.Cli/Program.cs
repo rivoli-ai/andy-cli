@@ -226,7 +226,7 @@ class Program
             var commandPalette = new CommandPalette();
 
             Andy.Model.Llm.ILlmProvider? llmProvider = null;
-            EngineAssistantService? aiService = null;
+            SimpleAssistantService? aiService = null;
 
             // Build comprehensive system prompt
             if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ANDY_STRICT_ERRORS")))
@@ -256,20 +256,16 @@ class Program
                 }
 
                 var toolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
-                var logger = serviceProvider.GetService<ILogger<EngineAssistantService>>();
-                aiService = new EngineAssistantService(
+                var logger = serviceProvider.GetService<ILogger<SimpleAssistantService>>();
+                aiService = new SimpleAssistantService(
                     llmProvider,
                     toolRegistry,
                     toolExecutor,
                     feed,
-                    systemPrompt,
-                    logger,
                     currentModel,
-                    currentProvider);
+                    currentProvider,
+                    logger);
 
-                // Get actual model and provider information from ModelCommand
-                // Set initial model info
-                aiService.UpdateModelInfo(currentModel, currentProvider);
                 var providerUrl = GetProviderUrl(currentProvider);
 
                 feed.AddMarkdownRich($"[model] {currentModel} with {currentProvider} provider [{providerUrl}] (tool-enabled)");
@@ -365,22 +361,15 @@ class Program
                                     aiService?.Dispose();
 
                                     var toolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
-                                    var logger = serviceProvider.GetService<ILogger<EngineAssistantService>>();
-                                    aiService = new EngineAssistantService(
+                                    var logger = serviceProvider.GetService<ILogger<SimpleAssistantService>>();
+                                    aiService = new SimpleAssistantService(
                                         llmProvider,
                                         toolRegistry,
                                         toolExecutor,
                                         feed,
-                                        systemPrompt,
-                                        logger,
                                         newModel,
-                                        newProvider);
-                                    
-                                    // Set model info for response interpretation
-                                    aiService.UpdateModelInfo(
-                                        modelCommand.GetCurrentModel(),
-                                        modelCommand.GetCurrentProvider()
-                                    );
+                                        newProvider,
+                                        logger);
                                 }
 
                                 feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
@@ -798,22 +787,15 @@ class Program
                                                 aiService?.Dispose();
 
                                                 var toolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
-                                                var logger = serviceProvider.GetService<ILogger<EngineAssistantService>>();
-                                                aiService = new EngineAssistantService(
+                                                var logger = serviceProvider.GetService<ILogger<SimpleAssistantService>>();
+                                                aiService = new SimpleAssistantService(
                                                     llmProvider,
                                                     toolRegistry,
                                                     toolExecutor,
                                                     feed,
-                                                    systemPrompt,
-                                                    logger,
                                                     newModel,
-                                                    newProvider);
-
-                                                // Set model info for response interpretation
-                                                aiService.UpdateModelInfo(
-                                                    modelCommand.GetCurrentModel(),
-                                                    modelCommand.GetCurrentProvider()
-                                                );
+                                                    newProvider,
+                                                    logger);
                                             }
 
                                             feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
