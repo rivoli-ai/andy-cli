@@ -177,6 +177,10 @@ public class EngineAssistantService : IDisposable
             // Extract response from agent result
             string responseContent = string.Empty;
 
+            // Log result details for debugging
+            _logger?.LogInformation("Agent result - Success: {Success}, StopReason: {StopReason}, HasObservation: {HasObs}",
+                result.Success, result.StopReason, result.FinalState.LastObservation != null);
+
             if (result.Success)
             {
                 // Get the final observation from the agent
