@@ -744,7 +744,7 @@ public class ModelCommand : ICommand
 
         return provider switch
         {
-            "cerebras" => "qwen-3-coder-480b",
+            "cerebras" => "llama-3.3-70b", // Only this model supports function calling
             "openai" => "gpt-4o",
             "anthropic" => "claude-3-sonnet-20240229",
             "gemini" => "gemini-2.0-flash-exp",
