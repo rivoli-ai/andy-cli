@@ -8,9 +8,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Andy.Context" Version="2025.9.21-rc.3" />
+    <PackageReference Include="Andy.Context" Version="2025.9.23-rc.4" />
     <PackageReference Include="Andy.Llm" Version="2025.9.19-rc.15" />
     <PackageReference Include="Andy.Tools" Version="2025.9.5-rc.15" />
+    <PackageReference Include="Andy.Model" Version="2025.9.20-rc.4" />
     <PackageReference Include="coverlet.collector" Version="6.0.2" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="Moq" Version="4.20.72" />
