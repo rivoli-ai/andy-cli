@@ -54,6 +54,9 @@ public class EngineAssistantService : IDisposable
         _logger?.LogInformation("Tool registry initialized with {ToolCount} tools: {Tools}",
             toolNames.Count, string.Join(", ", toolNames));
 
+        // Show tool count in UI for visibility
+        _feed.AddMarkdownRich($"[INFO] Loaded {toolNames.Count} tools for agent");
+
         // Build the core agent using andy-engine
         _agent = AgentBuilder.Create()
             .WithDefaults(llmProvider, toolRegistry, toolExecutor)
@@ -184,6 +187,13 @@ public class EngineAssistantService : IDisposable
                     pipeline.AddRawContent(responseContent);
                 }
 
+                // If no observation summary, show the stop reason (which contains the agent's response)
+                if (string.IsNullOrEmpty(responseContent) && !string.IsNullOrEmpty(result.StopReason))
+                {
+                    responseContent = result.StopReason;
+                    pipeline.AddRawContent(responseContent);
+                }
+
                 // Show key facts if available
                 if (observation?.KeyFacts.Count > 0)
                 {
@@ -194,6 +204,13 @@ public class EngineAssistantService : IDisposable
                         factsText.AppendLine($"- **{key}**: {value}");
                     }
                     pipeline.AddRawContent(factsText.ToString());
+                }
+
+                // If still no content, provide a generic success message
+                if (string.IsNullOrEmpty(responseContent))
+                {
+                    responseContent = "Task completed successfully.";
+                    pipeline.AddRawContent(responseContent);
                 }
             }
             else
@@ -219,10 +236,16 @@ public class EngineAssistantService : IDisposable
                         }
                         else
                         {
-                            // No question captured - show generic message
+                            // No question captured - show diagnostic info
                             responseContent = "The agent needs more information but didn't specify what.";
                             pipeline.AddRawContent(responseContent);
-                            _logger?.LogWarning("User input required but no question was captured");
+
+                            // Add diagnostic information
+                            var diagnosticInfo = $"\n**Debug Info:**\n- Stop Reason: {result.StopReason}\n- Working Memory Keys: {string.Join(", ", workingMemory.Keys)}";
+                            pipeline.AddRawContent(diagnosticInfo);
+
+                            _logger?.LogWarning("User input required but no question was captured. WorkingMemory: {Memory}",
+                                string.Join(", ", workingMemory.Select(kv => $"{kv.Key}={kv.Value}")));
                         }
                     }
                 }
