@@ -196,12 +196,32 @@ public class EngineAssistantService : IDisposable
             else
             {
                 // Check if this is a user input request
-                if (result.StopReason == "User input required" && !string.IsNullOrEmpty(_lastUserQuestion))
+                if (result.StopReason == "User input required")
                 {
-                    // Agent needs clarification - show the question
-                    responseContent = _lastUserQuestion;
-                    pipeline.AddRawContent(responseContent);
-                    _lastUserQuestion = null; // Clear for next time
+                    // Agent needs clarification - show the question if we captured it
+                    if (!string.IsNullOrEmpty(_lastUserQuestion))
+                    {
+                        responseContent = _lastUserQuestion;
+                        pipeline.AddRawContent(responseContent);
+                        _lastUserQuestion = null; // Clear for next time
+                    }
+                    else
+                    {
+                        // Fallback: extract from working memory digest if available
+                        var workingMemory = result.FinalState.WorkingMemoryDigest;
+                        if (workingMemory.TryGetValue("user_query", out var query))
+                        {
+                            responseContent = query;
+                            pipeline.AddRawContent(responseContent);
+                        }
+                        else
+                        {
+                            // No question captured - show generic message
+                            responseContent = "The agent needs more information but didn't specify what.";
+                            pipeline.AddRawContent(responseContent);
+                            _logger?.LogWarning("User input required but no question was captured");
+                        }
+                    }
                 }
                 // Check if this is a conversational response (StopReason contains the response)
                 // For chat-style interactions, the agent "stops" with the response content
