@@ -58,15 +58,24 @@ public class EngineAssistantService : IDisposable
         _feed.AddMarkdownRich($"[INFO] Loaded {toolNames.Count} tools for agent");
 
         // Build the core agent using andy-engine
-        _agent = AgentBuilder.Create()
+        var agentBuilder = AgentBuilder.Create()
             .WithDefaults(llmProvider, toolRegistry, toolExecutor)
             .WithPlannerOptions(new PlannerOptions
             {
                 Temperature = 0.0, // Deterministic for CLI usage
                 MaxTokens = 4096
-            })
-            .WithLogger(logger as ILogger<Agent> ?? throw new ArgumentNullException(nameof(logger)))
-            .Build();
+            });
+
+        if (logger != null)
+        {
+            var agentLogger = logger as ILogger<Agent>;
+            if (agentLogger != null)
+            {
+                agentBuilder = agentBuilder.WithLogger(agentLogger);
+            }
+        }
+
+        _agent = agentBuilder.Build();
 
         // Create user interface adapter for FeedView
         var userInterface = new FeedUserInterface(feed, logger as ILogger<FeedUserInterface>);
@@ -90,9 +99,15 @@ public class EngineAssistantService : IDisposable
 
         if (logger != null)
         {
-            interactiveBuilder = interactiveBuilder
-                .WithLogger(logger as ILogger<InteractiveAgent> ?? throw new ArgumentException("Invalid logger type"))
-                .WithAgentLogger(logger as ILogger<Agent> ?? throw new ArgumentException("Invalid logger type"));
+            var interactiveLogger = logger as ILogger<InteractiveAgent>;
+            var agentLogger = logger as ILogger<Agent>;
+
+            if (interactiveLogger != null && agentLogger != null)
+            {
+                interactiveBuilder = interactiveBuilder
+                    .WithLogger(interactiveLogger)
+                    .WithAgentLogger(agentLogger);
+            }
         }
 
         _interactiveAgent = interactiveBuilder.Build();
