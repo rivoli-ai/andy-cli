@@ -96,10 +96,29 @@ public class SimpleAssistantService : IDisposable
             // Process message through SimpleAgent
             var result = await _agent.ProcessMessageAsync(userMessage, cancellationToken);
 
+            _logger?.LogInformation("Agent result - Success: {Success}, Response: '{Response}', StopReason: {StopReason}",
+                result.Success, result.Response, result.StopReason);
+
+            // Debug: Always show result details
+            _feed.AddMarkdownRich($"[DEBUG] Success={result.Success}, Response.Length={result.Response?.Length ?? 0}, StopReason={result.StopReason}");
+
             // Add response to pipeline
             if (!string.IsNullOrEmpty(result.Response))
             {
                 pipeline.AddRawContent(result.Response);
+            }
+            else if (!result.Success)
+            {
+                // Error case - show the error
+                _logger?.LogWarning("Agent failed. StopReason: {StopReason}", result.StopReason);
+                pipeline.AddRawContent($"**Error**: Agent failed with StopReason: {result.StopReason}");
+            }
+            else
+            {
+                // No response content - this is unexpected
+                _logger?.LogWarning("Agent returned empty response. Success: {Success}, StopReason: {StopReason}",
+                    result.Success, result.StopReason);
+                pipeline.AddRawContent($"[No response received. StopReason: {result.StopReason}]");
             }
 
             // Show context stats
