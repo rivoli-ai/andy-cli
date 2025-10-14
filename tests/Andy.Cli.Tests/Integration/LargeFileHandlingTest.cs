@@ -8,13 +8,13 @@ using System.Threading.Tasks;
 using Andy.Cli.Services;
 using Andy.Cli.Widgets;
 using Andy.Llm;
-using Andy.Llm.Models;
+using Andy.Model.Llm;
 using Andy.Tools.Core;
 using Andy.Tools.Execution;
 using Andy.Tools.Library;
 using Moq;
 using Xunit;
-using MessageRole = Andy.Llm.Models.MessageRole;
+using MessageRole = Andy.Model.Llm.MessageRole;
 
 namespace Andy.Cli.Tests.Integration;
 

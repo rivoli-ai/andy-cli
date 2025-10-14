@@ -1,7 +1,7 @@
 using Moq;
 using Xunit;
 using Andy.Llm;
-using Andy.Llm.Models;
+using Andy.Model.Llm;
 using Andy.Cli.Tests.TestData;
 
 namespace Andy.Cli.Tests.Examples;

@@ -1,5 +1,5 @@
 using System.Text.Json;
-using Andy.Llm.Models;
+using Andy.Model.Llm;
 
 namespace Andy.Cli.Tests.TestData;
 

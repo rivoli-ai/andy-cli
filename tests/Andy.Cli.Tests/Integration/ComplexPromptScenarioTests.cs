@@ -17,7 +17,7 @@ using Andy.Tools.Library.FileSystem;
 using Andy.Tools.Library.System;
 using Andy.Tools.Validation;
 using Andy.Llm;
-using Andy.Llm.Models;
+using Andy.Model.Llm;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 

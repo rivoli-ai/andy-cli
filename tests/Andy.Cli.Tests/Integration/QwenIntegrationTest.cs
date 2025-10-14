@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 using Andy.Cli.Services;
 using Andy.Cli.Widgets;
 using Andy.Llm;
-using Andy.Llm.Models;
+using Andy.Model.Llm;
 using Andy.Tools.Core;
 using Andy.Tools.Execution;
 using Microsoft.Extensions.Logging.Abstractions;

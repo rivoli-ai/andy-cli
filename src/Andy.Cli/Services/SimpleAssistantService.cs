@@ -130,7 +130,7 @@ public class SimpleAssistantService : IDisposable
             await pipeline.FinalizeAsync();
             pipeline.Dispose();
 
-            return result.Response;
+            return result.Response ?? string.Empty;
         }
         catch (Exception ex)
         {
