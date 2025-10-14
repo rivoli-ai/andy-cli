@@ -1,10 +1,10 @@
 # andy-cli
-Command line code assistant in .NET
+Command line AI code assistant powered by .NET 8
 
-> ⚠️ **ALPHA RELEASE WARNING** ⚠️
-> 
+> **ALPHA RELEASE WARNING**
+>
 > This software is in ALPHA stage. **NO GUARANTEES** are made about its functionality, stability, or safety.
-> 
+>
 > **CRITICAL WARNINGS:**
 > - This tool performs **DESTRUCTIVE OPERATIONS** on files and directories
 > - Permission management is **NOT FULLY TESTED** and may have security vulnerabilities
@@ -12,17 +12,17 @@ Command line code assistant in .NET
 > - **DO NOT USE** on systems with critical or irreplaceable data
 > - **DO NOT USE** on systems without complete, verified backups
 > - The authors assume **NO RESPONSIBILITY** for data loss, system damage, or security breaches
-> 
+>
 > **USE AT YOUR OWN RISK**
 
 ## Features
 
-- Interactive TUI (Terminal User Interface) for AI-assisted coding
-- Support for multiple LLM providers (OpenAI, Anthropic, Cerebras, Azure OpenAI, Ollama, Google Gemini)
-- Automatic provider detection based on environment variables
-- Tool execution capabilities for file operations, code analysis, and more
-- Streaming responses with real-time display
-- Command palette for quick access to features
+- **Interactive TUI** - Modern terminal interface with real-time streaming responses
+- **Multi-Provider Support** - Works with OpenAI, Cerebras, Azure OpenAI, and Ollama
+- **Smart Provider Detection** - Automatically selects the best available LLM provider
+- **Tool Execution** - File operations, code search, bash commands, and more
+- **Context-Aware** - Maintains conversation history with intelligent context management
+- **Performance Optimized** - Efficient streaming and rendering with Andy.Tui framework
 
 ## Installation
 
@@ -37,23 +37,23 @@ dotnet run --project src/Andy.Cli
 
 Andy CLI automatically detects and selects the best available LLM provider based on your environment variables. The detection follows this priority order:
 
-1. **Ollama** (local) - Detected if running on localhost:11434
-2. **Azure OpenAI** - Requires `AZURE_OPENAI_API_KEY` and `AZURE_OPENAI_ENDPOINT`
-3. **OpenAI** - Requires `OPENAI_API_KEY`
-4. **Cerebras** - Requires `CEREBRAS_API_KEY`
-5. **Anthropic** - Requires `ANTHROPIC_API_KEY`
-6. **Google Gemini** - Requires `GOOGLE_API_KEY`
+1. **OpenAI** - Requires `OPENAI_API_KEY` (highest priority for reliability)
+2. **Cerebras** - Requires `CEREBRAS_API_KEY` (fast inference)
+3. **Ollama** (local) - Detected if running on localhost:11434 (no API key required)
+4. **Azure OpenAI** - Requires `AZURE_OPENAI_API_KEY` and `AZURE_OPENAI_ENDPOINT`
+
+Note: Anthropic and Google Gemini providers are recognized but require Andy.Llm package updates for full support.
 
 ### Environment Variables
 
 #### Required for Providers
 
+See Andy.Llm library documentation.
+
 - `OPENAI_API_KEY` - OpenAI API key
 - `AZURE_OPENAI_API_KEY` - Azure OpenAI API key
 - `AZURE_OPENAI_ENDPOINT` - Azure OpenAI endpoint URL
 - `CEREBRAS_API_KEY` - Cerebras API key
-- `ANTHROPIC_API_KEY` - Anthropic API key
-- `GOOGLE_API_KEY` - Google API key for Gemini
 - `OLLAMA_API_BASE` - Custom Ollama endpoint (default: http://localhost:11434)
 
 #### Provider Control
@@ -100,7 +100,7 @@ dotnet run --project src/Andy.Cli
 - `Ctrl+P` - Open command palette
 - `F2` - Toggle performance HUD
 - `ESC` - Exit application
-- `↑/↓` - Scroll through chat history
+- `Up/Down` - Scroll through chat history
 - `Page Up/Down` - Fast scroll
 
 #### Slash Commands
@@ -128,26 +128,48 @@ dotnet run --project src/Andy.Cli -- tools info <tool_name>
 
 ## Development
 
+### Architecture
+
+Andy CLI is built on a modular architecture using:
+- **Andy.Engine** - Core AI agent engine with tool execution
+- **Andy.Llm** - LLM provider abstractions and implementations
+- **Andy.Tools** - Extensible tool framework for file operations, code search, etc.
+- **Andy.Tui** - High-performance terminal UI framework
+- **Andy.Model** - Shared models and abstractions
+
 ### Project Structure
 
 - `src/Andy.Cli/` - Main CLI application
-- `src/Andy.Cli/Services/` - Core services including provider detection
-- `src/Andy.Cli/Commands/` - Command implementations
-- `src/Andy.Cli/Tools/` - Tool implementations
-- `src/Andy.Cli/Widgets/` - TUI components
+- `src/Andy.Cli/Services/` - Core services including provider detection and assistants
+- `src/Andy.Cli/Commands/` - Command implementations (model, tools, etc.)
+- `src/Andy.Cli/Tools/` - Additional tool implementations
+- `src/Andy.Cli/Widgets/` - TUI components and views
 - `tests/Andy.Cli.Tests/` - Unit and integration tests
 
 ### Testing
 
 ```bash
-# Run all tests
-dotnet test
+# Run all tests (skip Ollama detection for CI environments)
+ANDY_SKIP_OLLAMA=1 dotnet test
 
 # Run with coverage
 dotnet test --collect:"XPlat Code Coverage"
 
-# Test provider detection
-./test-provider-detection.sh
+# Generate coverage report
+reportgenerator -reports:"./TestResults/*/coverage.cobertura.xml" -targetdir:"./TestResults/CoverageReport" -reporttypes:Html
+```
+
+### Building
+
+```bash
+# Debug build
+dotnet build
+
+# Release build
+dotnet build -c Release
+
+# Clean build artifacts
+dotnet clean
 ```
 
 ## License

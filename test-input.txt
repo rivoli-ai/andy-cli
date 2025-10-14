@@ -1,1 +1,0 @@
-how would you do a migration from .NET 8 to .NET 10 in this project?
