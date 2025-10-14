@@ -17,7 +17,7 @@
     <PackageReference Include="Andy.Llm" Version="2025.10.5-rc.16" />
     <PackageReference Include="Andy.Model" Version="2025.9.20-rc.4" />
     <PackageReference Include="Andy.Tools" Version="2025.9.5-rc.15" />
-    <PackageReference Include="Andy.Tui" Version="2025.8.26-rc.31" />
+    <PackageReference Include="Andy.Tui" Version="2025.10.4-rc.35" />
     <PackageReference Include="JsonRepairSharp" Version="1.2.3" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.8.0" />
