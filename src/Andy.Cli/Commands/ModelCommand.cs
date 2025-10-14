@@ -45,7 +45,7 @@ public class ModelCommand : ICommand
         var hasConfiguredProvider = options?.Value != null && !string.IsNullOrEmpty(options.Value.DefaultProvider);
         if (hasConfiguredProvider)
         {
-            _currentProviderName = options.Value.DefaultProvider!;
+            _currentProviderName = options!.Value.DefaultProvider!;
         }
         else
         {
@@ -744,7 +744,7 @@ public class ModelCommand : ICommand
 
         return provider switch
         {
-            "cerebras" => "llama-3.3-70b",
+            "cerebras" => "llama-3.3-70b", // Only this model supports function calling
             "openai" => "gpt-4o",
             "anthropic" => "claude-3-sonnet-20240229",
             "gemini" => "gemini-2.0-flash-exp",

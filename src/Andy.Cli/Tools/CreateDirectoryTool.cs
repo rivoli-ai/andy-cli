@@ -62,7 +62,7 @@ public class CreateDirectoryTool : ToolBase
         }
     };
 
-    protected override async Task<ToolResult> ExecuteInternalAsync(
+    protected override Task<ToolResult> ExecuteInternalAsync(
         Dictionary<string, object?> parameters,
         ToolExecutionContext context)
     {
@@ -85,7 +85,7 @@ public class CreateDirectoryTool : ToolBase
             // Check if directory already exists
             if (Directory.Exists(fullPath))
             {
-                return ToolResult.Success($"Directory already exists: {fullPath}");
+                return Task.FromResult(ToolResult.Success($"Directory already exists: {fullPath}"));
             }
 
             // Create directory
@@ -99,7 +99,7 @@ public class CreateDirectoryTool : ToolBase
                 var parent = Path.GetDirectoryName(fullPath);
                 if (!string.IsNullOrEmpty(parent) && !Directory.Exists(parent))
                 {
-                    return ToolResult.Failure($"Parent directory does not exist: {parent}");
+                    return Task.FromResult(ToolResult.Failure($"Parent directory does not exist: {parent}"));
                 }
 
                 Directory.CreateDirectory(fullPath);
@@ -118,38 +118,38 @@ public class CreateDirectoryTool : ToolBase
                     ["attributes"] = info.Attributes.ToString()
                 };
 
-                return ToolResult.Success(
+                return Task.FromResult(ToolResult.Success(
                     $"Directory created successfully: {fullPath}",
-                    result);
+                    result));
             }
             else
             {
-                return ToolResult.Failure("Directory creation failed for unknown reason");
+                return Task.FromResult(ToolResult.Failure("Directory creation failed for unknown reason"));
             }
         }
         catch (UnauthorizedAccessException ex)
         {
-            return ToolResult.Failure($"Access denied: {ex.Message}");
+            return Task.FromResult(ToolResult.Failure($"Access denied: {ex.Message}"));
         }
         catch (ArgumentException ex)
         {
-            return ToolResult.Failure($"Invalid path: {ex.Message}");
+            return Task.FromResult(ToolResult.Failure($"Invalid path: {ex.Message}"));
         }
         catch (PathTooLongException ex)
         {
-            return ToolResult.Failure($"Path too long: {ex.Message}");
+            return Task.FromResult(ToolResult.Failure($"Path too long: {ex.Message}"));
         }
         catch (DirectoryNotFoundException ex)
         {
-            return ToolResult.Failure($"Directory not found: {ex.Message}");
+            return Task.FromResult(ToolResult.Failure($"Directory not found: {ex.Message}"));
         }
         catch (IOException ex)
         {
-            return ToolResult.Failure($"IO error: {ex.Message}");
+            return Task.FromResult(ToolResult.Failure($"IO error: {ex.Message}"));
         }
         catch (Exception ex)
         {
-            return ToolResult.Failure($"Unexpected error: {ex.Message}");
+            return Task.FromResult(ToolResult.Failure($"Unexpected error: {ex.Message}"));
         }
     }
 

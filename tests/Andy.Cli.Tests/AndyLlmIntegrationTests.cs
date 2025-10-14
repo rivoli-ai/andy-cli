@@ -1,6 +1,6 @@
 using Andy.Llm;
 using Andy.Llm.Extensions;
-using Andy.Llm.Models;
+using Andy.Model.Llm;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 

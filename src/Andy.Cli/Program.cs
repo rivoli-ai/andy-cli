@@ -12,7 +12,6 @@ using Andy.Cli.Tools;
 using Andy.Llm;
 using Andy.Llm.Extensions;
 using Andy.Model.Model;
-using Andy.Model.Orchestration;
 using Andy.Tools;
 using Andy.Tools.Core;
 using Andy.Tools.Execution;
@@ -227,7 +226,7 @@ class Program
             var commandPalette = new CommandPalette();
 
             Andy.Model.Llm.ILlmProvider? llmProvider = null;
-            AssistantService? aiService = null;
+            SimpleAssistantService? aiService = null;
 
             // Build comprehensive system prompt
             if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ANDY_STRICT_ERRORS")))
@@ -257,20 +256,16 @@ class Program
                 }
 
                 var toolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
-                var logger = serviceProvider.GetService<ILogger<AssistantService>>();
-                aiService = new AssistantService(
+                var logger = serviceProvider.GetService<ILogger<SimpleAssistantService>>();
+                aiService = new SimpleAssistantService(
                     llmProvider,
                     toolRegistry,
                     toolExecutor,
                     feed,
-                    systemPrompt,
-                    logger,
                     currentModel,
-                    currentProvider);
+                    currentProvider,
+                    logger);
 
-                // Get actual model and provider information from ModelCommand
-                // Set initial model info
-                aiService.UpdateModelInfo(currentModel, currentProvider);
                 var providerUrl = GetProviderUrl(currentProvider);
 
                 feed.AddMarkdownRich($"[model] {currentModel} with {currentProvider} provider [{providerUrl}] (tool-enabled)");
@@ -366,22 +361,15 @@ class Program
                                     aiService?.Dispose();
 
                                     var toolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
-                                    var logger = serviceProvider.GetService<ILogger<AssistantService>>();
-                                    aiService = new AssistantService(
+                                    var logger = serviceProvider.GetService<ILogger<SimpleAssistantService>>();
+                                    aiService = new SimpleAssistantService(
                                         llmProvider,
                                         toolRegistry,
                                         toolExecutor,
                                         feed,
-                                        systemPrompt,
-                                        logger,
                                         newModel,
-                                        newProvider);
-                                    
-                                    // Set model info for response interpretation
-                                    aiService.UpdateModelInfo(
-                                        modelCommand.GetCurrentModel(),
-                                        modelCommand.GetCurrentProvider()
-                                    );
+                                        newProvider,
+                                        logger);
                                 }
 
                                 feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
@@ -799,22 +787,15 @@ class Program
                                                 aiService?.Dispose();
 
                                                 var toolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
-                                                var logger = serviceProvider.GetService<ILogger<AssistantService>>();
-                                                aiService = new AssistantService(
+                                                var logger = serviceProvider.GetService<ILogger<SimpleAssistantService>>();
+                                                aiService = new SimpleAssistantService(
                                                     llmProvider,
                                                     toolRegistry,
                                                     toolExecutor,
                                                     feed,
-                                                    systemPrompt,
-                                                    logger,
                                                     newModel,
-                                                    newProvider);
-
-                                                // Set model info for response interpretation
-                                                aiService.UpdateModelInfo(
-                                                    modelCommand.GetCurrentModel(),
-                                                    modelCommand.GetCurrentProvider()
-                                                );
+                                                    newProvider,
+                                                    logger);
                                             }
 
                                             feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
@@ -922,49 +903,8 @@ class Program
                                 }
                             });
                         }
-                        else if (llmProvider is not null)
-                        {
-                            // Fallback to non-tool-aware conversation
-                            try
-                            {
-                                statusMessage.SetMessage("Thinking", animated: true);
-
-                                // For fallback non-tool-aware conversation, create a basic assistant
-                                // without tools and run a single turn
-                                var fallbackConversation = new Conversation
-                                {
-                                    Id = Guid.NewGuid().ToString(),
-                                    CreatedAt = DateTime.UtcNow
-                                };
-                                var emptyToolRegistry = new Andy.Model.Tooling.ToolRegistry();
-                                var fallbackAssistant = new Assistant(fallbackConversation, emptyToolRegistry, llmProvider);
-                                
-                                // Get response using the fallback assistant
-                                var response = await fallbackAssistant.RunTurnAsync(cmd, CancellationToken.None);
-
-                                // Estimate token usage since Message doesn't provide it
-                                int inputTokens = cmd.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length * 2;
-                                int outputTokens = (response.Content ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries).Length * 2;
-
-                                tokenCounter.AddTokens(inputTokens, outputTokens);
-
-                                AddReplyToFeed(feed, response.Content ?? string.Empty, inputTokens, outputTokens);
-
-                                // Note: Without persistent conversation, each request is independent
-
-                                statusMessage.SetMessage("Ready for next question", animated: false);
-                            }
-                            catch (Exception ex)
-                            {
-                                feed.AddMarkdownRich(ConsoleColors.ErrorPrefix(ex.Message));
-                                statusMessage.SetMessage("Error occurred", animated: false);
-                            }
-                        }
-                        else
-                        {
-                            feed.AddMarkdownRich("ok");
-                            statusMessage.SetMessage("No AI model connected", animated: false);
-                        }
+                        // No fallback - if aiService is null, the user needs to configure API keys
+                        // The initialization error message above already informed them
                         return;
                     }
                     if (k.Key == ConsoleKey.UpArrow) feed.ScrollLines(+2, Math.Max(1, viewport.Height - 5));

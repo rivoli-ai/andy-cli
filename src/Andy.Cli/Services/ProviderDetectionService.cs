@@ -20,38 +20,38 @@ public class ProviderDetectionService
     {
         new ProviderInfo
         {
-            Name = "ollama",
-            RequiredEnvVars = Array.Empty<string>(), // Ollama doesn't require API key
-            Priority = 1 // Highest priority
-        },
-        new ProviderInfo
-        {
-            Name = "azure",
-            RequiredEnvVars = new[] { "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT" },
-            Priority = 2
-        },
-        new ProviderInfo
-        {
             Name = "openai",
             RequiredEnvVars = new[] { "OPENAI_API_KEY" },
-            Priority = 3
-        },
-        new ProviderInfo
-        {
-            Name = "cerebras",
-            RequiredEnvVars = new[] { "CEREBRAS_API_KEY" },
-            Priority = 4 // Lowest priority in your list
+            Priority = 1 // Highest priority - most reliable
         },
         new ProviderInfo
         {
             Name = "anthropic",
             RequiredEnvVars = new[] { "ANTHROPIC_API_KEY" },
-            Priority = 5
+            Priority = 2
+        },
+        new ProviderInfo
+        {
+            Name = "cerebras",
+            RequiredEnvVars = new[] { "CEREBRAS_API_KEY" },
+            Priority = 3
         },
         new ProviderInfo
         {
             Name = "gemini",
             RequiredEnvVars = new[] { "GOOGLE_API_KEY" },
+            Priority = 4
+        },
+        new ProviderInfo
+        {
+            Name = "ollama",
+            RequiredEnvVars = Array.Empty<string>(), // Ollama doesn't require API key
+            Priority = 5
+        },
+        new ProviderInfo
+        {
+            Name = "azure",
+            RequiredEnvVars = new[] { "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT" },
             Priority = 6
         }
     };

@@ -68,7 +68,7 @@ public class ToolAdapter : Andy.Model.Tooling.ITool
         {
             var propSchema = new Dictionary<string, object>
             {
-                ["type"] = ConvertTypeToJsonSchema(param.Type),
+                ["type"] = ConvertTypeToJsonSchema(param.Type ?? "string"),
                 ["description"] = param.Description
             };
 

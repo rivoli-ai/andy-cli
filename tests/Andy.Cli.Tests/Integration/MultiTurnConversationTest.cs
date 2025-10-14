@@ -8,7 +8,7 @@ using Andy.Cli.Services.ContentPipeline;
 // Parser-related imports removed
 using Andy.Cli.Widgets;
 using Andy.Llm;
-using Andy.Llm.Models;
+using Andy.Model.Llm;
 using Andy.Tools.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
