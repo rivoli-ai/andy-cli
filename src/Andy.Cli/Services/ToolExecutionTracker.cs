@@ -42,28 +42,24 @@ public class ToolExecutionTracker
         if (!string.IsNullOrEmpty(_lastActiveToolId))
         {
             _executions[_lastActiveToolId] = info;
-
-            // CRITICAL: Update the UI tool directly using the lastActiveToolId
-            // This is the key link between SimpleAssistantService and ToolAdapter
-            if (_feedView != null && parameters != null)
-            {
-                // Directly update the tool with the exact ID from SimpleAssistantService
-                _feedView.UpdateToolByExactId(_lastActiveToolId, parameters);
-            }
         }
 
-        // If we have a FeedView, update it with the real parameters
+        // Always update the UI with parameters - try multiple approaches
         if (_feedView != null && parameters != null)
         {
-            // Find any running tool with a matching base name and update its parameters
-            // This is a workaround since SimpleAgent doesn't give us the actual parameters
+            // First, try to update by exact ID if we have it
+            if (!string.IsNullOrEmpty(_lastActiveToolId))
+            {
+                _feedView.UpdateToolByExactId(_lastActiveToolId, parameters);
+            }
+
+            // Also update by tool name
             _feedView.UpdateRunningToolParameters(toolName, parameters);
 
-            // Also try to find and update any active tools that match the base name
-            // This helps link the ToolAdapter execution with SimpleAssistantService's tracking
+            // Try to update any active tool with the base tool ID
             _feedView.UpdateActiveToolWithParameters(toolId, parameters);
 
-            // FORCE update ALL tools that might match - be really aggressive about it
+            // Force update all matching tools
             _feedView.ForceUpdateAllMatchingTools(toolId, toolName, parameters);
         }
     }

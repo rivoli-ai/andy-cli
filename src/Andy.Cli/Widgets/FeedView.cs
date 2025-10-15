@@ -194,6 +194,29 @@ namespace Andy.Cli.Widgets
                         }
                     }
                 }
+
+                // If we couldn't find by exact ID, try to update the most recent incomplete tool
+                // This handles cases where the tool ID doesn't match exactly
+                for (int i = _items.Count - 1; i >= 0; i--)
+                {
+                    if (_items[i] is RunningToolItem runningTool && !runningTool.IsComplete)
+                    {
+                        // If this tool has minimal parameters (just __toolId and __baseName), update it
+                        if (runningTool.Parameters == null || runningTool.Parameters.Count <= 2)
+                        {
+                            var mergedParams = new Dictionary<string, object?>(parameters);
+                            if (runningTool.Parameters != null)
+                            {
+                                if (runningTool.Parameters.TryGetValue("__toolId", out var tid))
+                                    mergedParams["__toolId"] = tid;
+                                if (runningTool.Parameters.TryGetValue("__baseName", out var bn))
+                                    mergedParams["__baseName"] = bn;
+                            }
+                            runningTool.SetParameters(mergedParams);
+                            return; // Updated the most recent tool needing parameters
+                        }
+                    }
+                }
             }
         }
 

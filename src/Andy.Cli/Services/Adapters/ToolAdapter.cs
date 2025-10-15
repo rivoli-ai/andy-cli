@@ -150,12 +150,14 @@ public class ToolAdapter : Andy.Model.Tooling.ITool
                 parameters[kvp.Key] = ConvertJsonElement(kvp.Value);
             }
 
-            // Track and log the actual parameters
+            // Track and log the actual parameters - use call.Id for unique tracking
+            ToolExecutionTracker.Instance.TrackToolStart(call.Id, call.Name, parameters);
+            // Also track with the base tool ID for backward compatibility
             ToolExecutionTracker.Instance.TrackToolStart(_toolId, call.Name, parameters);
 
             // Log what we received for debugging with more detail
-            _logger?.LogInformation("[TOOL_EXEC_START] Tool: {ToolId}, CallName: {CallName}, ParamCount: {ParamCount}",
-                _toolId, call.Name, parameters.Count);
+            _logger?.LogInformation("[TOOL_EXEC_START] Tool: {ToolId}, CallName: {CallName}, CallId: {CallId}, ParamCount: {ParamCount}",
+                _toolId, call.Name, call.Id, parameters.Count);
             foreach (var param in parameters.Take(5)) // Log first 5 parameters
             {
                 var value = param.Value?.ToString() ?? "null";
@@ -180,7 +182,9 @@ public class ToolAdapter : Andy.Model.Tooling.ITool
             _logger?.LogInformation("[TOOL_EXEC_END] Tool: {ToolId}, Duration: {Duration}ms, Success: {Success}",
                 _toolId, duration.TotalMilliseconds, result.IsSuccessful);
 
-            // Track completion with full result data
+            // Track completion with full result data - use call.Id for unique tracking
+            ToolExecutionTracker.Instance.TrackToolComplete(call.Id, result.IsSuccessful, result.Message, result.Data);
+            // Also track with the base tool ID for backward compatibility
             ToolExecutionTracker.Instance.TrackToolComplete(_toolId, result.IsSuccessful, result.Message, result.Data);
 
             // Convert to Andy.Model.ToolResult
