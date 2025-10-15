@@ -992,9 +992,73 @@ class Program
                 var b = new DL.DisplayListBuilder();
                 b.PushClip(new DL.ClipPush(0, 0, viewport.Width, viewport.Height));
                 b.DrawRect(new DL.Rect(0, 0, viewport.Width, viewport.Height, new DL.Rgb24(0, 0, 0)));
+
+                // Draw header with full-width background
+                var headerBg = new DL.Rgb24(30, 35, 50); // Dark blue-gray background
+                b.DrawRect(new DL.Rect(0, 0, viewport.Width, 1, headerBg)); // Full width header background (single row)
+
+                // Prepare header components
                 var gitInfo = GetGitInfo();
-                var headerText = $"Andy CLI [{gitInfo.branch}@{gitInfo.commit}]";
-                b.DrawText(new DL.TextRun(2, 1, headerText, new DL.Rgb24(200, 200, 50), null, DL.CellAttrFlags.Bold));
+                var title = "Andy CLI";
+                var gitInfoText = $"[{gitInfo.branch}@{gitInfo.commit}]";
+                var currentPath = Directory.GetCurrentDirectory();
+
+                // Use pipe as delimiter
+                var delimiter = " │ "; // Unicode box drawing character for vertical line
+                int delimiterLen = delimiter.Length;
+
+                // Calculate available space for path
+                int titleLen = title.Length;
+                int gitLen = gitInfoText.Length;
+                int padding = 2; // Padding from edges
+                int availableForPath = viewport.Width - titleLen - gitLen - (delimiterLen * 2) - (padding * 2);
+
+                // Truncate path if necessary, showing the right part
+                string displayPath = currentPath;
+                if (availableForPath > 10 && displayPath.Length > availableForPath)
+                {
+                    displayPath = "..." + displayPath.Substring(displayPath.Length - availableForPath + 3);
+                }
+                else if (availableForPath <= 10)
+                {
+                    // Not enough space for path
+                    displayPath = "";
+                }
+
+                // Render header components
+                int xPos = padding;
+
+                // Title
+                b.DrawText(new DL.TextRun(xPos, 0, title, new DL.Rgb24(250, 250, 100), headerBg, DL.CellAttrFlags.Bold));
+                xPos += titleLen;
+
+                // Delimiter after title
+                b.DrawText(new DL.TextRun(xPos, 0, delimiter, new DL.Rgb24(100, 100, 120), headerBg, DL.CellAttrFlags.None));
+                xPos += delimiterLen;
+
+                // Current path (if there's room)
+                if (!string.IsNullOrEmpty(displayPath))
+                {
+                    b.DrawText(new DL.TextRun(xPos, 0, displayPath, new DL.Rgb24(150, 180, 200), headerBg, DL.CellAttrFlags.None));
+                    xPos += displayPath.Length;
+
+                    // Delimiter after path
+                    b.DrawText(new DL.TextRun(xPos, 0, delimiter, new DL.Rgb24(100, 100, 120), headerBg, DL.CellAttrFlags.None));
+                    xPos += delimiterLen;
+                }
+
+                // Git info
+                if (xPos + gitLen < viewport.Width - padding)
+                {
+                    b.DrawText(new DL.TextRun(xPos, 0, gitInfoText, new DL.Rgb24(200, 200, 50), headerBg, DL.CellAttrFlags.None));
+                }
+
+                // Draw a subtle separator line below the header
+                var separatorColor = new DL.Rgb24(50, 55, 70);
+                for (int i = 0; i < viewport.Width; i++)
+                {
+                    b.DrawText(new DL.TextRun(i, 1, "─", separatorColor, null, DL.CellAttrFlags.None)); // Box drawing horizontal line
+                }
                 var baseDl = b.Build();
                 var wb = new DL.DisplayListBuilder();
                 hints.Render(viewport, baseDl, wb);
