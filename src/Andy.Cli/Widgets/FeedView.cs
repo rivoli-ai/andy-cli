@@ -134,6 +134,57 @@ namespace Andy.Cli.Widgets
             }
         }
 
+        /// <summary>Update any active tool that matches the base tool ID with parameters.</summary>
+        public void UpdateActiveToolWithParameters(string baseToolId, Dictionary<string, object?> parameters)
+        {
+            lock (_itemsLock)
+            {
+                // Find any running tool that matches the base tool ID
+                for (int i = _items.Count - 1; i >= 0; i--)
+                {
+                    if (_items[i] is RunningToolItem runningTool && !runningTool.IsComplete)
+                    {
+                        var toolNameNormalized = runningTool.ToolName.ToLower().Replace(" ", "_").Replace("-", "_");
+
+                        // Check if this running tool matches our base tool ID
+                        if (toolNameNormalized.Contains(baseToolId.ToLower()) ||
+                            baseToolId.ToLower().Contains(toolNameNormalized))
+                        {
+                            runningTool.SetParameters(parameters);
+
+                            // Add specific details based on tool type and parameters
+                            if (baseToolId.Contains("read_file"))
+                            {
+                                if (parameters.TryGetValue("file_path", out var filePath) && filePath != null)
+                                {
+                                    var fileName = Path.GetFileName(filePath.ToString() ?? "");
+                                    runningTool.AddDetail($"Reading: {fileName}");
+                                }
+                            }
+                            else if (baseToolId.Contains("list_directory"))
+                            {
+                                if (parameters.TryGetValue("path", out var path) && path != null)
+                                {
+                                    var pathStr = path.ToString() ?? ".";
+                                    runningTool.AddDetail($"Listing: {pathStr}");
+                                }
+                            }
+                            else if (baseToolId.Contains("write_file"))
+                            {
+                                if (parameters.TryGetValue("file_path", out var filePath) && filePath != null)
+                                {
+                                    var fileName = Path.GetFileName(filePath.ToString() ?? "");
+                                    runningTool.AddDetail($"Writing: {fileName}");
+                                }
+                            }
+
+                            break; // Update only the first matching tool
+                        }
+                    }
+                }
+            }
+        }
+
         /// <summary>Update tool execution to complete state.</summary>
         public void AddToolExecutionComplete(string toolId, bool success, string duration, string? result = null)
         {

@@ -67,29 +67,10 @@ public class SimpleAssistantService : IDisposable
             var baseToolId = e.ToolName.ToLower().Replace(" ", "_").Replace("-", "_");
             var toolId = $"{baseToolId}_{++_toolCallCounter}";
 
-            // Try to create meaningful parameters based on tool name and context
-            Dictionary<string, object?>? parameters = null;
-
-            // For code_index, we can infer it's indexing the current directory
-            if (baseToolId.Contains("code_index"))
-            {
-                parameters = new Dictionary<string, object?>
-                {
-                    ["path"] = Directory.GetCurrentDirectory(),
-                    ["recursive"] = true
-                };
-            }
-            else if (baseToolId.Contains("list_directory"))
-            {
-                parameters = new Dictionary<string, object?>
-                {
-                    ["path"] = ".",
-                    ["recursive"] = false
-                };
-            }
-
-            _runningTools[toolId] = (DateTime.UtcNow, parameters);
-            _feed.AddToolExecutionStart(toolId, e.ToolName, parameters);
+            // Don't create fake parameters - let ToolExecutionTracker provide the real ones
+            // The actual parameters will be set by ToolAdapter via ToolExecutionTracker
+            _runningTools[toolId] = (DateTime.UtcNow, null);
+            _feed.AddToolExecutionStart(toolId, e.ToolName, null);
 
             // Schedule completion after a reasonable timeout if not completed naturally
             _ = Task.Run(async () =>
@@ -141,65 +122,68 @@ public class SimpleAssistantService : IDisposable
             // Process message through SimpleAgent
             var result = await _agent.ProcessMessageAsync(userMessage, cancellationToken);
 
-            // Complete any running tools with result summary
+            // Complete any running tools
             var toolsToComplete = _runningTools.ToList();
             foreach (var tool in toolsToComplete)
             {
                 var elapsed = DateTime.UtcNow - tool.Value.startTime;
                 var durationStr = FormatDuration(elapsed);
 
-                // Extract base tool name from the unique ID (remove _counter suffix)
+                // Wait a bit to ensure tool execution has completed and been tracked
+                await Task.Delay(100);
+
+                // Try to get actual execution info from tracker
                 var baseToolName = tool.Key.Contains('_') ?
                     tool.Key.Substring(0, tool.Key.LastIndexOf('_')) :
                     tool.Key;
 
-                // Try to create a meaningful result summary based on tool name
-                // Note: SimpleAgent doesn't provide tool results, so we create informative summaries
+                // Try multiple ways to find the execution info
+                var executionInfo = ToolExecutionTracker.Instance.GetExecutionInfo(tool.Key) ??
+                                   ToolExecutionTracker.Instance.GetExecutionInfo(baseToolName);
+
                 string? resultSummary = null;
-                if (baseToolName.Contains("list_directory"))
+
+                if (executionInfo != null)
                 {
-                    // Simulate a result that would come from the tool
-                    var currentDir = Directory.GetCurrentDirectory();
-                    try
+                    // Use the actual result from the tool execution
+                    if (!string.IsNullOrEmpty(executionInfo.Result))
                     {
-                        var files = Directory.GetFiles(currentDir).Length;
-                        var dirs = Directory.GetDirectories(currentDir).Length;
-                        resultSummary = $"{{\"file_count\":{files},\"directory_count\":{dirs}}}";
+                        resultSummary = executionInfo.Result;
                     }
-                    catch
+                    else if (executionInfo.Parameters != null)
                     {
-                        resultSummary = "Directory contents retrieved";
+                        // Try to create a meaningful summary from parameters
+                        if (baseToolName.Contains("read_file") &&
+                            executionInfo.Parameters.TryGetValue("file_path", out var filePath))
+                        {
+                            var fileName = Path.GetFileName(filePath?.ToString() ?? "");
+                            resultSummary = $"Read {fileName}";
+                        }
+                        else if (baseToolName.Contains("list_directory") &&
+                                executionInfo.Parameters.TryGetValue("path", out var path))
+                        {
+                            resultSummary = $"Listed {path}";
+                        }
+                        else if (baseToolName.Contains("code_index"))
+                        {
+                            resultSummary = "Code repository indexed";
+                        }
                     }
                 }
-                else if (baseToolName.Contains("code_index"))
+
+                // Fallback to generic message if no actual result available
+                if (string.IsNullOrEmpty(resultSummary))
                 {
-                    // Provide more detailed code index information
-                    try
-                    {
-                        var currentDir = Directory.GetCurrentDirectory();
-                        var codeFiles = Directory.GetFiles(currentDir, "*.cs", SearchOption.AllDirectories).Length +
-                                       Directory.GetFiles(currentDir, "*.py", SearchOption.AllDirectories).Length +
-                                       Directory.GetFiles(currentDir, "*.js", SearchOption.AllDirectories).Length +
-                                       Directory.GetFiles(currentDir, "*.ts", SearchOption.AllDirectories).Length;
-                        var totalFiles = Directory.GetFiles(currentDir, "*", SearchOption.AllDirectories).Length;
-                        resultSummary = $"Indexed {codeFiles} code files out of {totalFiles} total files";
-                    }
-                    catch
-                    {
+                    if (baseToolName.Contains("read_file"))
+                        resultSummary = "File contents read";
+                    else if (baseToolName.Contains("list_directory"))
+                        resultSummary = "Directory listed";
+                    else if (baseToolName.Contains("code_index"))
                         resultSummary = "Code repository indexed";
-                    }
-                }
-                else if (baseToolName.Contains("read_file"))
-                {
-                    resultSummary = "File contents read";
-                }
-                else if (baseToolName.Contains("update_file") || baseToolName.Contains("edit_file"))
-                {
-                    resultSummary = "File updated successfully";
-                }
-                else if (baseToolName.Contains("bash") || baseToolName.Contains("command"))
-                {
-                    resultSummary = "Command executed";
+                    else if (baseToolName.Contains("write_file"))
+                        resultSummary = "File written";
+                    else
+                        resultSummary = "Operation completed";
                 }
 
                 _feed.AddToolExecutionComplete(tool.Key, true, durationStr, resultSummary);

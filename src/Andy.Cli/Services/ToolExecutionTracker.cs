@@ -38,7 +38,36 @@ public class ToolExecutionTracker
             // Find any running tool with a matching base name and update its parameters
             // This is a workaround since SimpleAgent doesn't give us the actual parameters
             _feedView.UpdateRunningToolParameters(toolName, parameters);
+
+            // Also try to find and update any active tools that match the base name
+            // This helps link the ToolAdapter execution with SimpleAssistantService's tracking
+            _feedView.UpdateActiveToolWithParameters(toolId, parameters);
         }
+    }
+
+    public ToolExecutionInfo? GetExecutionInfo(string toolId)
+    {
+        // Try exact match first
+        if (_executions.TryGetValue(toolId, out var info))
+            return info;
+
+        // Try to find by base tool name (in case the toolId has a counter suffix)
+        var baseToolId = toolId.Contains('_') ?
+            toolId.Substring(0, toolId.LastIndexOf('_')) :
+            toolId;
+
+        // Find the most recent execution with matching base name
+        foreach (var kvp in _executions.Reverse())
+        {
+            var execBaseId = kvp.Key.Contains('_') ?
+                kvp.Key.Substring(0, kvp.Key.LastIndexOf('_')) :
+                kvp.Key;
+
+            if (execBaseId.Equals(baseToolId, StringComparison.OrdinalIgnoreCase))
+                return kvp.Value;
+        }
+
+        return null;
     }
 
     public void TrackToolComplete(string toolId, bool success, string? result, object? resultData = null)
@@ -50,12 +79,74 @@ public class ToolExecutionTracker
             info.Result = result;
             info.ResultData = resultData;
 
+            // Format a meaningful result summary based on tool type and data
+            var resultSummary = FormatResultSummary(info.ToolName, info.Parameters, resultData, result);
+            if (!string.IsNullOrEmpty(resultSummary))
+            {
+                info.Result = resultSummary;
+            }
+
             // If we have a FeedView, update it with detailed result
             if (_feedView != null && info.Parameters != null)
             {
                 _feedView.UpdateToolResult(toolId, info.ToolName, success, resultData, info.Parameters);
             }
         }
+    }
+
+    private string? FormatResultSummary(string toolName, Dictionary<string, object?>? parameters, object? resultData, string? fallbackResult)
+    {
+        // For read_file, show what file was read
+        if (toolName.Contains("read_file", StringComparison.OrdinalIgnoreCase))
+        {
+            if (parameters?.TryGetValue("file_path", out var filePath) == true && filePath != null)
+            {
+                var fileName = System.IO.Path.GetFileName(filePath.ToString() ?? "");
+
+                // Try to get line count from result data
+                if (resultData is Dictionary<string, object?> resultDict)
+                {
+                    if (resultDict.TryGetValue("metadata", out var metadata) && metadata is Dictionary<string, object?> metaDict)
+                    {
+                        if (metaDict.TryGetValue("line_count", out var lines))
+                            return $"Read {fileName} ({lines} lines)";
+                    }
+                }
+
+                return $"Read {fileName}";
+            }
+        }
+        // For list_directory, show directory name
+        else if (toolName.Contains("list_directory", StringComparison.OrdinalIgnoreCase))
+        {
+            if (parameters?.TryGetValue("path", out var path) == true && path != null)
+            {
+                var dirName = path.ToString() ?? ".";
+                if (dirName == ".") dirName = "current directory";
+
+                // Try to get counts from result
+                if (resultData is Dictionary<string, object?> resultDict &&
+                    resultDict.TryGetValue("entries", out var entries) && entries is System.Collections.IEnumerable entryList)
+                {
+                    var count = 0;
+                    foreach (var _ in entryList) count++;
+                    return $"Listed {dirName} ({count} items)";
+                }
+
+                return $"Listed {dirName}";
+            }
+        }
+        // For write_file, show what file was written
+        else if (toolName.Contains("write_file", StringComparison.OrdinalIgnoreCase))
+        {
+            if (parameters?.TryGetValue("file_path", out var filePath) == true && filePath != null)
+            {
+                var fileName = System.IO.Path.GetFileName(filePath.ToString() ?? "");
+                return $"Wrote {fileName}";
+            }
+        }
+
+        return fallbackResult;
     }
 
     public class ToolExecutionInfo
