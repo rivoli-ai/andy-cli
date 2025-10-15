@@ -165,6 +165,79 @@ namespace Andy.Cli.Widgets
             }
         }
 
+        /// <summary>Update a tool by its exact ID - this is the most direct way to update a tool.</summary>
+        public void UpdateToolByExactId(string exactToolId, Dictionary<string, object?> parameters)
+        {
+            lock (_itemsLock)
+            {
+                // Look for any running tool item, starting from the most recent
+                for (int i = _items.Count - 1; i >= 0; i--)
+                {
+                    if (_items[i] is RunningToolItem runningTool && !runningTool.IsComplete)
+                    {
+                        // Check if this tool has the exact ID we're looking for
+                        // The tool ID should be in its parameters as __toolId
+                        if (runningTool.Parameters != null &&
+                            runningTool.Parameters.TryGetValue("__toolId", out var storedId) &&
+                            storedId?.ToString() == exactToolId)
+                        {
+                            // Found the exact match! Update with real parameters
+                            // Preserve the __toolId and __baseName for identification
+                            var mergedParams = new Dictionary<string, object?>(parameters);
+                            if (runningTool.Parameters.TryGetValue("__toolId", out var tid))
+                                mergedParams["__toolId"] = tid;
+                            if (runningTool.Parameters.TryGetValue("__baseName", out var bn))
+                                mergedParams["__baseName"] = bn;
+
+                            runningTool.SetParameters(mergedParams);
+                            return; // Found and updated the exact tool
+                        }
+                    }
+                }
+            }
+        }
+
+        /// <summary>FORCE update ALL matching tools with parameters - be aggressive about finding matches.</summary>
+        public void ForceUpdateAllMatchingTools(string toolId, string toolName, Dictionary<string, object?> parameters)
+        {
+            lock (_itemsLock)
+            {
+                // Update EVERY running tool that could possibly match
+                for (int i = _items.Count - 1; i >= 0; i--)
+                {
+                    if (_items[i] is RunningToolItem runningTool && !runningTool.IsComplete)
+                    {
+                        var normalizedToolId = toolId.ToLower().Replace("_", "").Replace("-", "");
+                        var normalizedToolName = toolName.ToLower().Replace("_", "").Replace("-", "");
+                        var normalizedRunningName = runningTool.ToolName.ToLower().Replace("_", "").Replace("-", "").Replace(" ", "");
+
+                        // Match if ANY of these conditions are true
+                        if (normalizedRunningName.Contains(normalizedToolId) ||
+                            normalizedRunningName.Contains(normalizedToolName) ||
+                            normalizedToolId.Contains(normalizedRunningName) ||
+                            normalizedToolName.Contains(normalizedRunningName))
+                        {
+                            runningTool.SetParameters(parameters);
+
+                            // Log that we updated it
+                            if (parameters.TryGetValue("file_path", out var fp))
+                            {
+                                runningTool.AddDetail($"File: {fp}");
+                            }
+                            else if (parameters.TryGetValue("directory_path", out var dp))
+                            {
+                                runningTool.AddDetail($"Directory: {dp}");
+                            }
+                            else if (parameters.TryGetValue("query", out var q))
+                            {
+                                runningTool.AddDetail($"Query: {q}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         /// <summary>Update any active tool that matches the base tool ID with parameters.</summary>
         public void UpdateActiveToolWithParameters(string baseToolId, Dictionary<string, object?> parameters)
         {
@@ -1242,6 +1315,7 @@ namespace Andy.Cli.Widgets
         public string ToolId => _toolId;
         public string ToolName => _toolName;
         public bool IsComplete => _isComplete;
+        public Dictionary<string, object?> Parameters => _parameters;
 
         public RunningToolItem(string toolId, string toolName)
         {
@@ -1527,7 +1601,7 @@ namespace Andy.Cli.Widgets
                     foreach (var param in _parameters.Take(2))
                     {
                         if (drawn >= maxLines || startLine > drawn + 2) break;
-                        var paramText = $"      {param.Key}: {TruncateValue(param.Value)}";
+                        var paramText = $"      {param.Key}: {TruncateValue(param.Value, 20)}";
                         if (paramText.Length > width - 2)
                         {
                             paramText = paramText.Substring(0, width - 5) + "...";
@@ -1555,12 +1629,31 @@ namespace Andy.Cli.Widgets
             }
             else
             {
-                // Completed: show in Claude's style
-                // Line 1: Tool name with symbol
+                // Completed: show in Claude's style with colored status dots
+                // Line 1: Tool name with colored symbol
                 if (drawn < maxLines && startLine <= 0)
                 {
+                    // Use colored dot based on success status
+                    var green = new DL.Rgb24(0, 200, 0);
+                    var red = new DL.Rgb24(200, 0, 0);
+                    var orange = new DL.Rgb24(255, 165, 0);
+
                     var symbol = "⏺"; // Circle bullet like Claude uses
-                    var toolDisplay = $"{symbol} {_toolName}";
+                    var symbolColor = _isSuccess ? green : red;
+
+                    // Check for warnings (partial success cases)
+                    if (_isSuccess && !string.IsNullOrEmpty(_result) &&
+                        (_result.Contains("warning", StringComparison.OrdinalIgnoreCase) ||
+                         _result.Contains("partial", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        symbolColor = orange;
+                    }
+
+                    // Draw the colored symbol separately
+                    b.DrawText(new DL.TextRun(x, row, symbol, symbolColor, null, DL.CellAttrFlags.None));
+
+                    // Then draw the tool name and parameters
+                    var toolDisplay = $" {_toolName}";
 
                     // Show parameters in parentheses
                     var paramDisplay = GetParameterDisplay();
@@ -1573,7 +1666,7 @@ namespace Andy.Cli.Widgets
                         toolDisplay += "()";
                     }
 
-                    b.DrawText(new DL.TextRun(x, row, toolDisplay, white, null, DL.CellAttrFlags.None));
+                    b.DrawText(new DL.TextRun(x + 2, row, toolDisplay, white, null, DL.CellAttrFlags.None));
                     row++; drawn++;
                 }
 
@@ -1816,10 +1909,10 @@ namespace Andy.Cli.Widgets
             return "Code repository indexed";
         }
 
-        private static string TruncateValue(object? value)
+        private static string TruncateValue(object? value, int maxLen = 20)
         {
             var s = value?.ToString() ?? "null";
-            if (s.Length > 20) s = s.Substring(0, 17) + "...";
+            if (s.Length > maxLen) s = s.Substring(0, maxLen - 3) + "...";
             return s.Replace("\n", " ").Replace("\r", " ").Trim();
         }
 
@@ -1834,43 +1927,39 @@ namespace Andy.Cli.Widgets
 
         private string GetParameterDisplay()
         {
-            // If we have a tool ID, show it for debugging
-            string debugInfo = "";
-            if (_parameters != null && _parameters.TryGetValue("__toolId", out var toolIdObj))
-            {
-                debugInfo = $"id:{toolIdObj} ";
-            }
+            // Skip internal parameters starting with __
+            var realParams = _parameters?.Where(p => !p.Key.StartsWith("__")).ToList();
 
-            if (_parameters == null || _parameters.Count <= 2) // <= 2 to account for __toolId and __baseName
+            // If no real parameters yet, show loading
+            if (realParams == null || !realParams.Any())
             {
+                // For file-based operations that set _filePath directly
                 if (!string.IsNullOrEmpty(_filePath))
-                    return debugInfo + GetShortPath(_filePath);
-                if (!string.IsNullOrEmpty(debugInfo))
-                    return debugInfo.Trim();
+                    return GetShortPath(_filePath);
 
-                // Always show something to indicate we're missing params
-                return debugInfo + "waiting...";
+                // Otherwise indicate we're waiting for params
+                return "loading...";
             }
 
             // Special handling for different tools
-            if (_toolName.Contains("code_index"))
+            if (_toolName.Contains("code_index", StringComparison.OrdinalIgnoreCase) ||
+                _toolName.Contains("index", StringComparison.OrdinalIgnoreCase))
             {
                 var parts = new List<string>();
 
-                // Show path if available
-                if (_parameters.TryGetValue("path", out var path) && path != null)
+                // Look for any path-like parameter
+                var pathParam = realParams.FirstOrDefault(p => p.Key.Contains("path", StringComparison.OrdinalIgnoreCase) ||
+                                                               p.Key.Contains("dir", StringComparison.OrdinalIgnoreCase));
+                if (pathParam.Value != null)
                 {
-                    parts.Add(GetShortPath(path.ToString() ?? ""));
-                }
-                else if (_parameters.TryGetValue("directory", out var dir) && dir != null)
-                {
-                    parts.Add(GetShortPath(dir.ToString() ?? ""));
+                    parts.Add(GetShortPath(pathParam.Value.ToString() ?? ""));
                 }
 
                 // Show query if searching for something specific
-                if (_parameters.TryGetValue("query", out var query) && query != null)
+                var queryParam = realParams.FirstOrDefault(p => p.Key.Contains("query", StringComparison.OrdinalIgnoreCase));
+                if (queryParam.Value != null)
                 {
-                    var queryStr = query.ToString() ?? "";
+                    var queryStr = queryParam.Value.ToString() ?? "";
                     if (queryStr.Length > 30) queryStr = queryStr.Substring(0, 27) + "...";
                     parts.Add($"query: '{queryStr}'");
                 }
@@ -1893,28 +1982,30 @@ namespace Andy.Cli.Widgets
 
                 return parts.Any() ? string.Join(", ", parts) : "current directory";
             }
-            else if (_toolName.Contains("list_directory"))
+            else if (_toolName.Contains("list_directory", StringComparison.OrdinalIgnoreCase))
             {
-                // Try both parameter names (directory_path is the actual param, path is legacy)
-                object? dirPath = null;
-                if (!_parameters.TryGetValue("directory_path", out dirPath))
-                    _parameters.TryGetValue("path", out dirPath);
+                // Look for any directory/path parameter
+                var dirParam = realParams.FirstOrDefault(p => p.Key.Contains("path", StringComparison.OrdinalIgnoreCase) ||
+                                                              p.Key.Contains("dir", StringComparison.OrdinalIgnoreCase));
 
-                if (dirPath != null)
+                if (dirParam.Value != null)
                 {
-                    var pathStr = dirPath.ToString() ?? ".";
+                    var pathStr = dirParam.Value.ToString() ?? ".";
 
                     // Build parameter list with significant options
                     var options = new List<string>();
 
-                    if (_parameters.TryGetValue("recursive", out var rec) && rec?.ToString() == "True")
+                    var recParam = realParams.FirstOrDefault(p => p.Key.Contains("recursive", StringComparison.OrdinalIgnoreCase));
+                    if (recParam.Value?.ToString() == "True")
                         options.Add("recursive");
 
-                    if (_parameters.TryGetValue("include_hidden", out var hidden) && hidden?.ToString() == "True")
+                    var hiddenParam = realParams.FirstOrDefault(p => p.Key.Contains("hidden", StringComparison.OrdinalIgnoreCase));
+                    if (hiddenParam.Value?.ToString() == "True")
                         options.Add("hidden");
 
-                    if (_parameters.TryGetValue("pattern", out var pattern) && pattern != null)
-                        options.Add($"pattern: {pattern}");
+                    var patternParam = realParams.FirstOrDefault(p => p.Key.Contains("pattern", StringComparison.OrdinalIgnoreCase));
+                    if (patternParam.Value != null)
+                        options.Add($"pattern: {patternParam.Value}");
 
                     var optionsStr = options.Any() ? ", " + string.Join(", ", options) : "";
                     return $"{GetShortPath(pathStr)}{optionsStr}";
@@ -1923,20 +2014,25 @@ namespace Andy.Cli.Widgets
                 // Fallback if no path found
                 return "current directory";
             }
-            else if (_parameters.TryGetValue("file_path", out var filePath))
+            else if (_toolName.Contains("read_file", StringComparison.OrdinalIgnoreCase))
             {
-                return GetShortPath(filePath?.ToString() ?? "");
-            }
-            else if (_parameters.TryGetValue("path", out var pathParam))
-            {
-                return GetShortPath(pathParam?.ToString() ?? "");
+                // Look for file path parameter
+                var fileParam = realParams.FirstOrDefault(p => p.Key.Contains("file", StringComparison.OrdinalIgnoreCase) ||
+                                                               p.Key.Contains("path", StringComparison.OrdinalIgnoreCase));
+                if (fileParam.Value != null)
+                {
+                    return GetShortPath(fileParam.Value.ToString() ?? "");
+                }
             }
 
-            // Default: show first parameter
-            var first = _parameters.First();
-            var value = first.Value?.ToString() ?? "null";
-            if (value.Length > 30) value = "..." + value.Substring(value.Length - 27);
-            return $"{first.Key}={value}";
+            // Default: show all real parameters
+            var displayParams = new List<string>();
+            foreach (var param in realParams.Take(3))
+            {
+                var value = TruncateValue(param.Value, 20);
+                displayParams.Add($"{param.Key}={value}");
+            }
+            return displayParams.Any() ? string.Join(", ", displayParams) : "";
         }
 
         private static string FormatDuration(TimeSpan elapsed)
