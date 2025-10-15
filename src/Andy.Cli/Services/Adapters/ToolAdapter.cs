@@ -154,7 +154,8 @@ public class ToolAdapter : Andy.Model.Tooling.ITool
             ToolExecutionTracker.Instance.TrackToolStart(_toolId, call.Name, parameters);
 
             // Log what we received for debugging with more detail
-            _logger?.LogInformation("[TOOL_EXEC_START] Tool: {ToolId}", _toolId);
+            _logger?.LogInformation("[TOOL_EXEC_START] Tool: {ToolId}, CallName: {CallName}, ParamCount: {ParamCount}",
+                _toolId, call.Name, parameters.Count);
             foreach (var param in parameters.Take(5)) // Log first 5 parameters
             {
                 var value = param.Value?.ToString() ?? "null";

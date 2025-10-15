@@ -103,13 +103,22 @@ namespace Andy.Cli.Widgets
         {
             lock (_itemsLock)
             {
-                // Find the most recent running tool with matching name
+                // Find the most recent running tool with matching name (be flexible with matching)
                 for (int i = _items.Count - 1; i >= 0; i--)
                 {
                     if (_items[i] is RunningToolItem runningTool &&
-                        !runningTool.IsComplete &&
-                        runningTool.ToolName.Equals(toolName, StringComparison.OrdinalIgnoreCase))
+                        !runningTool.IsComplete)
                     {
+                        // More flexible matching - handle different naming conventions
+                        var normalizedToolName = toolName.ToLower().Replace("_", "").Replace("-", "").Replace(" ", "");
+                        var normalizedRunningName = runningTool.ToolName.ToLower().Replace("_", "").Replace("-", "").Replace(" ", "");
+
+                        if (!normalizedRunningName.Equals(normalizedToolName, StringComparison.OrdinalIgnoreCase) &&
+                            !normalizedRunningName.Contains(normalizedToolName) &&
+                            !normalizedToolName.Contains(normalizedRunningName))
+                        {
+                            continue; // Not a match
+                        }
                         runningTool.SetParameters(parameters);
 
                         // Add details about what's being searched/indexed
@@ -1817,11 +1826,20 @@ namespace Andy.Cli.Widgets
 
         private string GetParameterDisplay()
         {
-            if (_parameters == null || !_parameters.Any())
+            // If we have a tool ID, show it for debugging
+            string debugInfo = "";
+            if (_parameters != null && _parameters.TryGetValue("__toolId", out var toolIdObj))
+            {
+                debugInfo = $"id:{toolIdObj} ";
+            }
+
+            if (_parameters == null || _parameters.Count <= 2) // <= 2 to account for __toolId and __baseName
             {
                 if (!string.IsNullOrEmpty(_filePath))
-                    return GetShortPath(_filePath);
-                return "";
+                    return debugInfo + GetShortPath(_filePath);
+                if (!string.IsNullOrEmpty(debugInfo))
+                    return debugInfo.Trim();
+                return "?"; // Show question mark if no parameters
             }
 
             // Special handling for different tools

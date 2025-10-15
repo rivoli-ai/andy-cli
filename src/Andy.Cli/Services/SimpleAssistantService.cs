@@ -74,7 +74,16 @@ public class SimpleAssistantService : IDisposable
             // Tell the tracker about this tool so it can link with the actual execution
             ToolExecutionTracker.Instance.SetLastActiveToolId(toolId);
 
-            _feed.AddToolExecutionStart(toolId, e.ToolName, null);
+            _logger?.LogInformation("[TOOL_START] UI toolId: {ToolId}, toolName: {ToolName}", toolId, e.ToolName);
+
+            // Pass the tool ID in the parameters so it shows in the UI
+            var displayParams = new Dictionary<string, object?>
+            {
+                ["__toolId"] = toolId,
+                ["__baseName"] = baseToolId
+            };
+
+            _feed.AddToolExecutionStart(toolId, e.ToolName, displayParams);
 
             // Schedule completion after a reasonable timeout if not completed naturally
             _ = Task.Run(async () =>
@@ -134,7 +143,9 @@ public class SimpleAssistantService : IDisposable
                 var durationStr = FormatDuration(elapsed);
 
                 // Wait a bit to ensure tool execution has completed and been tracked
-                await Task.Delay(100);
+                await Task.Delay(200);
+
+                _logger?.LogInformation("[TOOL_COMPLETE] Looking for execution info for toolId: {ToolId}", tool.Key);
 
                 // Try to get actual execution info from tracker
                 var baseToolName = tool.Key.Contains('_') ?
@@ -150,6 +161,9 @@ public class SimpleAssistantService : IDisposable
 
                 if (executionInfo != null)
                 {
+                    _logger?.LogInformation("[TOOL_COMPLETE] Found execution info - Success: {Success}, Result: {Result}, Params: {ParamCount}",
+                        executionInfo.Success, executionInfo.Result, executionInfo.Parameters?.Count ?? 0);
+
                     // Check if the tool execution was successful
                     isSuccess = executionInfo.Success;
 
@@ -176,7 +190,12 @@ public class SimpleAssistantService : IDisposable
 
                             if (dirPath != null)
                             {
-                                resultSummary = isSuccess ? $"Listed {dirPath}" : $"Directory not found: {dirPath}";
+                                var dirStr = dirPath.ToString() ?? ".";
+                                resultSummary = isSuccess ? $"Listed {dirStr}" : $"Directory not found: {dirStr}";
+                            }
+                            else
+                            {
+                                resultSummary = isSuccess ? "Directory listed" : "Directory operation failed";
                             }
                         }
                         else if (baseToolName.Contains("code_index"))
@@ -218,6 +237,8 @@ public class SimpleAssistantService : IDisposable
                     // Final fallback
                     if (string.IsNullOrEmpty(resultSummary))
                     {
+                        _logger?.LogWarning("[TOOL_COMPLETE] Using fallback for {ToolName} - no execution info found", baseToolName);
+
                         // We don't have detailed info, so use generic but accurate messages
                         if (baseToolName.Contains("read_file"))
                             resultSummary = isSuccess ? "File read completed" : "File read failed";
