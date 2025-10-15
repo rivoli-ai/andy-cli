@@ -128,6 +128,28 @@ namespace Andy.Cli.Widgets
                                 runningTool.AddDetail($"Filter: {filter}");
                             }
                         }
+                        else if (toolName.Contains("list_directory", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Try both parameter names for directory
+                            object? dirPath = null;
+                            if (!parameters.TryGetValue("directory_path", out dirPath))
+                                parameters.TryGetValue("path", out dirPath);
+
+                            if (dirPath != null)
+                            {
+                                runningTool.AddDetail($"Directory: {dirPath}");
+                            }
+
+                            // Add other significant parameters
+                            if (parameters.TryGetValue("recursive", out var rec) && rec?.ToString() == "True")
+                            {
+                                runningTool.AddDetail("Mode: Recursive");
+                            }
+                            if (parameters.TryGetValue("pattern", out var pattern) && pattern != null)
+                            {
+                                runningTool.AddDetail($"Pattern: {pattern}");
+                            }
+                        }
                         break;
                     }
                 }
@@ -163,9 +185,14 @@ namespace Andy.Cli.Widgets
                             }
                             else if (baseToolId.Contains("list_directory"))
                             {
-                                if (parameters.TryGetValue("path", out var path) && path != null)
+                                // Try both parameter names
+                                object? dirPath = null;
+                                if (!parameters.TryGetValue("directory_path", out dirPath))
+                                    parameters.TryGetValue("path", out dirPath);
+
+                                if (dirPath != null)
                                 {
-                                    var pathStr = path.ToString() ?? ".";
+                                    var pathStr = dirPath.ToString() ?? ".";
                                     runningTool.AddDetail($"Listing: {pathStr}");
                                 }
                             }
@@ -1840,12 +1867,33 @@ namespace Andy.Cli.Widgets
             }
             else if (_toolName.Contains("list_directory"))
             {
-                if (_parameters.TryGetValue("path", out var path))
+                // Try both parameter names (directory_path is the actual param, path is legacy)
+                object? dirPath = null;
+                if (!_parameters.TryGetValue("directory_path", out dirPath))
+                    _parameters.TryGetValue("path", out dirPath);
+
+                if (dirPath != null)
                 {
-                    var pathStr = path?.ToString() ?? ".";
-                    var recursive = _parameters.TryGetValue("recursive", out var rec) && rec?.ToString() == "True" ? ", recursive" : "";
-                    return $"{GetShortPath(pathStr)}{recursive}";
+                    var pathStr = dirPath.ToString() ?? ".";
+
+                    // Build parameter list with significant options
+                    var options = new List<string>();
+
+                    if (_parameters.TryGetValue("recursive", out var rec) && rec?.ToString() == "True")
+                        options.Add("recursive");
+
+                    if (_parameters.TryGetValue("include_hidden", out var hidden) && hidden?.ToString() == "True")
+                        options.Add("hidden");
+
+                    if (_parameters.TryGetValue("pattern", out var pattern) && pattern != null)
+                        options.Add($"pattern: {pattern}");
+
+                    var optionsStr = options.Any() ? ", " + string.Join(", ", options) : "";
+                    return $"{GetShortPath(pathStr)}{optionsStr}";
                 }
+
+                // Fallback if no path found
+                return "current directory";
             }
             else if (_parameters.TryGetValue("file_path", out var filePath))
             {

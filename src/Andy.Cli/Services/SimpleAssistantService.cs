@@ -146,9 +146,13 @@ public class SimpleAssistantService : IDisposable
                                    ToolExecutionTracker.Instance.GetExecutionInfo(baseToolName);
 
                 string? resultSummary = null;
+                bool isSuccess = true; // Assume success unless we know otherwise
 
                 if (executionInfo != null)
                 {
+                    // Check if the tool execution was successful
+                    isSuccess = executionInfo.Success;
+
                     // Use the actual result from the tool execution
                     if (!string.IsNullOrEmpty(executionInfo.Result))
                     {
@@ -161,16 +165,23 @@ public class SimpleAssistantService : IDisposable
                             executionInfo.Parameters.TryGetValue("file_path", out var filePath))
                         {
                             var fileName = Path.GetFileName(filePath?.ToString() ?? "");
-                            resultSummary = $"Read {fileName}";
+                            resultSummary = isSuccess ? $"Read {fileName}" : $"Failed to read {fileName}";
                         }
-                        else if (baseToolName.Contains("list_directory") &&
-                                executionInfo.Parameters.TryGetValue("path", out var path))
+                        else if (baseToolName.Contains("list_directory"))
                         {
-                            resultSummary = $"Listed {path}";
+                            // Try both parameter names (path and directory_path)
+                            object? dirPath = null;
+                            if (!executionInfo.Parameters.TryGetValue("directory_path", out dirPath))
+                                executionInfo.Parameters.TryGetValue("path", out dirPath);
+
+                            if (dirPath != null)
+                            {
+                                resultSummary = isSuccess ? $"Listed {dirPath}" : $"Directory not found: {dirPath}";
+                            }
                         }
                         else if (baseToolName.Contains("code_index"))
                         {
-                            resultSummary = "Code repository indexed";
+                            resultSummary = isSuccess ? "Code repository indexed" : "Failed to index repository";
                         }
                     }
                 }
@@ -182,36 +193,46 @@ public class SimpleAssistantService : IDisposable
                     var anyExecution = ToolExecutionTracker.Instance.GetExecutionInfo(tool.Key);
                     if (anyExecution != null && anyExecution.Parameters != null)
                     {
-                        if (baseToolName.Contains("list_directory") &&
-                            anyExecution.Parameters.TryGetValue("path", out var dirPath))
+                        isSuccess = anyExecution.Success;
+
+                        if (baseToolName.Contains("list_directory"))
                         {
-                            resultSummary = $"Listed {dirPath}";
+                            // Try both parameter names
+                            object? dirPath = null;
+                            if (!anyExecution.Parameters.TryGetValue("directory_path", out dirPath))
+                                anyExecution.Parameters.TryGetValue("path", out dirPath);
+
+                            if (dirPath != null)
+                            {
+                                resultSummary = isSuccess ? $"Listed {dirPath}" : $"Directory not found: {dirPath}";
+                            }
                         }
                         else if (baseToolName.Contains("read_file") &&
                                 anyExecution.Parameters.TryGetValue("file_path", out var filePath))
                         {
                             var fileName = Path.GetFileName(filePath?.ToString() ?? "");
-                            resultSummary = $"Read {fileName}";
+                            resultSummary = isSuccess ? $"Read {fileName}" : $"Failed to read {fileName}";
                         }
                     }
 
                     // Final fallback
                     if (string.IsNullOrEmpty(resultSummary))
                     {
+                        // We don't have detailed info, so use generic but accurate messages
                         if (baseToolName.Contains("read_file"))
-                            resultSummary = "File contents read";
+                            resultSummary = isSuccess ? "File read completed" : "File read failed";
                         else if (baseToolName.Contains("list_directory"))
-                            resultSummary = "Directory contents retrieved";
+                            resultSummary = isSuccess ? "Directory listing completed" : "Directory listing failed";
                         else if (baseToolName.Contains("code_index"))
-                            resultSummary = "Code repository indexed";
+                            resultSummary = isSuccess ? "Code indexing completed" : "Code indexing failed";
                         else if (baseToolName.Contains("write_file"))
-                            resultSummary = "File written";
+                            resultSummary = isSuccess ? "File write completed" : "File write failed";
                         else
-                            resultSummary = "Operation completed";
+                            resultSummary = isSuccess ? "Operation completed" : "Operation failed";
                     }
                 }
 
-                _feed.AddToolExecutionComplete(tool.Key, true, durationStr, resultSummary);
+                _feed.AddToolExecutionComplete(tool.Key, isSuccess, durationStr, resultSummary);
                 _runningTools.Remove(tool.Key);
             }
 
