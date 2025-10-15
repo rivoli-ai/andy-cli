@@ -12,12 +12,18 @@ public class ToolExecutionTracker
     private static ToolExecutionTracker? _instance;
     private readonly Dictionary<string, ToolExecutionInfo> _executions = new();
     private FeedView? _feedView;
+    private string? _lastActiveToolId; // Track the last tool started from UI
 
     public static ToolExecutionTracker Instance => _instance ??= new ToolExecutionTracker();
 
     public void SetFeedView(FeedView feedView)
     {
         _feedView = feedView;
+    }
+
+    public void SetLastActiveToolId(string toolId)
+    {
+        _lastActiveToolId = toolId;
     }
 
     public void TrackToolStart(string toolId, string toolName, Dictionary<string, object?>? parameters)
@@ -31,6 +37,12 @@ public class ToolExecutionTracker
         };
 
         _executions[toolId] = info;
+
+        // Also store with the last active tool ID if it's set (to link UI tool with actual execution)
+        if (!string.IsNullOrEmpty(_lastActiveToolId))
+        {
+            _executions[_lastActiveToolId] = info;
+        }
 
         // If we have a FeedView, update it with the real parameters
         if (_feedView != null && parameters != null)

@@ -70,6 +70,10 @@ public class SimpleAssistantService : IDisposable
             // Don't create fake parameters - let ToolExecutionTracker provide the real ones
             // The actual parameters will be set by ToolAdapter via ToolExecutionTracker
             _runningTools[toolId] = (DateTime.UtcNow, null);
+
+            // Tell the tracker about this tool so it can link with the actual execution
+            ToolExecutionTracker.Instance.SetLastActiveToolId(toolId);
+
             _feed.AddToolExecutionStart(toolId, e.ToolName, null);
 
             // Schedule completion after a reasonable timeout if not completed naturally
@@ -174,16 +178,37 @@ public class SimpleAssistantService : IDisposable
                 // Fallback to generic message if no actual result available
                 if (string.IsNullOrEmpty(resultSummary))
                 {
-                    if (baseToolName.Contains("read_file"))
-                        resultSummary = "File contents read";
-                    else if (baseToolName.Contains("list_directory"))
-                        resultSummary = "Directory listed";
-                    else if (baseToolName.Contains("code_index"))
-                        resultSummary = "Code repository indexed";
-                    else if (baseToolName.Contains("write_file"))
-                        resultSummary = "File written";
-                    else
-                        resultSummary = "Operation completed";
+                    // One more try to get any execution info by searching all executions
+                    var anyExecution = ToolExecutionTracker.Instance.GetExecutionInfo(tool.Key);
+                    if (anyExecution != null && anyExecution.Parameters != null)
+                    {
+                        if (baseToolName.Contains("list_directory") &&
+                            anyExecution.Parameters.TryGetValue("path", out var dirPath))
+                        {
+                            resultSummary = $"Listed {dirPath}";
+                        }
+                        else if (baseToolName.Contains("read_file") &&
+                                anyExecution.Parameters.TryGetValue("file_path", out var filePath))
+                        {
+                            var fileName = Path.GetFileName(filePath?.ToString() ?? "");
+                            resultSummary = $"Read {fileName}";
+                        }
+                    }
+
+                    // Final fallback
+                    if (string.IsNullOrEmpty(resultSummary))
+                    {
+                        if (baseToolName.Contains("read_file"))
+                            resultSummary = "File contents read";
+                        else if (baseToolName.Contains("list_directory"))
+                            resultSummary = "Directory contents retrieved";
+                        else if (baseToolName.Contains("code_index"))
+                            resultSummary = "Code repository indexed";
+                        else if (baseToolName.Contains("write_file"))
+                            resultSummary = "File written";
+                        else
+                            resultSummary = "Operation completed";
+                    }
                 }
 
                 _feed.AddToolExecutionComplete(tool.Key, true, durationStr, resultSummary);
