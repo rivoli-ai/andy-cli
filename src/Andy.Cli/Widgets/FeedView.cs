@@ -1965,17 +1965,20 @@ namespace Andy.Cli.Widgets
                 }
 
                 // Show namespace or class filter
-                if (_parameters.TryGetValue("namespace", out var ns) && ns != null)
+                if (_parameters != null)
                 {
-                    parts.Add($"namespace: {ns}");
-                }
-                else if (_parameters.TryGetValue("class", out var cls) && cls != null)
-                {
-                    parts.Add($"class: {cls}");
+                    if (_parameters.TryGetValue("namespace", out var ns) && ns != null)
+                    {
+                        parts.Add($"namespace: {ns}");
+                    }
+                    else if (_parameters.TryGetValue("class", out var cls) && cls != null)
+                    {
+                        parts.Add($"class: {cls}");
+                    }
                 }
 
                 // Show type filter
-                if (_parameters.TryGetValue("type", out var type) && type != null)
+                if (_parameters != null && _parameters.TryGetValue("type", out var type) && type != null)
                 {
                     parts.Add($"type: {type}");
                 }
