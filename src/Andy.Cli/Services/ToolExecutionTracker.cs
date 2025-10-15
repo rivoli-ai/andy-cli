@@ -11,8 +11,10 @@ public class ToolExecutionTracker
 {
     private static ToolExecutionTracker? _instance;
     private readonly Dictionary<string, ToolExecutionInfo> _executions = new();
+    private readonly Dictionary<string, Dictionary<string, object?>> _pendingParameters = new(); // Store parameters immediately
     private FeedView? _feedView;
     private string? _lastActiveToolId; // Track the last tool started from UI
+    private int _parameterUpdateCounter = 0;
 
     public static ToolExecutionTracker Instance => _instance ??= new ToolExecutionTracker();
 
@@ -24,6 +26,37 @@ public class ToolExecutionTracker
     public void SetLastActiveToolId(string toolId)
     {
         _lastActiveToolId = toolId;
+    }
+
+    /// <summary>
+    /// Store parameters immediately when we get them, even before tool execution
+    /// </summary>
+    public void StoreParameters(string toolName, Dictionary<string, object?> parameters)
+    {
+        lock (_pendingParameters)
+        {
+            _pendingParameters[toolName.ToLower()] = parameters;
+            _parameterUpdateCounter++;
+
+            // Also immediately update any running tools with matching names
+            if (_feedView != null)
+            {
+                // Force immediate update of all matching tools
+                _feedView.UpdateRunningToolParameters(toolName, parameters);
+                _feedView.ForceUpdateAllMatchingTools(toolName, toolName, parameters);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Get stored parameters for a tool
+    /// </summary>
+    public Dictionary<string, object?>? GetStoredParameters(string toolName)
+    {
+        lock (_pendingParameters)
+        {
+            return _pendingParameters.TryGetValue(toolName.ToLower(), out var parameters) ? parameters : null;
+        }
     }
 
     public void TrackToolStart(string toolId, string toolName, Dictionary<string, object?>? parameters)

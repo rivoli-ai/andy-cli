@@ -150,6 +150,10 @@ public class ToolAdapter : Andy.Model.Tooling.ITool
                 parameters[kvp.Key] = ConvertJsonElement(kvp.Value);
             }
 
+            // IMMEDIATELY store parameters so UI can access them
+            ToolExecutionTracker.Instance.StoreParameters(call.Name, parameters);
+            ToolExecutionTracker.Instance.StoreParameters(_toolId, parameters);
+
             // Track and log the actual parameters - use call.Id for unique tracking
             ToolExecutionTracker.Instance.TrackToolStart(call.Id, call.Name, parameters);
             // Also track with the base tool ID for backward compatibility

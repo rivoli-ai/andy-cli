@@ -76,12 +76,17 @@ public class SimpleAssistantService : IDisposable
 
             _logger?.LogInformation("[TOOL_START] UI toolId: {ToolId}, toolName: {ToolName}", toolId, e.ToolName);
 
-            // Pass the tool ID in the parameters so it shows in the UI
-            var displayParams = new Dictionary<string, object?>
-            {
-                ["__toolId"] = toolId,
-                ["__baseName"] = baseToolId
-            };
+            // Check if we already have parameters stored for this tool
+            var storedParams = ToolExecutionTracker.Instance.GetStoredParameters(e.ToolName) ??
+                               ToolExecutionTracker.Instance.GetStoredParameters(baseToolId);
+
+            // Pass the tool ID and any stored parameters to the UI
+            var displayParams = storedParams != null ?
+                new Dictionary<string, object?>(storedParams) :
+                new Dictionary<string, object?>();
+
+            displayParams["__toolId"] = toolId;
+            displayParams["__baseName"] = baseToolId;
 
             _feed.AddToolExecutionStart(toolId, e.ToolName, displayParams);
 
