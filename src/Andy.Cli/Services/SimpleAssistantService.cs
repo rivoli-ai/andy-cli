@@ -62,44 +62,52 @@ public class SimpleAssistantService : IDisposable
         {
             _logger?.LogInformation("Tool called: {ToolName}", e.ToolName);
 
-            // Show enhanced tool execution display
-            // Use a unique ID for each tool call to handle multiple calls to the same tool
+            // Use a unique ID for each tool call
             var baseToolId = e.ToolName.ToLower().Replace(" ", "_").Replace("-", "_");
             var toolId = $"{baseToolId}_{++_toolCallCounter}";
 
-            // Don't create fake parameters - let ToolExecutionTracker provide the real ones
-            // The actual parameters will be set by ToolAdapter via ToolExecutionTracker
+            // Track this tool but DON'T create UI yet - wait for parameters
             _runningTools[toolId] = (DateTime.UtcNow, null);
 
             // Tell the tracker about this tool so it can link with the actual execution
             ToolExecutionTracker.Instance.SetLastActiveToolId(toolId);
 
-            _logger?.LogInformation("[TOOL_START] UI toolId: {ToolId}, toolName: {ToolName}", toolId, e.ToolName);
+            _logger?.LogInformation("[TOOL_START] Tracking toolId: {ToolId}, toolName: {ToolName} - waiting for parameters", toolId, e.ToolName);
 
-            // Check if we already have parameters stored for this tool
-            var storedParams = ToolExecutionTracker.Instance.GetStoredParameters(e.ToolName) ??
-                               ToolExecutionTracker.Instance.GetStoredParameters(baseToolId);
-
-            // Pass the tool ID and any stored parameters to the UI
-            var displayParams = storedParams != null ?
-                new Dictionary<string, object?>(storedParams) :
-                new Dictionary<string, object?>();
-
-            displayParams["__toolId"] = toolId;
-            displayParams["__baseName"] = baseToolId;
-
-            _feed.AddToolExecutionStart(toolId, e.ToolName, displayParams);
-
-            // Schedule completion after a reasonable timeout if not completed naturally
+            // Set up a delayed UI creation that will check for parameters
             _ = Task.Run(async () =>
             {
-                await Task.Delay(TimeSpan.FromSeconds(30));
-                if (_runningTools.ContainsKey(toolId))
+                // Wait a short time for parameters to arrive
+                await Task.Delay(100);
+
+                // Check if we have parameters now
+                var storedParams = ToolExecutionTracker.Instance.GetStoredParameters(e.ToolName) ??
+                                   ToolExecutionTracker.Instance.GetStoredParameters(baseToolId);
+
+                // Create the UI entry with whatever parameters we have
+                var displayParams = storedParams != null ?
+                    new Dictionary<string, object?>(storedParams) :
+                    new Dictionary<string, object?>();
+
+                displayParams["__toolId"] = toolId;
+                displayParams["__baseName"] = baseToolId;
+
+                _logger?.LogInformation("[TOOL_UI] Creating UI for {ToolId} with {ParamCount} parameters",
+                    toolId, displayParams.Count - 2); // -2 for __toolId and __baseName
+
+                _feed.AddToolExecutionStart(toolId, e.ToolName, displayParams);
+
+                // Schedule completion after a reasonable timeout if not completed naturally
+                _ = Task.Run(async () =>
                 {
-                    var elapsed = DateTime.UtcNow - _runningTools[toolId].startTime;
-                    _feed.AddToolExecutionComplete(toolId, true, FormatDuration(elapsed), "Completed");
-                    _runningTools.Remove(toolId);
-                }
+                    await Task.Delay(TimeSpan.FromSeconds(30));
+                    if (_runningTools.ContainsKey(toolId))
+                    {
+                        var elapsed = DateTime.UtcNow - _runningTools[toolId].startTime;
+                        _feed.AddToolExecutionComplete(toolId, true, FormatDuration(elapsed), "Completed");
+                        _runningTools.Remove(toolId);
+                    }
+                });
             });
         };
     }
