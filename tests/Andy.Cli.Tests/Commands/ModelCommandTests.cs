@@ -11,6 +11,7 @@ using Xunit;
 
 namespace Andy.Cli.Tests.Commands;
 
+[Collection("EnvironmentVariableTests")] // Put tests in a collection to prevent parallel execution
 public class ModelCommandTests
 {
     private readonly IServiceProvider _serviceProvider;

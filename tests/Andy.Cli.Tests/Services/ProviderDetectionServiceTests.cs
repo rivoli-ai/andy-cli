@@ -5,6 +5,7 @@ using Andy.Cli.Services;
 
 namespace Andy.Cli.Tests.Services;
 
+[Collection("EnvironmentVariableTests")] // Put tests in a collection to prevent parallel execution
 public class ProviderDetectionServiceTests
 {
     [Fact]

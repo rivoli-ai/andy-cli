@@ -6,9 +6,11 @@ using Andy.Cli.Commands;
 using Andy.Llm;
 using Andy.Llm.Extensions;
 using Microsoft.Extensions.DependencyInjection;
+using Xunit;
 
 namespace Andy.Cli.Tests;
 
+[Collection("EnvironmentVariableTests")] // Put tests in a collection to prevent parallel execution
 public class ModelCommandProviderSwitchTests
 {
     [Fact]
@@ -79,13 +81,20 @@ public class ModelCommandProviderSwitchTests
     [Fact]
     public async Task Switching_To_OpenAI_Fails_Without_ApiKey()
     {
-        // Arrange
+        // Arrange - Save original values first
         var prevOpenAiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
         var prevCerebrasKey = Environment.GetEnvironmentVariable("CEREBRAS_API_KEY");
+
         try
         {
-            Environment.SetEnvironmentVariable("OPENAI_API_KEY", null);
+            // Aggressively ensure OPENAI_API_KEY is not set
+            // Set to empty string instead of null, as HasApiKey checks IsNullOrEmpty
+            Environment.SetEnvironmentVariable("OPENAI_API_KEY", string.Empty);
             Environment.SetEnvironmentVariable("CEREBRAS_API_KEY", "test-cerebras-key");
+
+            // Double-check it's really cleared
+            var checkKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
+            Assert.True(string.IsNullOrEmpty(checkKey), $"OPENAI_API_KEY should be empty but was: '{checkKey}'");
 
             var services = new ServiceCollection();
             services.AddLogging();
