@@ -150,20 +150,73 @@ public class ToolAdapter : Andy.Model.Tooling.ITool
                 parameters[kvp.Key] = ConvertJsonElement(kvp.Value);
             }
 
-            // Log what we received for debugging
-            _logger?.LogDebug("Tool {ToolId} called with arguments: {Arguments}", _toolId, call.ArgumentsJson);
-            _logger?.LogDebug("Parsed parameters: {Parameters}", JsonSerializer.Serialize(parameters));
+            // Track and log the actual parameters
+            ToolExecutionTracker.Instance.TrackToolStart(_toolId, call.Name, parameters);
+
+            // Log what we received for debugging with more detail
+            _logger?.LogInformation("[TOOL_EXEC_START] Tool: {ToolId}", _toolId);
+            foreach (var param in parameters.Take(5)) // Log first 5 parameters
+            {
+                var value = param.Value?.ToString() ?? "null";
+                if (value.Length > 100) value = value.Substring(0, 97) + "...";
+                _logger?.LogInformation("[TOOL_PARAM] {Key}: {Value}", param.Key, value);
+            }
+            if (parameters.Count > 5)
+            {
+                _logger?.LogInformation("[TOOL_PARAM] ... and {Count} more parameters", parameters.Count - 5);
+            }
 
             // Execute using Andy.Tools
             var context = new Andy.Tools.Core.ToolExecutionContext
             {
                 CancellationToken = ct
             };
+
+            var startTime = DateTime.UtcNow;
             var result = await _toolExecutor.ExecuteAsync(_toolId, parameters, context);
+            var duration = DateTime.UtcNow - startTime;
+
+            _logger?.LogInformation("[TOOL_EXEC_END] Tool: {ToolId}, Duration: {Duration}ms, Success: {Success}",
+                _toolId, duration.TotalMilliseconds, result.IsSuccessful);
+
+            // Track completion
+            ToolExecutionTracker.Instance.TrackToolComplete(_toolId, result.IsSuccessful, result.Message);
 
             // Convert to Andy.Model.ToolResult
             if (result.IsSuccessful)
             {
+                // Log success details
+                if (result.Data != null)
+                {
+                    var dataStr = JsonSerializer.Serialize(result.Data);
+                    if (_toolId.Contains("read_file") && dataStr.Length > 500)
+                    {
+                        // For file reads, log line count and truncated preview
+                        var lines = dataStr.Split('\n').Length;
+                        _logger?.LogInformation("[TOOL_RESULT] Read {Lines} lines from file", lines);
+                        _logger?.LogDebug("[TOOL_PREVIEW] {Preview}...", dataStr.Substring(0, 500));
+                    }
+                    else if (_toolId.Contains("update") || _toolId.Contains("edit"))
+                    {
+                        // For updates, try to extract diff statistics
+                        _logger?.LogInformation("[TOOL_RESULT] File updated successfully");
+                        if (dataStr.Contains("+") || dataStr.Contains("-"))
+                        {
+                            var additions = dataStr.Count(c => c == '+');
+                            var deletions = dataStr.Count(c => c == '-');
+                            _logger?.LogInformation("[TOOL_STATS] {Additions} additions, {Deletions} deletions", additions, deletions);
+                        }
+                    }
+                    else if (dataStr.Length > 200)
+                    {
+                        _logger?.LogInformation("[TOOL_RESULT] {Preview}...", dataStr.Substring(0, 200));
+                    }
+                    else
+                    {
+                        _logger?.LogInformation("[TOOL_RESULT] {Result}", dataStr);
+                    }
+                }
+
                 // Try to use Data if available, otherwise use Message
                 object? resultData = result.Data;
 
@@ -176,6 +229,10 @@ public class ToolAdapter : Andy.Model.Tooling.ITool
             }
             else
             {
+                // Log error details
+                _logger?.LogWarning("[TOOL_ERROR] Tool {ToolId} failed: {Error}",
+                    _toolId, result.ErrorMessage ?? result.Message ?? "Unknown error");
+
                 // Return error result
                 var errorData = new
                 {

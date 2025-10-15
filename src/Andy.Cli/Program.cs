@@ -129,6 +129,9 @@ class Program
             var feed = new FeedView();
             feed.SetFocused(false);
             feed.SetAnimationSpeed(8); // faster scroll-in
+
+            // Initialize the tool execution tracker with the feed view
+            ToolExecutionTracker.Instance.SetFeedView(feed);
             feed.AddMarkdownRich("**Ready to assist!** What can I help you learn or explore today?");
 
             // Initialize Andy.Llm and Andy.Tools services
@@ -877,6 +880,7 @@ class Program
                         {
                             // Run the assistant processing on a background task so UI can update
                             isProcessingMessage = true;
+                            prompt.SetShowCaret(false); // Hide cursor during processing
                             _ = Task.Run(async () =>
                             {
                                 try
@@ -900,6 +904,7 @@ class Program
                                 finally
                                 {
                                     isProcessingMessage = false;
+                                    prompt.SetShowCaret(true); // Show cursor again when done
                                 }
                             });
                         }
@@ -996,8 +1001,8 @@ class Program
                 foreach (var op in wb.Build().Ops) Append(op, builder);
                 foreach (var op in overlay.Build().Ops) Append(op, builder);
                 await scheduler.RenderOnceAsync(builder.Build(), viewport, caps, pty, CancellationToken.None);
-                // Position terminal cursor as a thin bar inside the prompt
-                if (prompt.TryGetTerminalCursor(out int col1, out int row1))
+                // Position terminal cursor as a thin bar inside the prompt (only when not processing)
+                if (!isProcessingMessage && prompt.TryGetTerminalCursor(out int col1, out int row1))
                 {
                     if (!cursorStyledShown)
                     {
@@ -1006,6 +1011,15 @@ class Program
                         cursorStyledShown = true;
                     }
                     Console.Write($"\u001b[{row1};{col1}H");
+                }
+                else if (isProcessingMessage)
+                {
+                    // Hide cursor completely during processing
+                    if (cursorStyledShown)
+                    {
+                        Console.Write("\u001b[?25l"); // Hide cursor
+                        cursorStyledShown = false;
+                    }
                 }
 
                 static void Append(object op, DL.DisplayListBuilder b)

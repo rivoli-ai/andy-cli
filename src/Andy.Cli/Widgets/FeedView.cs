@@ -70,6 +70,108 @@ namespace Andy.Cli.Widgets
             AddItem(new SpacerItem(1));
         }
 
+        /// <summary>Add a tool execution start with animation.</summary>
+        public void AddToolExecutionStart(string toolId, string toolName, Dictionary<string, object?>? parameters = null)
+        {
+            var item = new RunningToolItem(toolId, toolName);
+            if (parameters != null)
+            {
+                item.SetParameters(parameters);
+            }
+            AddItem(item);
+        }
+
+        /// <summary>Add detail to a running tool execution.</summary>
+        public void AddToolExecutionDetail(string toolId, string detail)
+        {
+            // Find and update the running tool item
+            lock (_itemsLock)
+            {
+                for (int i = _items.Count - 1; i >= 0; i--)
+                {
+                    if (_items[i] is RunningToolItem runningTool && runningTool.ToolId == toolId && !runningTool.IsComplete)
+                    {
+                        runningTool.AddDetail(detail);
+                        break;
+                    }
+                }
+            }
+        }
+
+        /// <summary>Update running tool with actual parameters from ToolAdapter.</summary>
+        public void UpdateRunningToolParameters(string toolName, Dictionary<string, object?> parameters)
+        {
+            lock (_itemsLock)
+            {
+                // Find the most recent running tool with matching name
+                for (int i = _items.Count - 1; i >= 0; i--)
+                {
+                    if (_items[i] is RunningToolItem runningTool &&
+                        !runningTool.IsComplete &&
+                        runningTool.ToolName.Equals(toolName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        runningTool.SetParameters(parameters);
+
+                        // Add details about what's being searched/indexed
+                        if (toolName.Contains("code_index", StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (parameters.TryGetValue("query", out var query) && query != null)
+                            {
+                                runningTool.AddDetail($"Query: {query}");
+                            }
+                            if (parameters.TryGetValue("namespace", out var ns) && ns != null)
+                            {
+                                runningTool.AddDetail($"Namespace: {ns}");
+                            }
+                            if (parameters.TryGetValue("filter", out var filter) && filter != null)
+                            {
+                                runningTool.AddDetail($"Filter: {filter}");
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        /// <summary>Update tool execution to complete state.</summary>
+        public void AddToolExecutionComplete(string toolId, bool success, string duration, string? result = null)
+        {
+            // Find and update the running tool item
+            lock (_itemsLock)
+            {
+                for (int i = _items.Count - 1; i >= 0; i--)
+                {
+                    if (_items[i] is RunningToolItem runningTool && runningTool.ToolId == toolId)
+                    {
+                        runningTool.SetComplete(success, duration);
+                        if (!string.IsNullOrEmpty(result))
+                        {
+                            runningTool.SetResult(result);
+                        }
+                        // Add spacing after tool execution
+                        _items.Add(new SpacerItem(1));
+                        break;
+                    }
+                }
+            }
+        }
+
+        /// <summary>Add processing indicator with animation.</summary>
+        public void AddProcessingIndicator()
+        {
+            AddItem(new ProcessingIndicatorItem());
+        }
+
+        /// <summary>Clear processing indicator.</summary>
+        public void ClearProcessingIndicator()
+        {
+            lock (_itemsLock)
+            {
+                _items.RemoveAll(item => item is ProcessingIndicatorItem);
+            }
+        }
+
         /// <summary>Expose a snapshot of items for verification in tests.</summary>
         internal IReadOnlyList<IFeedItem> GetItemsForTesting()
         {
@@ -788,21 +890,755 @@ namespace Andy.Cli.Widgets
             renderer.SetText(_content.ToString());
             renderer.Render(new L.Rect(x, y, width, maxLines), baseDl, b);
 
-            // Show a blinking cursor at the end if still streaming
-            if (!_completed && _lines.Length > 0)
-            {
-                var lastLine = _lines[_lines.Length - 1];
-                int cursorX = x + (lastLine.Length % width);
-                int cursorY = y + Math.Min(maxLines - 1, MeasureLineCount(width) - 1 - startLine);
+            // Don't show cursor at all - it's distracting and ugly
+            // Cursor should only appear when user is actually typing in an input field
+        }
+    }
 
-                if (cursorY >= y && cursorY < y + maxLines)
+    /// <summary>Processing indicator with animation.</summary>
+    public sealed class ProcessingIndicatorItem : IFeedItem
+    {
+        private readonly DateTime _startTime;
+        private int _animationFrame;
+        private readonly string[] _spinnerFrames = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" };
+
+        public ProcessingIndicatorItem()
+        {
+            _startTime = DateTime.UtcNow;
+        }
+
+        public int MeasureLineCount(int width)
+        {
+            return 3; // One line indicator + 2 blank lines for spacing
+        }
+
+        public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
+        {
+            if (width <= 0 || maxLines <= 0 || startLine > 1) return;
+
+            int row = y;
+            int drawn = 0;
+
+            // Line 1: Processing message
+            if (drawn < maxLines && startLine <= 0)
+            {
+                // Update animation frame
+                _animationFrame = ((int)(DateTime.UtcNow - _startTime).TotalMilliseconds / 100) % _spinnerFrames.Length;
+
+                var dim = new DL.Rgb24(150, 150, 150);
+                var spinner = _spinnerFrames[_animationFrame];
+
+                // Calculate elapsed time
+                var elapsed = DateTime.UtcNow - _startTime;
+                var elapsedText = elapsed.TotalSeconds < 1 ? "" : $" [{elapsed.TotalSeconds:F1}s]";
+
+                // Build message with spinner
+                var message = $"{spinner} Processing request{elapsedText}";
+
+                b.DrawText(new DL.TextRun(x, row, message, dim, null, DL.CellAttrFlags.None));
+                row++;
+                drawn++;
+            }
+
+            // Line 2-3: Blank lines for spacing
+            for (int i = 1; i <= 2 && drawn < maxLines; i++)
+            {
+                if (startLine <= i)
                 {
-                    // Simple blinking cursor effect
-                    var cursor = (DateTime.Now.Millisecond / 500) % 2 == 0 ? "▊" : " ";
-                    b.DrawText(new DL.TextRun(cursorX, cursorY, cursor,
-                        new DL.Rgb24(100, 200, 100), null, DL.CellAttrFlags.Bold));
+                    // Just skip - blank line
+                    row++;
+                    drawn++;
                 }
             }
+        }
+    }
+
+    /// <summary>Tool execution item in Claude's clean style.</summary>
+    internal sealed class RunningToolItem : IFeedItem
+    {
+        private readonly string _toolId;
+        private readonly string _toolName;
+        private readonly DateTime _startTime;
+        private bool _isComplete;
+        private bool _isSuccess;
+        private string _duration = "";
+        private int _animationFrame;
+        private readonly string[] _spinnerFrames = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" };
+        private Dictionary<string, object?> _parameters = new();
+        private string? _result;
+        private int _linesAdded;
+        private int _linesRemoved;
+        private string _filePath = "";
+        private readonly List<string> _details = new();
+
+        public string ToolId => _toolId;
+        public string ToolName => _toolName;
+        public bool IsComplete => _isComplete;
+
+        public RunningToolItem(string toolId, string toolName)
+        {
+            _toolId = toolId;
+            _toolName = toolName;
+            _startTime = DateTime.UtcNow;
+            _isComplete = false;
+            _isSuccess = false;
+        }
+
+        public void SetComplete(bool success, string duration)
+        {
+            _isComplete = true;
+            _isSuccess = success;
+            _duration = duration;
+        }
+
+        public void SetParameters(Dictionary<string, object?> parameters)
+        {
+            _parameters = parameters;
+            // Extract file path if present
+            if (parameters.TryGetValue("file_path", out var path))
+            {
+                _filePath = path?.ToString() ?? "";
+            }
+            else if (parameters.TryGetValue("path", out var altPath))
+            {
+                _filePath = altPath?.ToString() ?? "";
+            }
+        }
+
+        public void SetResult(string? result)
+        {
+            _result = result;
+            // Try to extract statistics from result
+            ExtractStatistics(result);
+        }
+
+        public void SetStatistics(int linesAdded, int linesRemoved)
+        {
+            _linesAdded = linesAdded;
+            _linesRemoved = linesRemoved;
+        }
+
+        public void AddDetail(string detail)
+        {
+            _details.Add(detail);
+        }
+
+        private void ExtractStatistics(string? result)
+        {
+            if (string.IsNullOrEmpty(result)) return;
+
+            // Try to extract line counts for read operations
+            if (_toolName.Contains("Read") || _toolName.Contains("read_file"))
+            {
+                var match = System.Text.RegularExpressions.Regex.Match(result, @"(\d+)\s+lines");
+                if (match.Success && int.TryParse(match.Groups[1].Value, out var lines))
+                {
+                    _linesAdded = lines;
+                }
+                // Also try to extract file size if available
+                var sizeMatch = System.Text.RegularExpressions.Regex.Match(result, @"(\d+(?:\.\d+)?)\s*([KMG]?B)");
+                if (sizeMatch.Success)
+                {
+                    _details.Add($"Size: {sizeMatch.Groups[1].Value}{sizeMatch.Groups[2].Value}");
+                }
+            }
+
+            // Extract directory listing statistics
+            if (_toolName.Contains("list_directory") || _toolName.Contains("ListDirectory"))
+            {
+                // Try to parse JSON result for file/directory counts and names
+                try
+                {
+                    if (result.Contains("\"items\"") || result.Contains("\"name\""))
+                    {
+                        // Extract file and directory names
+                        var nameMatches = System.Text.RegularExpressions.Regex.Matches(result, @"""name"":\s*""([^""]+)""");
+                        var fileNames = new List<string>();
+                        var dirNames = new List<string>();
+
+                        // Count files and directories from JSON
+                        var fileCount = System.Text.RegularExpressions.Regex.Matches(result, @"""type"":\s*""file""").Count;
+                        var dirCount = System.Text.RegularExpressions.Regex.Matches(result, @"""type"":\s*""directory""").Count;
+
+                        // Extract some file names for preview
+                        foreach (System.Text.RegularExpressions.Match nameMatch in nameMatches.Take(10))
+                        {
+                            var name = nameMatch.Groups[1].Value;
+                            // Check if it's likely a directory (ends with / or has no extension)
+                            if (name.EndsWith("/") || (!name.Contains(".") && !name.StartsWith(".")))
+                            {
+                                if (dirNames.Count < 3) dirNames.Add(name.TrimEnd('/'));
+                            }
+                            else
+                            {
+                                if (fileNames.Count < 5) fileNames.Add(name);
+                            }
+                        }
+
+                        // Create summary
+                        var summary = $"Found {fileCount} files and {dirCount} directories";
+                        _details.Add(summary);
+
+                        // Add sample names if available
+                        if (fileNames.Any())
+                        {
+                            var fileList = string.Join(", ", fileNames.Take(3));
+                            if (fileCount > 3) fileList += "...";
+                            _details.Add($"Files: {fileList}");
+                        }
+                        if (dirNames.Any())
+                        {
+                            var dirList = string.Join(", ", dirNames);
+                            if (dirCount > dirNames.Count) dirList += "...";
+                            _details.Add($"Dirs: {dirList}");
+                        }
+                    }
+                    else if (result.Contains("files") && result.Contains("directories"))
+                    {
+                        // Try to extract from plain text
+                        var fileMatch = System.Text.RegularExpressions.Regex.Match(result, @"(\d+)\s+files?");
+                        var dirMatch = System.Text.RegularExpressions.Regex.Match(result, @"(\d+)\s+director");
+                        if (fileMatch.Success && dirMatch.Success)
+                        {
+                            _details.Add($"Found {fileMatch.Groups[1].Value} files and {dirMatch.Groups[1].Value} directories");
+                        }
+                    }
+                }
+                catch { /* Ignore parsing errors */ }
+            }
+
+            // Extract code indexing statistics
+            if (_toolName.Contains("code_index") || _toolName.Contains("CodeIndex") || _toolName.Contains("index"))
+            {
+                try
+                {
+                    // Parse more detailed statistics from result
+                    var indexedMatch = System.Text.RegularExpressions.Regex.Match(result, @"Indexed\s+(\d+)\s+code\s+files\s+out\s+of\s+(\d+)\s+total");
+                    if (indexedMatch.Success)
+                    {
+                        _details.Add($"Indexed {indexedMatch.Groups[1].Value} code files");
+                        _details.Add($"Total {indexedMatch.Groups[2].Value} files in repository");
+                    }
+                    else
+                    {
+                        // Look for file counts
+                        var fileMatch = System.Text.RegularExpressions.Regex.Match(result, @"(\d+)\s+files?");
+                        var codeFileMatch = System.Text.RegularExpressions.Regex.Match(result, @"(\d+)\s+code\s+files?");
+                        var classMatch = System.Text.RegularExpressions.Regex.Match(result, @"(\d+)\s+class");
+                        var methodMatch = System.Text.RegularExpressions.Regex.Match(result, @"(\d+)\s+method");
+                        var lineMatch = System.Text.RegularExpressions.Regex.Match(result, @"(\d+)\s+lines?");
+
+                        var stats = new List<string>();
+                        if (codeFileMatch.Success)
+                            stats.Add($"{codeFileMatch.Groups[1].Value} code files");
+                        else if (fileMatch.Success)
+                            stats.Add($"{fileMatch.Groups[1].Value} files");
+
+                        if (classMatch.Success) stats.Add($"{classMatch.Groups[1].Value} classes");
+                        if (methodMatch.Success) stats.Add($"{methodMatch.Groups[1].Value} methods");
+                        if (lineMatch.Success) stats.Add($"{lineMatch.Groups[1].Value} lines");
+
+                        if (stats.Any())
+                        {
+                            _details.Add($"Indexed: {string.Join(", ", stats)}");
+                        }
+                        else
+                        {
+                            _details.Add("Code repository indexed");
+                        }
+                    }
+
+                    // Look for language/file type information
+                    var langMatch = System.Text.RegularExpressions.Regex.Match(result, @"Languages?:\s*([^\n]+)");
+                    if (langMatch.Success)
+                    {
+                        _details.Add($"Languages: {langMatch.Groups[1].Value.Trim()}");
+                    }
+                    else
+                    {
+                        // Look for file extensions
+                        var extensions = System.Text.RegularExpressions.Regex.Matches(result, @"\.(cs|py|js|ts|tsx|jsx|java|cpp|c|h|go|rs|rb|php|swift|kt|scala|clj)\b");
+                        var uniqueExts = extensions.Cast<System.Text.RegularExpressions.Match>()
+                            .Select(m => m.Value)
+                            .Distinct()
+                            .Take(8)
+                            .ToList();
+                        if (uniqueExts.Any())
+                        {
+                            _details.Add($"File types: {string.Join(", ", uniqueExts)}");
+                        }
+                    }
+
+                    // Look for framework/technology detection
+                    if (result.Contains(".csproj") || result.Contains("dotnet"))
+                        _details.Add("Technology: .NET/C#");
+                    else if (result.Contains("package.json"))
+                        _details.Add("Technology: Node.js/JavaScript");
+                    else if (result.Contains("requirements.txt") || result.Contains("setup.py"))
+                        _details.Add("Technology: Python");
+                    else if (result.Contains("pom.xml") || result.Contains("build.gradle"))
+                        _details.Add("Technology: Java");
+                }
+                catch { /* Ignore parsing errors */ }
+            }
+        }
+
+        public int MeasureLineCount(int width)
+        {
+            if (!_isComplete)
+            {
+                // Running: spinner + details
+                return 2 + Math.Min(_details.Count, 2); // Show up to 2 detail lines
+            }
+
+            // Calculate lines based on content
+            int lines = 2; // Tool name + result summary
+
+            // Add lines for statistics if present
+            if (_linesAdded > 0 || _linesRemoved > 0)
+            {
+                lines++; // Statistics line
+            }
+
+            // Add detail lines
+            lines += Math.Min(_details.Count, 3); // Show up to 3 detail lines when complete
+
+            return Math.Min(lines, 6); // Cap at 6 lines max
+        }
+
+        public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
+        {
+            if (width <= 0 || maxLines <= 0) return;
+
+            int row = y;
+            int drawn = 0;
+
+            // Update animation frame
+            _animationFrame = (_animationFrame + 1) % _spinnerFrames.Length;
+
+            // Colors
+            var white = new DL.Rgb24(255, 255, 255);
+            var dim = new DL.Rgb24(150, 150, 150);
+            var dimmer = new DL.Rgb24(100, 100, 100);
+
+            if (!_isComplete)
+            {
+                // While running: show spinner with tool name
+                if (drawn < maxLines && startLine <= 0)
+                {
+                    var spinner = _spinnerFrames[_animationFrame];
+                    var toolDisplay = $"{spinner} {_toolName}";
+
+                    // Show parameters in parentheses
+                    var paramDisplay = GetParameterDisplay();
+                    if (!string.IsNullOrEmpty(paramDisplay))
+                    {
+                        toolDisplay += $"({paramDisplay})";
+                    }
+                    else
+                    {
+                        toolDisplay += "()";
+                    }
+
+                    b.DrawText(new DL.TextRun(x, row, toolDisplay, white, null, DL.CellAttrFlags.None));
+                    row++; drawn++;
+                }
+
+                // Indented progress indicator
+                if (drawn < maxLines && startLine <= 1)
+                {
+                    var elapsed = DateTime.UtcNow - _startTime;
+                    var statusText = $"  ⎿  Running... [{FormatDuration(elapsed)}]";
+                    b.DrawText(new DL.TextRun(x, row, statusText, dimmer, null, DL.CellAttrFlags.None));
+                    row++; drawn++;
+                }
+
+                // Show parameters during execution
+                if (_parameters != null && _parameters.Any() && drawn < maxLines)
+                {
+                    foreach (var param in _parameters.Take(2))
+                    {
+                        if (drawn >= maxLines || startLine > drawn + 2) break;
+                        var paramText = $"      {param.Key}: {TruncateValue(param.Value)}";
+                        if (paramText.Length > width - 2)
+                        {
+                            paramText = paramText.Substring(0, width - 5) + "...";
+                        }
+                        b.DrawText(new DL.TextRun(x, row, paramText, dimmer, null, DL.CellAttrFlags.None));
+                        row++; drawn++;
+                    }
+                }
+
+                // Show recent details during execution
+                var recentDetails = _details.TakeLast(2).ToList();
+                for (int i = 0; i < recentDetails.Count && drawn < maxLines; i++)
+                {
+                    if (startLine <= drawn + 2)
+                    {
+                        var detailText = $"      {recentDetails[i]}";
+                        if (detailText.Length > width - 2)
+                        {
+                            detailText = detailText.Substring(0, width - 5) + "...";
+                        }
+                        b.DrawText(new DL.TextRun(x, row, detailText, dimmer, null, DL.CellAttrFlags.None));
+                        row++; drawn++;
+                    }
+                }
+            }
+            else
+            {
+                // Completed: show in Claude's style
+                // Line 1: Tool name with symbol
+                if (drawn < maxLines && startLine <= 0)
+                {
+                    var symbol = "⏺"; // Circle bullet like Claude uses
+                    var toolDisplay = $"{symbol} {_toolName}";
+
+                    // Show parameters in parentheses
+                    var paramDisplay = GetParameterDisplay();
+                    if (!string.IsNullOrEmpty(paramDisplay))
+                    {
+                        toolDisplay += $"({paramDisplay})";
+                    }
+                    else
+                    {
+                        toolDisplay += "()";
+                    }
+
+                    b.DrawText(new DL.TextRun(x, row, toolDisplay, white, null, DL.CellAttrFlags.None));
+                    row++; drawn++;
+                }
+
+                // Line 2: Result summary with statistics
+                if (drawn < maxLines && startLine <= 1)
+                {
+                    string resultText = "  ⎿  ";
+
+                    if (!_isSuccess)
+                    {
+                        resultText += "Error: ";
+                    }
+
+                    // Add specific result based on tool type
+                    if (_toolName.Contains("Read") || _toolName.Contains("read_file"))
+                    {
+                        if (_linesAdded > 0)
+                        {
+                            resultText += $"Read {_linesAdded} lines";
+                            if (_parameters.ContainsKey("limit"))
+                            {
+                                resultText += " (truncated)";
+                            }
+                        }
+                        else
+                        {
+                            resultText += GetResultSummary();
+                        }
+                    }
+                    else if (_toolName.Contains("list_directory") || _toolName.Contains("ListDirectory"))
+                    {
+                        // Show directory listing summary
+                        if (_details.Any())
+                        {
+                            resultText += _details.First();
+                        }
+                        else
+                        {
+                            resultText += GetResultSummary();
+                        }
+                    }
+                    else if (_toolName.Contains("code_index") || _toolName.Contains("CodeIndex") || _toolName.Contains("index"))
+                    {
+                        // Show code index summary
+                        if (_details.Any())
+                        {
+                            resultText += _details.First();
+                        }
+                        else
+                        {
+                            resultText += "Code indexed";
+                        }
+                    }
+                    else if (_toolName.Contains("Update") || _toolName.Contains("Edit") || _toolName.Contains("Write") ||
+                             _toolName.Contains("update_file") || _toolName.Contains("edit_file"))
+                    {
+                        if (_linesAdded > 0 || _linesRemoved > 0)
+                        {
+                            resultText += $"Updated {GetShortPath(_filePath)}";
+                            if (_linesAdded > 0 && _linesRemoved > 0)
+                            {
+                                resultText += $" with {_linesAdded} additions and {_linesRemoved} removals";
+                            }
+                            else if (_linesAdded > 0)
+                            {
+                                resultText += $" with {_linesAdded} additions";
+                            }
+                            else if (_linesRemoved > 0)
+                            {
+                                resultText += $" with {_linesRemoved} removals";
+                            }
+                        }
+                        else
+                        {
+                            resultText += GetResultSummary();
+                        }
+                    }
+                    else
+                    {
+                        resultText += GetResultSummary();
+                    }
+
+                    if (resultText.Length > width - 2)
+                    {
+                        resultText = resultText.Substring(0, width - 5) + "...";
+                    }
+
+                    b.DrawText(new DL.TextRun(x, row, resultText, dim, null, DL.CellAttrFlags.None));
+                    row++; drawn++;
+                }
+
+                // Show additional details after completion (skip the first one as it's in the summary)
+                for (int i = 1; i < _details.Count && i <= 3 && drawn < maxLines; i++)
+                {
+                    if (startLine <= drawn + 2)
+                    {
+                        var detailText = $"        {_details[i]}";
+                        if (detailText.Length > width - 2)
+                        {
+                            detailText = detailText.Substring(0, width - 5) + "...";
+                        }
+                        b.DrawText(new DL.TextRun(x, row, detailText, new DL.Rgb24(100, 100, 100), null, DL.CellAttrFlags.None));
+                        row++; drawn++;
+                    }
+                }
+
+                // Line 3+: Show code diff preview if applicable (for Update/Edit tools)
+                if ((_toolName.Contains("Update") || _toolName.Contains("Edit")) && drawn < maxLines && _result != null)
+                {
+                    // Show a few lines of the diff if available
+                    var lines = _result.Split('\n').Take(3);
+                    foreach (var line in lines)
+                    {
+                        if (drawn >= maxLines || startLine > drawn + 2) break;
+
+                        var diffLine = "        " + line.Trim();
+                        if (diffLine.Length > width - 2)
+                        {
+                            diffLine = diffLine.Substring(0, width - 5) + "...";
+                        }
+
+                        var lineColor = dimmer;
+                        if (line.StartsWith("+")) lineColor = new DL.Rgb24(100, 180, 100);
+                        else if (line.StartsWith("-")) lineColor = new DL.Rgb24(180, 100, 100);
+
+                        b.DrawText(new DL.TextRun(x, row, diffLine, lineColor, null, DL.CellAttrFlags.None));
+                        row++; drawn++;
+                    }
+                }
+            }
+        }
+
+        private string GetShortPath(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return "";
+
+            // Shorten long paths
+            var parts = path.Split('/');
+            if (parts.Length > 3)
+            {
+                return $".../{parts[parts.Length - 2]}/{parts[parts.Length - 1]}";
+            }
+            return path;
+        }
+
+        private string GetResultSummary()
+        {
+            // Try to provide more specific summaries based on tool type
+            if (_toolName.Contains("list_directory") || _toolName.Contains("ListDirectory"))
+            {
+                if (_details.Any())
+                    return _details.First();
+                else if (!string.IsNullOrEmpty(_result))
+                    return ExtractDirectoryStats(_result);
+                else if (!string.IsNullOrEmpty(_filePath))
+                    return $"Listed {GetShortPath(_filePath)}";
+                else
+                    return "Directory contents retrieved";
+            }
+            else if (_toolName.Contains("code_index") || _toolName.Contains("CodeIndex"))
+            {
+                if (_details.Any())
+                    return _details.First();
+                else if (!string.IsNullOrEmpty(_result))
+                    return ExtractCodeIndexStats(_result);
+                else
+                    return "Code repository indexed";
+            }
+            else if (_toolName.Contains("bash") || _toolName.Contains("command"))
+            {
+                if (!string.IsNullOrEmpty(_result))
+                {
+                    var lines = _result.Split('\n').Length;
+                    return $"Command executed ({lines} lines output)";
+                }
+                return "Command executed";
+            }
+            else if (!string.IsNullOrEmpty(_result))
+            {
+                return FirstLine(_result);
+            }
+            else if (_isSuccess)
+            {
+                return "Completed successfully";
+            }
+            else
+            {
+                return "Operation failed";
+            }
+        }
+
+        private string ExtractDirectoryStats(string result)
+        {
+            // Try to extract meaningful stats from result
+            var fileCount = System.Text.RegularExpressions.Regex.Matches(result, @"""type"":\s*""file""").Count;
+            var dirCount = System.Text.RegularExpressions.Regex.Matches(result, @"""type"":\s*""directory""").Count;
+
+            if (fileCount > 0 || dirCount > 0)
+            {
+                return $"Found {fileCount} files and {dirCount} directories";
+            }
+
+            // Try to count items in array
+            var itemMatches = System.Text.RegularExpressions.Regex.Matches(result, @"\{[^}]+\}");
+            if (itemMatches.Count > 0)
+            {
+                return $"Listed {itemMatches.Count} items";
+            }
+
+            return "Directory contents retrieved";
+        }
+
+        private string ExtractCodeIndexStats(string result)
+        {
+            // Try to extract meaningful stats from code index result
+            var fileMatch = System.Text.RegularExpressions.Regex.Match(result, @"(\d+)\s+files?");
+            var classMatch = System.Text.RegularExpressions.Regex.Match(result, @"(\d+)\s+class");
+            var functionMatch = System.Text.RegularExpressions.Regex.Match(result, @"(\d+)\s+(function|method)");
+            var lineMatch = System.Text.RegularExpressions.Regex.Match(result, @"(\d+)\s+lines?");
+
+            var stats = new List<string>();
+            if (fileMatch.Success) stats.Add($"{fileMatch.Groups[1].Value} files");
+            if (classMatch.Success) stats.Add($"{classMatch.Groups[1].Value} classes");
+            if (functionMatch.Success) stats.Add($"{functionMatch.Groups[1].Value} {functionMatch.Groups[2].Value}s");
+            if (lineMatch.Success) stats.Add($"{lineMatch.Groups[1].Value} lines");
+
+            if (stats.Any())
+            {
+                return $"Indexed: {string.Join(", ", stats.Take(3))}";
+            }
+
+            return "Code repository indexed";
+        }
+
+        private static string TruncateValue(object? value)
+        {
+            var s = value?.ToString() ?? "null";
+            if (s.Length > 20) s = s.Substring(0, 17) + "...";
+            return s.Replace("\n", " ").Replace("\r", " ").Trim();
+        }
+
+        private static string FirstLine(string s)
+        {
+            var line = s.Replace("\r\n", "\n").Replace('\r', '\n');
+            var nl = line.IndexOf('\n');
+            if (nl >= 0) line = line.Substring(0, nl);
+            if (line.Length > 80) line = line.Substring(0, 77) + "...";
+            return line.Trim();
+        }
+
+        private string GetParameterDisplay()
+        {
+            if (_parameters == null || !_parameters.Any())
+            {
+                if (!string.IsNullOrEmpty(_filePath))
+                    return GetShortPath(_filePath);
+                return "";
+            }
+
+            // Special handling for different tools
+            if (_toolName.Contains("code_index"))
+            {
+                var parts = new List<string>();
+
+                // Show path if available
+                if (_parameters.TryGetValue("path", out var path) && path != null)
+                {
+                    parts.Add(GetShortPath(path.ToString()));
+                }
+                else if (_parameters.TryGetValue("directory", out var dir) && dir != null)
+                {
+                    parts.Add(GetShortPath(dir.ToString()));
+                }
+
+                // Show query if searching for something specific
+                if (_parameters.TryGetValue("query", out var query) && query != null)
+                {
+                    var queryStr = query.ToString();
+                    if (queryStr.Length > 30) queryStr = queryStr.Substring(0, 27) + "...";
+                    parts.Add($"query: '{queryStr}'");
+                }
+
+                // Show namespace or class filter
+                if (_parameters.TryGetValue("namespace", out var ns) && ns != null)
+                {
+                    parts.Add($"namespace: {ns}");
+                }
+                else if (_parameters.TryGetValue("class", out var cls) && cls != null)
+                {
+                    parts.Add($"class: {cls}");
+                }
+
+                // Show type filter
+                if (_parameters.TryGetValue("type", out var type) && type != null)
+                {
+                    parts.Add($"type: {type}");
+                }
+
+                return parts.Any() ? string.Join(", ", parts) : "current directory";
+            }
+            else if (_toolName.Contains("list_directory"))
+            {
+                if (_parameters.TryGetValue("path", out var path))
+                {
+                    var pathStr = path?.ToString() ?? ".";
+                    var recursive = _parameters.TryGetValue("recursive", out var rec) && rec?.ToString() == "True" ? ", recursive" : "";
+                    return $"{GetShortPath(pathStr)}{recursive}";
+                }
+            }
+            else if (_parameters.TryGetValue("file_path", out var filePath))
+            {
+                return GetShortPath(filePath?.ToString() ?? "");
+            }
+            else if (_parameters.TryGetValue("path", out var pathParam))
+            {
+                return GetShortPath(pathParam?.ToString() ?? "");
+            }
+
+            // Default: show first parameter
+            var first = _parameters.First();
+            var value = first.Value?.ToString() ?? "null";
+            if (value.Length > 30) value = "..." + value.Substring(value.Length - 27);
+            return $"{first.Key}={value}";
+        }
+
+        private static string FormatDuration(TimeSpan elapsed)
+        {
+            if (elapsed.TotalMilliseconds < 1000)
+                return $"{elapsed.TotalMilliseconds:F0}ms";
+            else if (elapsed.TotalSeconds < 60)
+                return $"{elapsed.TotalSeconds:F1}s";
+            else
+                return $"{elapsed.TotalMinutes:F1}m";
         }
     }
 }

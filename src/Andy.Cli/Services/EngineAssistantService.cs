@@ -189,11 +189,29 @@ public class EngineAssistantService : IDisposable
                 _isFirstMessage = false;
             }
 
-            // Show loading indicator
-            _feed.AddMarkdownRich($"[...] Processing request...");
+            // Show enhanced processing indicator
+            _feed.AddProcessingIndicator();
+
+            // Track processing time
+            var startTime = DateTime.UtcNow;
 
             // Process message through interactive agent
             var result = await _interactiveAgent.ProcessMessageAsync(messageToSend, cancellationToken);
+
+            // Calculate actual duration
+            var duration = DateTime.UtcNow - startTime;
+
+            // Clear the processing indicator
+            _feed.ClearProcessingIndicator();
+
+            // Add technical summary of what happened
+            var technicalSummary = $"Processing completed in {duration.TotalSeconds:F1}s | Model: {_modelName} | Provider: {_providerName}";
+            if (!result.Success)
+            {
+                technicalSummary += $" | Status: Failed - {result.StopReason}";
+            }
+            _feed.AddMarkdownRich(technicalSummary);
+            _feed.AddMarkdownRich(""); // Blank line after technical info
 
             // Extract response from agent result
             string responseContent = string.Empty;
@@ -292,10 +310,10 @@ public class EngineAssistantService : IDisposable
                 }
             }
 
-            // Show context stats
+            // Show context stats with actual duration
             var stats = GetContextStats();
             pipeline.AddSystemMessage("", SystemMessageType.Context, priority: 1999);
-            var contextInfo = $"Context: {stats.TurnCount} turns, ~{stats.EstimatedTokens} tokens, Duration: {stats.TotalDuration.TotalSeconds:F1}s";
+            var contextInfo = $"Context: {stats.TurnCount} turns, ~{stats.EstimatedTokens} tokens, Duration: {duration.TotalSeconds:F1}s";
             pipeline.AddSystemMessage(contextInfo, SystemMessageType.Context, priority: 2000);
 
             await pipeline.FinalizeAsync();

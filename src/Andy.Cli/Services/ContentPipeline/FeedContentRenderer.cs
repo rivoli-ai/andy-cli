@@ -54,7 +54,11 @@ public class FeedContentRenderer : IContentRenderer
             return;
 
         _feedView.AddMarkdownRich(block.Content);
-        _logger?.LogTrace("Rendered text block {BlockId} with {Length} characters", 
+
+        // Add spacing after content blocks
+        _feedView.AddMarkdownRich("");
+
+        _logger?.LogTrace("Rendered text block {BlockId} with {Length} characters",
             block.Id, block.Content.Length);
     }
 
@@ -80,8 +84,9 @@ public class FeedContentRenderer : IContentRenderer
         // Render context messages with subdued formatting
         if (block.Type == SystemMessageType.Context)
         {
-            // Use markdown italics for context info to make it less prominent
-            _feedView.AddMarkdownRich($"_{block.Message}_");
+            // Single line before context (not too much spacing)
+            // No underscores - just show plain context info
+            _feedView.AddMarkdownRich(block.Message);
         }
         else
         {
