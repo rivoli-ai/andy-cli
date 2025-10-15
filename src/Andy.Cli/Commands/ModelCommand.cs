@@ -734,6 +734,16 @@ public class ModelCommand : ICommand
             return envModel;
         }
 
+        // Check configured default from LlmOptions
+        var options = _serviceProvider.GetService<IOptions<Andy.Llm.Configuration.LlmOptions>>();
+        if (options?.Value?.Providers != null &&
+            options.Value.Providers.TryGetValue(provider.ToLowerInvariant(), out var providerConfig) &&
+            !string.IsNullOrEmpty(providerConfig.Model))
+        {
+            return providerConfig.Model;
+        }
+
+        // Fall back to hardcoded defaults
         return provider switch
         {
             "cerebras" => "llama-3.3-70b", // Only this model supports function calling
