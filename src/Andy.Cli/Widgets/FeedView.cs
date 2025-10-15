@@ -1577,30 +1577,25 @@ namespace Andy.Cli.Widgets
                     row++; drawn++;
                 }
 
-                // Line 2: Result summary with statistics
+                // Line 2: Result summary with statistics (only show if we have something meaningful)
                 if (drawn < maxLines && startLine <= 1)
                 {
-                    string resultText = "  ⎿  ";
-
-                    if (!_isSuccess)
-                    {
-                        resultText += "Error: ";
-                    }
+                    string resultContent = "";
 
                     // Add specific result based on tool type
                     if (_toolName.Contains("Read") || _toolName.Contains("read_file"))
                     {
                         if (_linesAdded > 0)
                         {
-                            resultText += $"Read {_linesAdded} lines";
+                            resultContent = $"Read {_linesAdded} lines";
                             if (_parameters.ContainsKey("limit"))
                             {
-                                resultText += " (truncated)";
+                                resultContent += " (truncated)";
                             }
                         }
                         else
                         {
-                            resultText += GetResultSummary();
+                            resultContent = GetResultSummary();
                         }
                     }
                     else if (_toolName.Contains("list_directory") || _toolName.Contains("ListDirectory"))
@@ -1608,11 +1603,11 @@ namespace Andy.Cli.Widgets
                         // Show directory listing summary
                         if (_details.Any())
                         {
-                            resultText += _details.First();
+                            resultContent = _details.First();
                         }
                         else
                         {
-                            resultText += GetResultSummary();
+                            resultContent = GetResultSummary();
                         }
                     }
                     else if (_toolName.Contains("code_index") || _toolName.Contains("CodeIndex") || _toolName.Contains("index"))
@@ -1620,11 +1615,11 @@ namespace Andy.Cli.Widgets
                         // Show code index summary
                         if (_details.Any())
                         {
-                            resultText += _details.First();
+                            resultContent = _details.First();
                         }
                         else
                         {
-                            resultText += "Code indexed";
+                            resultContent = GetResultSummary(); // This returns empty string now, not generic message
                         }
                     }
                     else if (_toolName.Contains("Update") || _toolName.Contains("Edit") || _toolName.Contains("Write") ||
@@ -1632,37 +1627,50 @@ namespace Andy.Cli.Widgets
                     {
                         if (_linesAdded > 0 || _linesRemoved > 0)
                         {
-                            resultText += $"Updated {GetShortPath(_filePath)}";
+                            resultContent = $"Updated {GetShortPath(_filePath)}";
                             if (_linesAdded > 0 && _linesRemoved > 0)
                             {
-                                resultText += $" with {_linesAdded} additions and {_linesRemoved} removals";
+                                resultContent += $" with {_linesAdded} additions and {_linesRemoved} removals";
                             }
                             else if (_linesAdded > 0)
                             {
-                                resultText += $" with {_linesAdded} additions";
+                                resultContent += $" with {_linesAdded} additions";
                             }
                             else if (_linesRemoved > 0)
                             {
-                                resultText += $" with {_linesRemoved} removals";
+                                resultContent += $" with {_linesRemoved} removals";
                             }
                         }
                         else
                         {
-                            resultText += GetResultSummary();
+                            resultContent = GetResultSummary();
                         }
                     }
                     else
                     {
-                        resultText += GetResultSummary();
+                        resultContent = GetResultSummary();
                     }
 
-                    if (resultText.Length > width - 2)
+                    // Only show the result line if we have actual content
+                    if (!string.IsNullOrEmpty(resultContent))
                     {
-                        resultText = resultText.Substring(0, width - 5) + "...";
-                    }
+                        string resultText = "  ⎿  ";
 
-                    b.DrawText(new DL.TextRun(x, row, resultText, dim, null, DL.CellAttrFlags.None));
-                    row++; drawn++;
+                        if (!_isSuccess)
+                        {
+                            resultText += "Error: ";
+                        }
+
+                        resultText += resultContent;
+
+                        if (resultText.Length > width - 2)
+                        {
+                            resultText = resultText.Substring(0, width - 5) + "...";
+                        }
+
+                        b.DrawText(new DL.TextRun(x, row, resultText, dim, null, DL.CellAttrFlags.None));
+                        row++; drawn++;
+                    }
                 }
 
                 // Show additional details after completion (skip the first one as it's in the summary)
@@ -1731,7 +1739,7 @@ namespace Andy.Cli.Widgets
                 else if (!string.IsNullOrEmpty(_filePath))
                     return $"Listed {GetShortPath(_filePath)}";
                 else
-                    return "Directory contents retrieved";
+                    return ""; // Don't show generic message
             }
             else if (_toolName.Contains("code_index") || _toolName.Contains("CodeIndex"))
             {
@@ -1740,7 +1748,7 @@ namespace Andy.Cli.Widgets
                 else if (!string.IsNullOrEmpty(_result))
                     return ExtractCodeIndexStats(_result);
                 else
-                    return "Code repository indexed";
+                    return ""; // Don't show generic message
             }
             else if (_toolName.Contains("bash") || _toolName.Contains("command"))
             {
@@ -1839,7 +1847,9 @@ namespace Andy.Cli.Widgets
                     return debugInfo + GetShortPath(_filePath);
                 if (!string.IsNullOrEmpty(debugInfo))
                     return debugInfo.Trim();
-                return "?"; // Show question mark if no parameters
+
+                // Always show something to indicate we're missing params
+                return debugInfo + "waiting...";
             }
 
             // Special handling for different tools

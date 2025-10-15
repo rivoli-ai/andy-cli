@@ -234,22 +234,13 @@ public class SimpleAssistantService : IDisposable
                         }
                     }
 
-                    // Final fallback
+                    // Final fallback - don't show generic messages, they're annoying
                     if (string.IsNullOrEmpty(resultSummary))
                     {
-                        _logger?.LogWarning("[TOOL_COMPLETE] Using fallback for {ToolName} - no execution info found", baseToolName);
+                        _logger?.LogWarning("[TOOL_COMPLETE] No execution info found for {ToolName}", baseToolName);
 
-                        // We don't have detailed info, so use generic but accurate messages
-                        if (baseToolName.Contains("read_file"))
-                            resultSummary = isSuccess ? "File read completed" : "File read failed";
-                        else if (baseToolName.Contains("list_directory"))
-                            resultSummary = isSuccess ? "Directory listing completed" : "Directory listing failed";
-                        else if (baseToolName.Contains("code_index"))
-                            resultSummary = isSuccess ? "Code indexing completed" : "Code indexing failed";
-                        else if (baseToolName.Contains("write_file"))
-                            resultSummary = isSuccess ? "File write completed" : "File write failed";
-                        else
-                            resultSummary = isSuccess ? "Operation completed" : "Operation failed";
+                        // Don't show anything generic - leave it empty or show the actual status
+                        resultSummary = isSuccess ? "" : "Failed";
                     }
                 }
 
