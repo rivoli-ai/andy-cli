@@ -12,6 +12,7 @@ public class ToolExecutionTracker
     private static ToolExecutionTracker? _instance;
     private readonly Dictionary<string, ToolExecutionInfo> _executions = new();
     private readonly Dictionary<string, Dictionary<string, object?>> _pendingParameters = new(); // Store parameters immediately
+    private readonly Dictionary<string, string> _toolNameToIdMap = new(); // Map tool names to their UI IDs
     private FeedView? _feedView;
     private string? _lastActiveToolId; // Track the last tool started from UI
     private int _parameterUpdateCounter = 0;
@@ -28,6 +29,26 @@ public class ToolExecutionTracker
         _lastActiveToolId = toolId;
     }
 
+    public string? GetLastActiveToolId()
+    {
+        return _lastActiveToolId;
+    }
+
+    public void RegisterToolMapping(string toolName, string uiToolId)
+    {
+        _toolNameToIdMap[toolName.ToLower()] = uiToolId;
+    }
+
+    public string? GetToolIdForName(string toolName)
+    {
+        return _toolNameToIdMap.TryGetValue(toolName.ToLower(), out var id) ? id : null;
+    }
+
+    public FeedView? GetFeedView()
+    {
+        return _feedView;
+    }
+
     /// <summary>
     /// Store parameters immediately when we get them, even before tool execution
     /// </summary>
@@ -35,7 +56,8 @@ public class ToolExecutionTracker
     {
         lock (_pendingParameters)
         {
-            _pendingParameters[toolName.ToLower()] = parameters;
+            var key = toolName.ToLower();
+            _pendingParameters[key] = parameters;
             _parameterUpdateCounter++;
 
             // Also immediately update any running tools with matching names
@@ -44,6 +66,12 @@ public class ToolExecutionTracker
                 // Force immediate update of all matching tools
                 _feedView.UpdateRunningToolParameters(toolName, parameters);
                 _feedView.ForceUpdateAllMatchingTools(toolName, toolName, parameters);
+
+                // If we have a lastActiveToolId, update that specific tool
+                if (!string.IsNullOrEmpty(_lastActiveToolId))
+                {
+                    _feedView.UpdateToolByExactId(_lastActiveToolId, parameters);
+                }
             }
         }
     }
@@ -55,7 +83,10 @@ public class ToolExecutionTracker
     {
         lock (_pendingParameters)
         {
-            return _pendingParameters.TryGetValue(toolName.ToLower(), out var parameters) ? parameters : null;
+            var key = toolName.ToLower();
+            var found = _pendingParameters.TryGetValue(key, out var parameters);
+            // Don't use console output - it messes up the TUI
+            return found ? parameters : null;
         }
     }
 
@@ -136,6 +167,21 @@ public class ToolExecutionTracker
             if (!string.IsNullOrEmpty(resultSummary))
             {
                 info.Result = resultSummary;
+            }
+
+            // For datetime_tool, capture the actual result
+            if (info.ToolName.Contains("datetime", StringComparison.OrdinalIgnoreCase))
+            {
+                // The actual date/time is typically in the result string
+                // But don't add "Output:" prefix if it's an error
+                if (!string.IsNullOrEmpty(result) && success)
+                {
+                    info.Result = result; // Just use the result directly
+                }
+                else if (!string.IsNullOrEmpty(result))
+                {
+                    info.Result = result; // For errors, also use directly
+                }
             }
 
             // If we have a FeedView, update it with detailed result

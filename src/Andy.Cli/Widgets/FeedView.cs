@@ -1359,6 +1359,26 @@ namespace Andy.Cli.Widgets
         public void SetParameters(Dictionary<string, object?> parameters)
         {
             _parameters = parameters;
+
+            // DEBUG: Write to a file what parameters we received
+            try
+            {
+                var debugPath = "/tmp/tool_params_debug.txt";
+                var debugInfo = $"[{DateTime.Now:HH:mm:ss.fff}] SetParameters called for {_toolName}:\n";
+                debugInfo += $"  Tool ID: {_toolId}\n";
+                debugInfo += $"  Parameter count: {parameters?.Count ?? 0}\n";
+                if (parameters != null)
+                {
+                    foreach (var p in parameters)
+                    {
+                        debugInfo += $"    {p.Key} = {p.Value}\n";
+                    }
+                }
+                debugInfo += "\n";
+                System.IO.File.AppendAllText(debugPath, debugInfo);
+            }
+            catch { }
+
             // Extract file path if present
             if (parameters.TryGetValue("file_path", out var path))
             {
@@ -1881,11 +1901,24 @@ namespace Andy.Cli.Widgets
             }
             else if (_isSuccess)
             {
-                return "Completed successfully";
+                // Try to show something more meaningful than generic message
+                if (_parameters != null)
+                {
+                    // Show the operation type if available
+                    if (_parameters.TryGetValue("operation", out var op) && op != null)
+                    {
+                        return $"Completed: {op}";
+                    }
+                    if (_parameters.TryGetValue("action", out var action) && action != null)
+                    {
+                        return $"Completed: {action}";
+                    }
+                }
+                return "Done";  // Much shorter than "Completed successfully"
             }
             else
             {
-                return "Operation failed";
+                return "Failed";
             }
         }
 
@@ -1950,6 +1983,24 @@ namespace Andy.Cli.Widgets
 
         private string GetParameterDisplay()
         {
+            // DEBUG: Log what parameters we have
+            try
+            {
+                var debugPath = "/tmp/tool_params_debug.txt";
+                var debugInfo = $"[{DateTime.Now:HH:mm:ss.fff}] GetParameterDisplay for {_toolName}:\n";
+                debugInfo += $"  _parameters is null? {_parameters == null}\n";
+                debugInfo += $"  _parameters count: {_parameters?.Count ?? 0}\n";
+                if (_parameters != null)
+                {
+                    foreach (var p in _parameters.Take(5))
+                    {
+                        debugInfo += $"    {p.Key} = {p.Value}\n";
+                    }
+                }
+                System.IO.File.AppendAllText(debugPath, debugInfo + "\n");
+            }
+            catch { }
+
             // Skip internal parameters starting with __
             var realParams = _parameters?.Where(p => !p.Key.StartsWith("__")).ToList();
 
@@ -1964,9 +2015,28 @@ namespace Andy.Cli.Widgets
                 return "loading...";
             }
 
+            var displayParams = new List<string>();
+
+            // Special handling for datetime_tool
+            if (_toolName.Contains("datetime", StringComparison.OrdinalIgnoreCase))
+            {
+                // Show the operation being performed
+                var opParam = realParams.FirstOrDefault(p => p.Key.Contains("operation", StringComparison.OrdinalIgnoreCase));
+                if (opParam.Value != null)
+                {
+                    displayParams.Add($"op:{opParam.Value}");
+                }
+
+                // Show timezone if specified
+                var tzParam = realParams.FirstOrDefault(p => p.Key.Contains("timezone", StringComparison.OrdinalIgnoreCase));
+                if (tzParam.Value != null)
+                {
+                    displayParams.Add($"tz:{tzParam.Value}");
+                }
+            }
             // Special handling for different tools
-            if (_toolName.Contains("code_index", StringComparison.OrdinalIgnoreCase) ||
-                _toolName.Contains("index", StringComparison.OrdinalIgnoreCase))
+            else if (_toolName.Contains("code_index", StringComparison.OrdinalIgnoreCase) ||
+                     _toolName.Contains("index", StringComparison.OrdinalIgnoreCase))
             {
                 var parts = new List<string>();
 
@@ -2051,13 +2121,16 @@ namespace Andy.Cli.Widgets
                 }
             }
 
-            // Default: show all real parameters
-            var displayParams = new List<string>();
-            foreach (var param in realParams.Take(3))
+            // Generic fallback - show ALL real parameters if no special handling matched
+            if (!displayParams.Any() && realParams.Any())
             {
-                var value = TruncateValue(param.Value, 20);
-                displayParams.Add($"{param.Key}={value}");
+                foreach (var param in realParams.Take(3))
+                {
+                    var value = TruncateValue(param.Value, 20);
+                    displayParams.Add($"{param.Key}={value}");
+                }
             }
+
             return displayParams.Any() ? string.Join(", ", displayParams) : "";
         }
 

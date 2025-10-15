@@ -150,7 +150,65 @@ public class ToolAdapter : Andy.Model.Tooling.ITool
                 parameters[kvp.Key] = ConvertJsonElement(kvp.Value);
             }
 
-            // IMMEDIATELY store parameters so UI can access them
+            // Log what we're about to do
+            _logger?.LogWarning("[TOOL_ADAPTER] Executing {ToolName} with {ParamCount} parameters: {Params}",
+                call.Name, parameters.Count, string.Join(", ", parameters.Select(p => $"{p.Key}={p.Value}")));
+
+            // DEBUG: Write to file
+            try
+            {
+                var debugInfo = $"[{DateTime.Now:HH:mm:ss.fff}] ToolAdapter.ExecuteAsync:\n";
+                debugInfo += $"  call.Name: {call.Name}\n";
+                debugInfo += $"  _toolId: {_toolId}\n";
+                debugInfo += $"  Parameters: {string.Join(", ", parameters.Select(p => $"{p.Key}={p.Value}"))}\n";
+                System.IO.File.AppendAllText("/tmp/tool_adapter_debug.txt", debugInfo);
+            }
+            catch { }
+
+            // IMMEDIATELY update the UI with actual parameters
+            // The UI should already exist from the ToolCalled event
+            var feedView = ToolExecutionTracker.Instance.GetFeedView();
+            _logger?.LogWarning("[TOOL_ADAPTER] FeedView is {State}", feedView != null ? "available" : "NULL");
+
+            if (feedView != null)
+            {
+                // Try to find the UI tool ID for this tool by name - try multiple variations
+                var toolId = ToolExecutionTracker.Instance.GetToolIdForName(call.Name) ??
+                             ToolExecutionTracker.Instance.GetToolIdForName(_toolId) ??
+                             ToolExecutionTracker.Instance.GetToolIdForName(call.Name.Replace("-", "_")) ??
+                             ToolExecutionTracker.Instance.GetToolIdForName(call.Name.Replace("_", "-"));
+
+                _logger?.LogWarning("[TOOL_ADAPTER] Found UI toolId for {ToolName}: {ToolId}", call.Name, toolId ?? "NULL");
+
+                // DEBUG: Write lookup result
+                try
+                {
+                    var debugInfo = $"  Lookup result: toolId = {toolId ?? "NULL"}\n";
+                    debugInfo += $"  About to update: {!string.IsNullOrEmpty(toolId)}\n\n";
+                    System.IO.File.AppendAllText("/tmp/tool_adapter_debug.txt", debugInfo);
+                }
+                catch { }
+
+                if (!string.IsNullOrEmpty(toolId))
+                {
+                    _logger?.LogWarning("[TOOL_ADAPTER] Updating UI for {ToolId} with {ParamCount} parameters",
+                        toolId, parameters.Count);
+
+                    // Update the existing UI entry with real parameters
+                    feedView.UpdateToolByExactId(toolId, parameters);
+                    feedView.ForceUpdateAllMatchingTools(toolId, call.Name, parameters);
+                }
+                else
+                {
+                    _logger?.LogError("[TOOL_ADAPTER] No UI tool ID found for {ToolName}/{ToolId} - cannot update UI!", call.Name, _toolId);
+                }
+            }
+            else
+            {
+                _logger?.LogError("[TOOL_ADAPTER] FeedView not available - cannot update UI!");
+            }
+
+            // Store parameters for later use
             ToolExecutionTracker.Instance.StoreParameters(call.Name, parameters);
             ToolExecutionTracker.Instance.StoreParameters(_toolId, parameters);
 

@@ -47,11 +47,14 @@ public class SimpleAssistantService : IDisposable
         // Build system prompt using the new SystemPrompts helper
         var systemPrompt = SystemPrompts.GetDefaultCliPrompt();
 
+        // Wrap the tool executor to update UI when tools execute
+        var uiExecutor = new UiUpdatingToolExecutor(toolExecutor, logger as ILogger<UiUpdatingToolExecutor>);
+
         // Create the SimpleAgent
         _agent = new SimpleAgent(
             llmProvider,
             toolRegistry,
-            toolExecutor,
+            uiExecutor,  // Use the wrapped executor
             systemPrompt,
             maxTurns: 10,
             logger: logger as ILogger<SimpleAgent>
@@ -66,48 +69,40 @@ public class SimpleAssistantService : IDisposable
             var baseToolId = e.ToolName.ToLower().Replace(" ", "_").Replace("-", "_");
             var toolId = $"{baseToolId}_{++_toolCallCounter}";
 
-            // Track this tool but DON'T create UI yet - wait for parameters
+            // Track this tool
             _runningTools[toolId] = (DateTime.UtcNow, null);
 
-            // Tell the tracker about this tool so it can link with the actual execution
+            // Tell the tracker about this tool so the ToolAdapter can update it
             ToolExecutionTracker.Instance.SetLastActiveToolId(toolId);
+            ToolExecutionTracker.Instance.SetFeedView(_feed);
 
-            _logger?.LogInformation("[TOOL_START] Tracking toolId: {ToolId}, toolName: {ToolName} - waiting for parameters", toolId, e.ToolName);
+            // Register multiple variations of the tool name to ensure we can find it
+            ToolExecutionTracker.Instance.RegisterToolMapping(e.ToolName, toolId);
+            ToolExecutionTracker.Instance.RegisterToolMapping(e.ToolName.Replace("-", "_"), toolId);
+            ToolExecutionTracker.Instance.RegisterToolMapping(e.ToolName.Replace("_", "-"), toolId);
+            ToolExecutionTracker.Instance.RegisterToolMapping(baseToolId, toolId);
 
-            // Set up a delayed UI creation that will check for parameters
+            _logger?.LogWarning("[TOOL_CALLED_EVENT] Tool: {ToolName}, ID: {ToolId} - Registered mappings, creating UI",
+                e.ToolName, toolId);
+
+            // CREATE UI IMMEDIATELY - parameters will be filled in by ToolAdapter
+            var initialParams = new Dictionary<string, object?>
+            {
+                ["__toolId"] = toolId,
+                ["__baseName"] = baseToolId
+            };
+            _feed.AddToolExecutionStart(toolId, e.ToolName, initialParams);
+
+            // Schedule completion after a reasonable timeout if not completed naturally
             _ = Task.Run(async () =>
             {
-                // Wait a short time for parameters to arrive
-                await Task.Delay(100);
-
-                // Check if we have parameters now
-                var storedParams = ToolExecutionTracker.Instance.GetStoredParameters(e.ToolName) ??
-                                   ToolExecutionTracker.Instance.GetStoredParameters(baseToolId);
-
-                // Create the UI entry with whatever parameters we have
-                var displayParams = storedParams != null ?
-                    new Dictionary<string, object?>(storedParams) :
-                    new Dictionary<string, object?>();
-
-                displayParams["__toolId"] = toolId;
-                displayParams["__baseName"] = baseToolId;
-
-                _logger?.LogInformation("[TOOL_UI] Creating UI for {ToolId} with {ParamCount} parameters",
-                    toolId, displayParams.Count - 2); // -2 for __toolId and __baseName
-
-                _feed.AddToolExecutionStart(toolId, e.ToolName, displayParams);
-
-                // Schedule completion after a reasonable timeout if not completed naturally
-                _ = Task.Run(async () =>
+                await Task.Delay(TimeSpan.FromSeconds(30));
+                if (_runningTools.ContainsKey(toolId))
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(30));
-                    if (_runningTools.ContainsKey(toolId))
-                    {
-                        var elapsed = DateTime.UtcNow - _runningTools[toolId].startTime;
-                        _feed.AddToolExecutionComplete(toolId, true, FormatDuration(elapsed), "Completed");
-                        _runningTools.Remove(toolId);
-                    }
-                });
+                    var elapsed = DateTime.UtcNow - _runningTools[toolId].startTime;
+                    _feed.AddToolExecutionComplete(toolId, true, FormatDuration(elapsed), "Completed");
+                    _runningTools.Remove(toolId);
+                }
             });
         };
     }
@@ -180,8 +175,33 @@ public class SimpleAssistantService : IDisposable
                     // Check if the tool execution was successful
                     isSuccess = executionInfo.Success;
 
+                    // For datetime_tool, show the actual output
+                    if (baseToolName.Contains("datetime"))
+                    {
+                        // Use the Result directly if it was set by UiUpdatingToolExecutor
+                        if (!string.IsNullOrEmpty(executionInfo.Result))
+                        {
+                            resultSummary = executionInfo.Result;
+                        }
+                        // Otherwise try to extract from ResultData
+                        else if (executionInfo.ResultData is Dictionary<string, object?> resultDict)
+                        {
+                            if (resultDict.TryGetValue("result", out var res) && res != null)
+                            {
+                                resultSummary = res.ToString();
+                            }
+                            else if (resultDict.TryGetValue("output", out var output) && output != null)
+                            {
+                                resultSummary = output.ToString();
+                            }
+                            else if (resultDict.TryGetValue("formatted", out var formatted) && formatted != null)
+                            {
+                                resultSummary = formatted.ToString();
+                            }
+                        }
+                    }
                     // Use the actual result from the tool execution
-                    if (!string.IsNullOrEmpty(executionInfo.Result))
+                    else if (!string.IsNullOrEmpty(executionInfo.Result))
                     {
                         resultSummary = executionInfo.Result;
                     }
@@ -252,10 +272,28 @@ public class SimpleAssistantService : IDisposable
                     {
                         _logger?.LogWarning("[TOOL_COMPLETE] No execution info found for {ToolName}", baseToolName);
 
+                        // DEBUG: Write to file what's happening
+                        try
+                        {
+                            var debugInfo = $"[{DateTime.Now:HH:mm:ss.fff}] NO RESULT for {baseToolName}:\n";
+                            debugInfo += $"  executionInfo was null: {executionInfo == null}\n";
+                            if (executionInfo != null)
+                            {
+                                debugInfo += $"  Result: '{executionInfo.Result}'\n";
+                                debugInfo += $"  ResultData type: {executionInfo.ResultData?.GetType().Name ?? "null"}\n";
+                            }
+                            System.IO.File.AppendAllText("/tmp/tool_complete_debug.txt", debugInfo + "\n");
+                        }
+                        catch { }
+
                         // Don't show anything generic - leave it empty or show the actual status
                         resultSummary = isSuccess ? "" : "Failed";
                     }
                 }
+
+                // DEBUG: Log what we're passing to the UI
+                _logger?.LogWarning("[TOOL_COMPLETE] Calling AddToolExecutionComplete for {ToolId} with result: '{Result}'",
+                    tool.Key, resultSummary);
 
                 _feed.AddToolExecutionComplete(tool.Key, isSuccess, durationStr, resultSummary);
                 _runningTools.Remove(tool.Key);
