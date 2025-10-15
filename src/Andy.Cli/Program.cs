@@ -18,6 +18,7 @@ using Andy.Tools.Execution;
 using Andy.Tools.Library;
 using Andy.Tools.Framework;
 using Andy.Tools.Registry;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using DL = Andy.Tui.DisplayList;
@@ -136,6 +137,16 @@ class Program
 
             // Initialize Andy.Llm and Andy.Tools services
             var services = new ServiceCollection();
+
+            // Add configuration from appsettings.json
+            var configuration = new ConfigurationBuilder()
+                .SetBasePath(AppContext.BaseDirectory)
+                .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false)
+                .AddEnvironmentVariables()
+                .Build();
+
+            services.AddSingleton<IConfiguration>(configuration);
+
             services.AddLogging(builder =>
             {
                 // Disable console logging to avoid UI interference
@@ -147,14 +158,47 @@ class Program
                 }
             }); // Conditional logging based on environment variable
 
-            // Configure LLM services
+            // Configure LLM services - first from appsettings, then from environment
             services.ConfigureLlmFromEnvironment();
+
+            // Add provider configurations from appsettings.json
+            services.Configure<Andy.Llm.Configuration.LlmOptions>(options =>
+            {
+                var providers = configuration.GetSection("Providers");
+                if (providers.Exists())
+                {
+                    foreach (var provider in providers.GetChildren())
+                    {
+                        var providerName = provider.Key.ToLowerInvariant();
+                        var apiKey = provider["ApiKey"];
+
+                        // Expand environment variables in API keys
+                        if (!string.IsNullOrEmpty(apiKey) && apiKey.StartsWith("${") && apiKey.EndsWith("}"))
+                        {
+                            var envVar = apiKey.Substring(2, apiKey.Length - 3);
+                            apiKey = Environment.GetEnvironmentVariable(envVar) ?? "";
+                        }
+
+                        if (!string.IsNullOrEmpty(apiKey))
+                        {
+                            options.Providers[providerName] = new Andy.Llm.Configuration.ProviderConfig
+                            {
+                                ApiKey = apiKey,
+                                ApiBase = provider["BaseUrl"],
+                                Model = provider["DefaultModel"],
+                                Enabled = true
+                            };
+                        }
+                    }
+                }
+            });
+
             services.AddLlmServices(options =>
             {
                 // Auto-detect the default provider based on environment variables
                 var detectionService = new ProviderDetectionService();
                 var detectedProvider = detectionService.DetectDefaultProvider();
-                options.DefaultProvider = detectedProvider ?? "cerebras"; // Fallback to Cerebras if none detected
+                options.DefaultProvider = detectedProvider ?? "openai"; // Default to OpenAI instead of forcing Cerebras
             });
 
             // Add the provider factory if not already added

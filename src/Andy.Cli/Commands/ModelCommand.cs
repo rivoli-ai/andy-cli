@@ -14,7 +14,7 @@ namespace Andy.Cli.Commands;
 
 public class ModelCommand : ICommand
 {
-    private readonly IServiceProvider _serviceProvider;
+    private IServiceProvider _serviceProvider;
     private readonly ModelMemoryService _modelMemory;
     private readonly Dictionary<string, List<ModelInfo>> _modelCache = new();
     private readonly Dictionary<string, DateTime> _cacheTimestamps = new();
@@ -33,11 +33,6 @@ public class ModelCommand : ICommand
     public ModelCommand(IServiceProvider serviceProvider)
     {
         _serviceProvider = serviceProvider;
-        var providerFactory = serviceProvider.GetService<ILlmProviderFactory>();
-        if (providerFactory != null)
-        {
-            _currentProviderInstance = providerFactory.CreateProvider(_currentProviderName);
-        }
         _modelMemory = new ModelMemoryService();
 
         // First priority: Check for configured default provider from options
@@ -459,11 +454,9 @@ public class ModelCommand : ICommand
 
             var newProvider = services.BuildServiceProvider();
             _currentServiceProvider = newProvider;
-            var providerFactory = newProvider.GetService<ILlmProviderFactory>();
-            if (providerFactory != null)
-            {
-                _currentProviderInstance = providerFactory.CreateProvider(providerName);
-            }
+            _currentProviderInstance = null; // Clear old instance
+            _serviceProvider = newProvider; // Update service provider
+            GetOrCreateProviderInstance(); // Try to create new instance
 
             var message = new StringBuilder();
             if (providerChanged)
@@ -561,11 +554,9 @@ public class ModelCommand : ICommand
 
             var newProvider = services.BuildServiceProvider();
             _currentServiceProvider = newProvider;
-            var providerFactory = newProvider.GetService<ILlmProviderFactory>();
-            if (providerFactory != null)
-            {
-                _currentProviderInstance = providerFactory.CreateProvider(provider);
-            }
+            _currentProviderInstance = null; // Clear old instance
+            _serviceProvider = newProvider; // Update service provider
+            GetOrCreateProviderInstance(); // Try to create new instance
 
             var message = new StringBuilder();
             message.AppendLine(ConsoleColors.SuccessPrefix($"Switched to provider: {provider}"));
@@ -590,7 +581,7 @@ public class ModelCommand : ICommand
         info.AppendLine($"Provider: {_currentProviderName}");
         info.AppendLine($"URL: {GetProviderUrl(_currentProviderName)}");
         info.AppendLine($"Model: {_currentModel}");
-        info.AppendLine($"Status: {(_currentProviderInstance != null ? "Connected" : "Not connected")}");
+        info.AppendLine($"Status: {(GetOrCreateProviderInstance() != null ? "Connected" : "Not connected")}");
         info.AppendLine();
 
         // Try to get current model info
@@ -626,7 +617,8 @@ public class ModelCommand : ICommand
 
     private async Task<CommandResult> TestModelAsync(string[] args, CancellationToken cancellationToken)
     {
-        if (_currentProviderInstance == null)
+        var provider = GetOrCreateProviderInstance();
+        if (provider == null)
         {
             return CommandResult.Failure(ConsoleColors.ErrorPrefix("No model client available. Please switch to a valid model first."));
         }
@@ -661,7 +653,7 @@ public class ModelCommand : ICommand
                 }
             };
 
-            var response = await _currentProviderInstance.CompleteAsync(request, cancellationToken);
+            var response = await provider.CompleteAsync(request, cancellationToken);
             var elapsed = DateTime.UtcNow - startTime;
 
             var result = new StringBuilder();
@@ -786,7 +778,28 @@ public class ModelCommand : ICommand
         return null;
     }
 
-    public ILlmProvider? GetCurrentProviderInstance() => _currentProviderInstance;
+    private ILlmProvider? GetOrCreateProviderInstance()
+    {
+        if (_currentProviderInstance == null)
+        {
+            var providerFactory = _serviceProvider.GetService<ILlmProviderFactory>();
+            if (providerFactory != null && HasApiKey(_currentProviderName))
+            {
+                try
+                {
+                    _currentProviderInstance = providerFactory.CreateProvider(_currentProviderName);
+                }
+                catch (Exception ex)
+                {
+                    // Log but don't crash - provider creation failed
+                    _lastProviderErrors[_currentProviderName] = ex.Message;
+                }
+            }
+        }
+        return _currentProviderInstance;
+    }
+
+    public ILlmProvider? GetCurrentProviderInstance() => GetOrCreateProviderInstance();
     public string GetCurrentProvider() => _currentProviderName;
     public string GetCurrentModel() => _currentModel;
 
