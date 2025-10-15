@@ -179,8 +179,8 @@ public class ToolAdapter : Andy.Model.Tooling.ITool
             _logger?.LogInformation("[TOOL_EXEC_END] Tool: {ToolId}, Duration: {Duration}ms, Success: {Success}",
                 _toolId, duration.TotalMilliseconds, result.IsSuccessful);
 
-            // Track completion
-            ToolExecutionTracker.Instance.TrackToolComplete(_toolId, result.IsSuccessful, result.Message);
+            // Track completion with full result data
+            ToolExecutionTracker.Instance.TrackToolComplete(_toolId, result.IsSuccessful, result.Message, result.Data);
 
             // Convert to Andy.Model.ToolResult
             if (result.IsSuccessful)

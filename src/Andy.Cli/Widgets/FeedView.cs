@@ -291,6 +291,187 @@ namespace Andy.Cli.Widgets
 
             b.Pop();
         }
+
+        /// <summary>
+        /// Update tool result with detailed information from the actual tool execution
+        /// </summary>
+        public void UpdateToolResult(string toolId, string toolName, bool success, object? resultData, Dictionary<string, object?>? parameters)
+        {
+            // Extract meaningful result summary based on tool type and actual result data
+            string? resultSummary = null;
+
+            if (toolName.Contains("read_file", StringComparison.OrdinalIgnoreCase))
+            {
+                // For read_file, show what file was read and its characteristics
+                if (parameters?.TryGetValue("file_path", out var filePath) == true && filePath != null)
+                {
+                    var fileName = Path.GetFileName(filePath.ToString() ?? "");
+
+                    // Try to extract metadata from result
+                    if (resultData is Dictionary<string, object?> resultDict)
+                    {
+                        if (resultDict.TryGetValue("metadata", out var metadata) && metadata is Dictionary<string, object?> metaDict)
+                        {
+                            var parts = new List<string> { $"Read {fileName}" };
+
+                            if (metaDict.TryGetValue("line_count", out var lines))
+                                parts.Add($"{lines} lines");
+                            if (metaDict.TryGetValue("file_size_formatted", out var size))
+                                parts.Add($"{size}");
+                            if (metaDict.TryGetValue("encoding", out var encoding))
+                                parts.Add($"{encoding}");
+
+                            resultSummary = string.Join(", ", parts);
+                        }
+                        else if (resultDict.TryGetValue("content", out var content) && content is string contentStr)
+                        {
+                            var lineCount = contentStr.Split('\n').Length;
+                            resultSummary = $"Read {fileName} ({lineCount} lines, {contentStr.Length} chars)";
+                        }
+                    }
+
+                    if (string.IsNullOrEmpty(resultSummary))
+                        resultSummary = $"Read {fileName}";
+                }
+            }
+            else if (toolName.Contains("write_file", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parameters?.TryGetValue("file_path", out var filePath) == true && filePath != null)
+                {
+                    var fileName = Path.GetFileName(filePath.ToString() ?? "");
+                    if (parameters.TryGetValue("content", out var content) && content != null)
+                    {
+                        var contentStr = content.ToString() ?? "";
+                        var lineCount = contentStr.Split('\n').Length;
+                        resultSummary = $"Wrote {fileName} ({lineCount} lines, {contentStr.Length} chars)";
+                    }
+                    else
+                    {
+                        resultSummary = $"Wrote {fileName}";
+                    }
+                }
+            }
+            else if (toolName.Contains("delete_file", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parameters?.TryGetValue("file_path", out var filePath) == true && filePath != null)
+                {
+                    var fileName = Path.GetFileName(filePath.ToString() ?? "");
+                    resultSummary = $"Deleted {fileName}";
+                }
+            }
+            else if (toolName.Contains("list_directory", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parameters?.TryGetValue("path", out var path) == true)
+                {
+                    var dirName = Path.GetFileName(path?.ToString() ?? ".") ?? ".";
+                    if (string.IsNullOrEmpty(dirName)) dirName = ".";
+
+                    // Try to extract entry counts from result
+                    if (resultData is Dictionary<string, object?> resultDict &&
+                        resultDict.TryGetValue("entries", out var entries) && entries is IEnumerable<object> entryList)
+                    {
+                        var entryArray = entryList.ToArray();
+                        var fileCount = 0;
+                        var dirCount = 0;
+
+                        foreach (var entry in entryArray)
+                        {
+                            if (entry is Dictionary<string, object?> entryDict &&
+                                entryDict.TryGetValue("type", out var type))
+                            {
+                                if ("file".Equals(type?.ToString(), StringComparison.OrdinalIgnoreCase))
+                                    fileCount++;
+                                else if ("directory".Equals(type?.ToString(), StringComparison.OrdinalIgnoreCase))
+                                    dirCount++;
+                            }
+                        }
+
+                        resultSummary = $"Listed {dirName}: {fileCount} files, {dirCount} directories";
+                    }
+                    else
+                    {
+                        resultSummary = $"Listed {dirName}";
+                    }
+                }
+            }
+            else if (toolName.Contains("bash_command", StringComparison.OrdinalIgnoreCase) ||
+                     toolName.Contains("execute_command", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parameters?.TryGetValue("command", out var command) == true && command != null)
+                {
+                    var cmdStr = command.ToString() ?? "";
+                    // Extract just the command name (first word)
+                    var cmdName = cmdStr.Split(' ').FirstOrDefault() ?? cmdStr;
+                    if (cmdName.Length > 20) cmdName = cmdName.Substring(0, 17) + "...";
+
+                    if (resultData is Dictionary<string, object?> resultDict)
+                    {
+                        if (resultDict.TryGetValue("exit_code", out var exitCode))
+                        {
+                            resultSummary = exitCode?.ToString() == "0"
+                                ? $"Executed {cmdName} successfully"
+                                : $"Executed {cmdName} (exit code: {exitCode})";
+                        }
+                        else if (resultDict.TryGetValue("output", out var output) && output != null)
+                        {
+                            var outputStr = output.ToString() ?? "";
+                            var lines = outputStr.Split('\n').Length;
+                            resultSummary = $"Executed {cmdName} ({lines} lines output)";
+                        }
+                    }
+
+                    if (string.IsNullOrEmpty(resultSummary))
+                        resultSummary = $"Executed {cmdName}";
+                }
+            }
+            else if (toolName.Contains("search", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parameters?.TryGetValue("query", out var query) == true && query != null)
+                {
+                    if (resultData is Dictionary<string, object?> resultDict &&
+                        resultDict.TryGetValue("matches", out var matches))
+                    {
+                        if (matches is IEnumerable<object> matchList)
+                        {
+                            var count = matchList.Count();
+                            resultSummary = $"Found {count} matches for \"{query}\"";
+                        }
+                        else if (matches is int matchCount)
+                        {
+                            resultSummary = $"Found {matchCount} matches for \"{query}\"";
+                        }
+                    }
+                    else
+                    {
+                        resultSummary = $"Searched for \"{query}\"";
+                    }
+                }
+            }
+
+            // If we have a detailed result, find and update the corresponding running tool
+            if (!string.IsNullOrEmpty(resultSummary))
+            {
+                lock (_itemsLock)
+                {
+                    // Find tools that match the toolName pattern (might have counter suffix)
+                    for (int i = _items.Count - 1; i >= 0; i--)
+                    {
+                        if (_items[i] is RunningToolItem runningTool &&
+                            !runningTool.IsComplete)
+                        {
+                            // Match by tool name (ignoring counter suffix if present)
+                            var baseToolName = runningTool.ToolName.ToLower().Replace(" ", "_").Replace("-", "_");
+                            if (toolId.StartsWith(baseToolName, StringComparison.OrdinalIgnoreCase))
+                            {
+                                // Update with detailed result
+                                runningTool.SetResult(resultSummary);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// <summary>Contract for a line-oriented feed item that can render any slice of its lines.</summary>
@@ -1573,17 +1754,17 @@ namespace Andy.Cli.Widgets
                 // Show path if available
                 if (_parameters.TryGetValue("path", out var path) && path != null)
                 {
-                    parts.Add(GetShortPath(path.ToString()));
+                    parts.Add(GetShortPath(path.ToString() ?? ""));
                 }
                 else if (_parameters.TryGetValue("directory", out var dir) && dir != null)
                 {
-                    parts.Add(GetShortPath(dir.ToString()));
+                    parts.Add(GetShortPath(dir.ToString() ?? ""));
                 }
 
                 // Show query if searching for something specific
                 if (_parameters.TryGetValue("query", out var query) && query != null)
                 {
-                    var queryStr = query.ToString();
+                    var queryStr = query.ToString() ?? "";
                     if (queryStr.Length > 30) queryStr = queryStr.Substring(0, 27) + "...";
                     parts.Add($"query: '{queryStr}'");
                 }

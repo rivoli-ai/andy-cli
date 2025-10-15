@@ -41,13 +41,20 @@ public class ToolExecutionTracker
         }
     }
 
-    public void TrackToolComplete(string toolId, bool success, string? result)
+    public void TrackToolComplete(string toolId, bool success, string? result, object? resultData = null)
     {
         if (_executions.TryGetValue(toolId, out var info))
         {
             info.EndTime = DateTime.UtcNow;
             info.Success = success;
             info.Result = result;
+            info.ResultData = resultData;
+
+            // If we have a FeedView, update it with detailed result
+            if (_feedView != null && info.Parameters != null)
+            {
+                _feedView.UpdateToolResult(toolId, info.ToolName, success, resultData, info.Parameters);
+            }
         }
     }
 
@@ -60,5 +67,6 @@ public class ToolExecutionTracker
         public DateTime? EndTime { get; set; }
         public bool Success { get; set; }
         public string? Result { get; set; }
+        public object? ResultData { get; set; }
     }
 }
