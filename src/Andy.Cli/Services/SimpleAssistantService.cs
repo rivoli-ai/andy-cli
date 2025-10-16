@@ -149,8 +149,8 @@ public class SimpleAssistantService : IDisposable
                 return msg;
             }
 
-            // Processing indicator disabled to avoid rendering issues
-            // _feed.AddProcessingIndicator();
+            // Show processing indicator while waiting for LLM response
+            _feed.AddProcessingIndicator();
 
             // Track processing time
             var startTime = DateTime.UtcNow;
@@ -402,6 +402,9 @@ public class SimpleAssistantService : IDisposable
         }
         catch (Exception ex)
         {
+            // Clear the processing indicator if an error occurred
+            _feed.ClearProcessingIndicator();
+
             _logger?.LogError(ex, "Failed to process message");
 
             // Log full error details for debugging
