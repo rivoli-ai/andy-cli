@@ -136,8 +136,8 @@ public class SimpleAssistantService : IDisposable
                 return msg;
             }
 
-            // Show enhanced processing indicator
-            _feed.AddProcessingIndicator();
+            // Processing indicator disabled to avoid rendering issues
+            // _feed.AddProcessingIndicator();
 
             // Track processing time
             var startTime = DateTime.UtcNow;
@@ -316,17 +316,14 @@ public class SimpleAssistantService : IDisposable
             // Clear the processing indicator (has 1 blank line built-in)
             _feed.ClearProcessingIndicator();
 
-            // Add technical summary with gray color (matching context line)
-            var technicalSummary = $"Processing completed in {duration.TotalSeconds:F1}s | Model: {_modelName} | Provider: {_providerName}";
-            if (!result.Success)
-            {
-                technicalSummary += $" | Status: Failed - {result.StopReason}";
-            }
-            // Use AddMarkdownRich with gray color - now works because content is not from LLM
-            _feed.AddMarkdownRich(Commands.ConsoleColors.Dim(technicalSummary));
-
-            // Add blank line after technical summary to separate from response
-            _feed.AddMarkdownRich("");
+            // Processing completed message disabled to avoid rendering issues
+            // var technicalSummary = $"Processing completed in {duration.TotalSeconds:F1}s | Model: {_modelName} | Provider: {_providerName}";
+            // if (!result.Success)
+            // {
+            //     technicalSummary += $" | Status: Failed - {result.StopReason}";
+            // }
+            // _feed.AddMarkdownRich(Commands.ConsoleColors.Dim(technicalSummary));
+            // _feed.AddMarkdownRich("");
 
             _logger?.LogInformation("Agent result - Success: {Success}, Response: '{Response}', StopReason: {StopReason}",
                 result.Success, result.Response, result.StopReason);

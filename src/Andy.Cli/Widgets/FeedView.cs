@@ -693,6 +693,10 @@ namespace Andy.Cli.Widgets
             {
                 var line = _lines[i];
                 if (line.StartsWith("```")) { inCode = !inCode; continue; }
+
+                // Draw background rectangle for full line width to clear any previous content
+                b.DrawRect(new DL.Rect(x, y + printed, width, 1, theme.Background));
+
                 DL.Rgb24 fg;
                 DL.CellAttrFlags attr = DL.CellAttrFlags.None;
                 if (!inCode && line.StartsWith("# ")) { line = line.Substring(2); fg = new DL.Rgb24(100, 200, 255); attr = DL.CellAttrFlags.Bold; }
@@ -1290,6 +1294,7 @@ namespace Andy.Cli.Widgets
                 // Update animation frame
                 _animationFrame = ((int)(DateTime.UtcNow - _startTime).TotalMilliseconds / 100) % _spinnerFrames.Length;
 
+                var theme = Themes.Theme.Current;
                 var dim = new DL.Rgb24(150, 150, 150);
                 var spinner = _spinnerFrames[_animationFrame];
 
@@ -1300,7 +1305,10 @@ namespace Andy.Cli.Widgets
                 // Build message with spinner
                 var message = $"{spinner} Processing request{elapsedText}";
 
-                b.DrawText(new DL.TextRun(x, row, message, dim, null, DL.CellAttrFlags.None));
+                // Draw background rectangle for full line width to clear any previous content
+                b.DrawRect(new DL.Rect(x, row, width, 1, theme.Background));
+
+                b.DrawText(new DL.TextRun(x, row, message, dim, theme.Background, DL.CellAttrFlags.None));
                 row++;
                 drawn++;
             }

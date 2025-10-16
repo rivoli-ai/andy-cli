@@ -190,7 +190,8 @@ public class EngineAssistantService : IDisposable
             }
 
             // Show enhanced processing indicator
-            _feed.AddProcessingIndicator();
+            // Processing indicator disabled to avoid rendering issues
+            // _feed.AddProcessingIndicator();
 
             // Track processing time
             var startTime = DateTime.UtcNow;
@@ -204,14 +205,14 @@ public class EngineAssistantService : IDisposable
             // Clear the processing indicator
             _feed.ClearProcessingIndicator();
 
-            // Add technical summary of what happened
-            var technicalSummary = $"Processing completed in {duration.TotalSeconds:F1}s | Model: {_modelName} | Provider: {_providerName}";
-            if (!result.Success)
-            {
-                technicalSummary += $" | Status: Failed - {result.StopReason}";
-            }
-            _feed.AddMarkdownRich(technicalSummary);
-            _feed.AddMarkdownRich(""); // Blank line after technical info
+            // Processing completed message disabled to avoid rendering issues
+            // var technicalSummary = $"Processing completed in {duration.TotalSeconds:F1}s | Model: {_modelName} | Provider: {_providerName}";
+            // if (!result.Success)
+            // {
+            //     technicalSummary += $" | Status: Failed - {result.StopReason}";
+            // }
+            // _feed.AddMarkdownRich(technicalSummary);
+            // _feed.AddMarkdownRich(""); // Blank line after technical info
 
             // Extract response from agent result
             string responseContent = string.Empty;
