@@ -68,7 +68,7 @@ namespace Andy.Cli.Widgets
         {
             if (width <= 0 || maxLines <= 0) return;
 
-            var blackBg = new DL.Rgb24(0, 0, 0);
+            DL.Rgb24? bg = null; // Transparent background
             var greenFg = new DL.Rgb24(0, 255, 0);
             var redFg = new DL.Rgb24(255, 80, 80);
             var whiteFg = new DL.Rgb24(220, 220, 220);
@@ -84,7 +84,7 @@ namespace Andy.Cli.Widgets
             {
                 if (currentLine >= startLine && renderedLines < maxLines)
                 {
-                    b.DrawText(new DL.TextRun(x, y + renderedLines, _title, whiteFg, blackBg, DL.CellAttrFlags.Bold));
+                    b.DrawText(new DL.TextRun(x, y + renderedLines, _title, whiteFg, bg, DL.CellAttrFlags.Bold));
                     renderedLines++;
                 }
                 currentLine++;
@@ -100,7 +100,7 @@ namespace Andy.Cli.Widgets
                     // Category header
                     if (currentLine >= startLine && renderedLines < maxLines)
                     {
-                        b.DrawText(new DL.TextRun(x, y + renderedLines, entry.CategoryName + " Tools:", cyanFg, blackBg, DL.CellAttrFlags.Bold));
+                        b.DrawText(new DL.TextRun(x, y + renderedLines, entry.CategoryName + " Tools:", cyanFg, bg, DL.CellAttrFlags.Bold));
                         renderedLines++;
                     }
                     currentLine++;
@@ -115,22 +115,22 @@ namespace Andy.Cli.Widgets
 
                         // Render status indicator with brackets
                         int pos = x + 2; // Indent tools
-                        b.DrawText(new DL.TextRun(pos, y + renderedLines, "[", whiteFg, blackBg, DL.CellAttrFlags.None));
+                        b.DrawText(new DL.TextRun(pos, y + renderedLines, "[", whiteFg, bg, DL.CellAttrFlags.None));
                         pos += 1;
-                        b.DrawText(new DL.TextRun(pos, y + renderedLines, status, statusColor, blackBg, DL.CellAttrFlags.None));
+                        b.DrawText(new DL.TextRun(pos, y + renderedLines, status, statusColor, bg, DL.CellAttrFlags.None));
                         pos += status.Length;
-                        b.DrawText(new DL.TextRun(pos, y + renderedLines, "] ", whiteFg, blackBg, DL.CellAttrFlags.None));
+                        b.DrawText(new DL.TextRun(pos, y + renderedLines, "] ", whiteFg, bg, DL.CellAttrFlags.None));
                         pos += 2;
 
                         // Render tool name
-                        b.DrawText(new DL.TextRun(pos, y + renderedLines, entry.ToolName, whiteFg, blackBg, DL.CellAttrFlags.Bold));
+                        b.DrawText(new DL.TextRun(pos, y + renderedLines, entry.ToolName, whiteFg, bg, DL.CellAttrFlags.Bold));
                         pos += entry.ToolName?.Length ?? 0;
 
                         // Render tool ID if present
                         if (!string.IsNullOrEmpty(entry.ToolId))
                         {
                             var idText = $" (ID: {entry.ToolId})";
-                            b.DrawText(new DL.TextRun(pos, y + renderedLines, idText, grayFg, blackBg, DL.CellAttrFlags.None));
+                            b.DrawText(new DL.TextRun(pos, y + renderedLines, idText, grayFg, bg, DL.CellAttrFlags.None));
                         }
 
                         renderedLines++;
@@ -142,7 +142,7 @@ namespace Andy.Cli.Widgets
                     {
                         if (currentLine >= startLine && renderedLines < maxLines)
                         {
-                            b.DrawText(new DL.TextRun(x + 7, y + renderedLines, entry.Description, grayFg, blackBg, DL.CellAttrFlags.None));
+                            b.DrawText(new DL.TextRun(x + 7, y + renderedLines, entry.Description, grayFg, bg, DL.CellAttrFlags.None));
                             renderedLines++;
                         }
                         currentLine++;
@@ -154,7 +154,7 @@ namespace Andy.Cli.Widgets
                         if (currentLine >= startLine && renderedLines < maxLines)
                         {
                             var permStr = $"Requires: {entry.Permissions}";
-                            b.DrawText(new DL.TextRun(x + 7, y + renderedLines, permStr, yellowFg, blackBg, DL.CellAttrFlags.None));
+                            b.DrawText(new DL.TextRun(x + 7, y + renderedLines, permStr, yellowFg, bg, DL.CellAttrFlags.None));
                             renderedLines++;
                         }
                         currentLine++;

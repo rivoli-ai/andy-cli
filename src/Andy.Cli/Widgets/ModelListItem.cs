@@ -70,7 +70,7 @@ namespace Andy.Cli.Widgets
         {
             if (width <= 0 || maxLines <= 0) return;
 
-            var blackBg = new DL.Rgb24(0, 0, 0);
+            DL.Rgb24? bg = null; // Transparent background
             var greenFg = new DL.Rgb24(0, 255, 0);
             var redFg = new DL.Rgb24(255, 80, 80);
             var whiteFg = new DL.Rgb24(220, 220, 220);
@@ -85,7 +85,7 @@ namespace Andy.Cli.Widgets
             {
                 if (currentLine >= startLine && renderedLines < maxLines)
                 {
-                    b.DrawText(new DL.TextRun(x, y + renderedLines, _title, whiteFg, blackBg, DL.CellAttrFlags.Bold));
+                    b.DrawText(new DL.TextRun(x, y + renderedLines, _title, whiteFg, bg, DL.CellAttrFlags.Bold));
                     renderedLines++;
                 }
                 currentLine++;
@@ -101,7 +101,7 @@ namespace Andy.Cli.Widgets
                     // Provider header
                     if (currentLine >= startLine && renderedLines < maxLines)
                     {
-                        b.DrawText(new DL.TextRun(x, y + renderedLines, entry.Provider + ":", cyanFg, blackBg, DL.CellAttrFlags.None));
+                        b.DrawText(new DL.TextRun(x, y + renderedLines, entry.Provider + ":", cyanFg, bg, DL.CellAttrFlags.None));
                         renderedLines++;
                     }
                     currentLine++;
@@ -118,19 +118,19 @@ namespace Andy.Cli.Widgets
 
                         // Render indicator
                         int pos = x;
-                        b.DrawText(new DL.TextRun(pos, y + renderedLines, indicator, whiteFg, blackBg, DL.CellAttrFlags.None));
+                        b.DrawText(new DL.TextRun(pos, y + renderedLines, indicator, whiteFg, bg, DL.CellAttrFlags.None));
                         pos += indicator.Length;
 
                         // Render colored status with brackets
-                        b.DrawText(new DL.TextRun(pos, y + renderedLines, "[", whiteFg, blackBg, DL.CellAttrFlags.None));
+                        b.DrawText(new DL.TextRun(pos, y + renderedLines, "[", whiteFg, bg, DL.CellAttrFlags.None));
                         pos += 1;
-                        b.DrawText(new DL.TextRun(pos, y + renderedLines, status, statusColor, blackBg, DL.CellAttrFlags.None));
+                        b.DrawText(new DL.TextRun(pos, y + renderedLines, status, statusColor, bg, DL.CellAttrFlags.None));
                         pos += status.Length;
-                        b.DrawText(new DL.TextRun(pos, y + renderedLines, "] ", whiteFg, blackBg, DL.CellAttrFlags.None));
+                        b.DrawText(new DL.TextRun(pos, y + renderedLines, "] ", whiteFg, bg, DL.CellAttrFlags.None));
                         pos += 2;
 
                         // Render model name and availability
-                        b.DrawText(new DL.TextRun(pos, y + renderedLines, entry.ModelName + availability, whiteFg, blackBg, DL.CellAttrFlags.None));
+                        b.DrawText(new DL.TextRun(pos, y + renderedLines, entry.ModelName + availability, whiteFg, bg, DL.CellAttrFlags.None));
 
                         renderedLines++;
                     }
@@ -141,7 +141,7 @@ namespace Andy.Cli.Widgets
                     {
                         if (currentLine >= startLine && renderedLines < maxLines)
                         {
-                            b.DrawText(new DL.TextRun(x + 5, y + renderedLines, entry.Description, grayFg, blackBg, DL.CellAttrFlags.None));
+                            b.DrawText(new DL.TextRun(x + 5, y + renderedLines, entry.Description, grayFg, bg, DL.CellAttrFlags.None));
                             renderedLines++;
                         }
                         currentLine++;
@@ -159,22 +159,22 @@ namespace Andy.Cli.Widgets
                             if (parts.Length == 2)
                             {
                                 int pos = x;
-                                b.DrawText(new DL.TextRun(pos, y + renderedLines, parts[0], whiteFg, blackBg, DL.CellAttrFlags.None));
+                                b.DrawText(new DL.TextRun(pos, y + renderedLines, parts[0], whiteFg, bg, DL.CellAttrFlags.None));
                                 pos += parts[0].Length;
-                                b.DrawText(new DL.TextRun(pos, y + renderedLines, "[", whiteFg, blackBg, DL.CellAttrFlags.None));
+                                b.DrawText(new DL.TextRun(pos, y + renderedLines, "[", whiteFg, bg, DL.CellAttrFlags.None));
                                 pos += 1;
-                                b.DrawText(new DL.TextRun(pos, y + renderedLines, "SET", greenFg, blackBg, DL.CellAttrFlags.None));
+                                b.DrawText(new DL.TextRun(pos, y + renderedLines, "SET", greenFg, bg, DL.CellAttrFlags.None));
                                 pos += 3;
-                                b.DrawText(new DL.TextRun(pos, y + renderedLines, "]", whiteFg, blackBg, DL.CellAttrFlags.None));
+                                b.DrawText(new DL.TextRun(pos, y + renderedLines, "]", whiteFg, bg, DL.CellAttrFlags.None));
                             }
                             else
                             {
-                                b.DrawText(new DL.TextRun(x, y + renderedLines, entry.Description, whiteFg, blackBg, DL.CellAttrFlags.None));
+                                b.DrawText(new DL.TextRun(x, y + renderedLines, entry.Description, whiteFg, bg, DL.CellAttrFlags.None));
                             }
                         }
                         else
                         {
-                            b.DrawText(new DL.TextRun(x, y + renderedLines, entry.Description, whiteFg, blackBg, DL.CellAttrFlags.None));
+                            b.DrawText(new DL.TextRun(x, y + renderedLines, entry.Description, whiteFg, bg, DL.CellAttrFlags.None));
                         }
                         renderedLines++;
                     }

@@ -49,7 +49,7 @@ namespace Andy.Cli.Widgets
                 var color = (ch == '◆') ? accentColor : baseColor;
                 var attrs = (ch == '◆') ? DL.CellAttrFlags.Bold : DL.CellAttrFlags.None;
 
-                b.DrawText(new DL.TextRun(startX + i, y, ch.ToString(), color, new DL.Rgb24(0, 0, 0), attrs));
+                b.DrawText(new DL.TextRun(startX + i, y, ch.ToString(), color, null, attrs));
             }
 
             // Render token information
@@ -59,7 +59,7 @@ namespace Andy.Cli.Widgets
                 for (int i = 0; i < tokenInfo.Length && tokenStartX + i < x + width; i++)
                 {
                     char ch = tokenInfo[i];
-                    b.DrawText(new DL.TextRun(tokenStartX + i, y, ch.ToString(), tokenColor, new DL.Rgb24(0, 0, 0), DL.CellAttrFlags.None));
+                    b.DrawText(new DL.TextRun(tokenStartX + i, y, ch.ToString(), tokenColor, null, DL.CellAttrFlags.None));
                 }
             }
         }

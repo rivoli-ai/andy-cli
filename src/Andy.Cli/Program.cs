@@ -600,8 +600,7 @@ class Program
                     var confirmB = new DL.DisplayListBuilder();
                     confirmB.PushClip(new DL.ClipPush(0, 0, viewport.Width, viewport.Height));
 
-                    // Semi-transparent backdrop
-                    confirmB.DrawRect(new DL.Rect(0, 0, viewport.Width, viewport.Height, new DL.Rgb24(0, 0, 0)));
+                    // No backdrop - use transparent terminal background
 
                     // Dialog box
                     int bw = Math.Min(44, viewport.Width - 4);
