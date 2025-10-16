@@ -41,6 +41,8 @@
     <Compile Include="Widgets/ProductivityAndCliToolRenderingTests.cs" />
     <!-- Markdown rendering tests -->
     <Compile Include="Widgets/MarkdownRenderingTests.cs" />
+    <!-- Token counter tests -->
+    <Compile Include="Widgets/TokenCounterTests.cs" />
     <!-- Code indexing tests -->
     <Compile Include="Tools/CodeIndexToolTests.cs" />
     <!-- Parallel tool execution tests -->

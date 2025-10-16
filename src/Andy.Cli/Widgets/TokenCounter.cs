@@ -38,7 +38,7 @@ namespace Andy.Cli.Widgets
         public void RenderAt(int x, int y, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
             int totalTokens = _totalInputTokens + _totalOutputTokens;
-            string text = $"Total: {FormatNumber(_totalInputTokens)}→{FormatNumber(_totalOutputTokens)} ({FormatNumber(totalTokens)})";
+            string text = $"Total: {FormatNumber(_totalOutputTokens)}→{FormatNumber(_totalInputTokens)} ({FormatNumber(totalTokens)})";
 
             for (int i = 0; i < text.Length; i++)
             {
@@ -54,7 +54,7 @@ namespace Andy.Cli.Widgets
         public int GetWidth()
         {
             int totalTokens = _totalInputTokens + _totalOutputTokens;
-            return $"Total: {FormatNumber(_totalInputTokens)}→{FormatNumber(_totalOutputTokens)} ({FormatNumber(totalTokens)})".Length;
+            return $"Total: {FormatNumber(_totalOutputTokens)}→{FormatNumber(_totalInputTokens)} ({FormatNumber(totalTokens)})".Length;
         }
 
         /// <summary>Format a number with thousands separators.</summary>
