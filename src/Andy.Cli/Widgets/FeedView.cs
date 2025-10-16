@@ -1274,7 +1274,7 @@ namespace Andy.Cli.Widgets
 
         public int MeasureLineCount(int width)
         {
-            return 1; // Just the indicator line, no built-in spacing
+            return 2; // Indicator line + 1 blank line for spacing
         }
 
         public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
@@ -1305,15 +1305,12 @@ namespace Andy.Cli.Widgets
                 drawn++;
             }
 
-            // Line 2-3: Blank lines for spacing
-            for (int i = 1; i <= 2 && drawn < maxLines; i++)
+            // Line 2: Blank line for spacing after spinner
+            if (drawn < maxLines && startLine <= 1)
             {
-                if (startLine <= i)
-                {
-                    // Just skip - blank line
-                    row++;
-                    drawn++;
-                }
+                // Just skip - blank line
+                row++;
+                drawn++;
             }
         }
     }

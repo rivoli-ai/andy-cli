@@ -313,11 +313,8 @@ public class SimpleAssistantService : IDisposable
             // Calculate actual duration
             var duration = DateTime.UtcNow - startTime;
 
-            // Clear the processing indicator (now has zero built-in spacing)
+            // Clear the processing indicator (has 1 blank line built-in)
             _feed.ClearProcessingIndicator();
-
-            // Add blank line after clearing processing indicator
-            _feed.AddMarkdownRich("");
 
             // Add technical summary with gray color (matching context line)
             var technicalSummary = $"Processing completed in {duration.TotalSeconds:F1}s | Model: {_modelName} | Provider: {_providerName}";
