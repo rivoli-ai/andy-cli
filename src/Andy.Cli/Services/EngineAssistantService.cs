@@ -311,11 +311,11 @@ public class EngineAssistantService : IDisposable
                 }
             }
 
-            // Show context stats with actual duration
-            var stats = GetContextStats();
-            pipeline.AddSystemMessage("", SystemMessageType.Context, priority: 1999);
-            var contextInfo = $"Context: {stats.TurnCount} turns, ~{stats.EstimatedTokens} tokens, Duration: {duration.TotalSeconds:F1}s";
-            pipeline.AddSystemMessage(contextInfo, SystemMessageType.Context, priority: 2000);
+            // Context line disabled to avoid rendering issues
+            // var stats = GetContextStats();
+            // pipeline.AddSystemMessage("", SystemMessageType.Context, priority: 1999);
+            // var contextInfo = $"Context: {stats.TurnCount} turns, ~{stats.EstimatedTokens} tokens, Duration: {duration.TotalSeconds:F1}s";
+            // pipeline.AddSystemMessage(contextInfo, SystemMessageType.Context, priority: 2000);
 
             await pipeline.FinalizeAsync();
             pipeline.Dispose();

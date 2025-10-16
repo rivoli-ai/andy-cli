@@ -351,13 +351,11 @@ public class SimpleAssistantService : IDisposable
                 pipeline.AddRawContent($"[No response received. StopReason: {result.StopReason}]");
             }
 
-            // Add blank line after response content to separate from context
-            pipeline.AddSystemMessage("", SystemMessageType.Context, priority: 1999);
-
-            // Show context stats with actual duration (with metadata color)
-            var stats = GetContextStats();
-            var contextInfo = Commands.ConsoleColors.Metadata($"Context: {stats.TurnCount} turns, ~{stats.EstimatedTokens} tokens, Duration: {duration.TotalSeconds:F1}s");
-            pipeline.AddSystemMessage(contextInfo, SystemMessageType.Context, priority: 2000);
+            // Context line disabled to avoid rendering issues
+            // pipeline.AddSystemMessage("", SystemMessageType.Context, priority: 1999);
+            // var stats = GetContextStats();
+            // var contextInfo = Commands.ConsoleColors.Metadata($"Context: {stats.TurnCount} turns, ~{stats.EstimatedTokens} tokens, Duration: {duration.TotalSeconds:F1}s");
+            // pipeline.AddSystemMessage(contextInfo, SystemMessageType.Context, priority: 2000);
 
             await pipeline.FinalizeAsync();
             pipeline.Dispose();
