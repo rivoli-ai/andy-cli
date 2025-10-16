@@ -10,7 +10,7 @@ namespace Andy.Cli.Widgets
         private string _message = "Ready to assist";
         private DateTime _lastUpdate = DateTime.Now;
         private DL.Rgb24 _fg = new DL.Rgb24(150, 200, 255);
-        private DL.Rgb24? _bg = null; // Transparent background
+        private DL.Rgb24 _bg = new DL.Rgb24(0, 0, 0);
         private bool _isAnimated = false;
 
         /// <summary>Set the current status message.</summary>
