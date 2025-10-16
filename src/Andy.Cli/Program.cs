@@ -521,11 +521,12 @@ class Program
                     Aliases = new[] { "clear", "reset" },
                     Action = args =>
                     {
-                        // Recreate AssistantService to clear context
+                        // Clear conversation context and reset token counter
                         if (aiService != null)
                         {
                             aiService.ClearContext();
                         }
+                        tokenCounter.Reset();
                         feed.Clear();
                         feed.AddMarkdownRich("**Chat cleared!** Ready for a fresh conversation.");
                     }
@@ -883,11 +884,12 @@ class Program
                                 }
                                 else if (commandName == "clear")
                                 {
-                                    // Recreate AssistantService to clear context
+                                    // Clear conversation context and reset token counter
                                     if (aiService != null)
                                     {
                                         aiService.ClearContext();
                                     }
+                                    tokenCounter.Reset();
                                     feed.Clear();
                                     feed.AddMarkdownRich("**Chat cleared!** Ready for a fresh conversation.");
                                     return;
@@ -919,7 +921,7 @@ class Program
 
                                     // Get context stats for token counting
                                     var stats = aiService.GetContextStats();
-                                    tokenCounter.AddTokens(stats.EstimatedTokens / 2, stats.EstimatedTokens / 2);
+                                    tokenCounter.AddTokens(stats.LastInputTokens, stats.LastOutputTokens);
 
                                     statusMessage.SetMessage("Ready for next question", animated: false);
                                 }

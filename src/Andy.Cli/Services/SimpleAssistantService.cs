@@ -19,6 +19,8 @@ public class SimpleAssistantService : IDisposable
     private readonly string _providerName;
     private readonly Dictionary<string, (DateTime startTime, Dictionary<string, object?>? parameters)> _runningTools = new();
     private int _toolCallCounter = 0;
+    private int _lastInputTokens = 0;
+    private int _lastOutputTokens = 0;
 
     public SimpleAssistantService(
         ILlmProvider llmProvider,
@@ -140,8 +142,17 @@ public class SimpleAssistantService : IDisposable
             // Track processing time
             var startTime = DateTime.UtcNow;
 
+            // Estimate input tokens from user message and conversation history
+            var history = _agent.GetHistory();
+            var contextLength = history.Sum(m => m.Content?.Length ?? 0);
+            var userMessageLength = userMessage.Length;
+            _lastInputTokens = EstimateTokens(contextLength + userMessageLength);
+
             // Process message through SimpleAgent
             var result = await _agent.ProcessMessageAsync(userMessage, cancellationToken);
+
+            // Estimate output tokens from response
+            _lastOutputTokens = EstimateTokens(result.Response?.Length ?? 0);
 
             // Complete any running tools
             var toolsToComplete = _runningTools.ToList();
@@ -386,6 +397,8 @@ public class SimpleAssistantService : IDisposable
     public void ClearContext()
     {
         _agent.ClearHistory();
+        _lastInputTokens = 0;
+        _lastOutputTokens = 0;
         _logger?.LogInformation("Conversation context cleared");
     }
 
@@ -394,6 +407,8 @@ public class SimpleAssistantService : IDisposable
         public int TurnCount { get; set; }
         public int EstimatedTokens { get; set; }
         public TimeSpan TotalDuration { get; set; }
+        public int LastInputTokens { get; set; }
+        public int LastOutputTokens { get; set; }
     }
 
     /// <summary>
@@ -405,14 +420,26 @@ public class SimpleAssistantService : IDisposable
         var turnCount = history.Count / 2; // Rough estimate: user + assistant per turn
 
         // Rough token estimation
-        var estimatedTokens = history.Sum(m => m.Content.Length / 4); // Simple char-to-token ratio
+        var estimatedTokens = history.Sum(m => m.Content?.Length ?? 0) / 4; // Simple char-to-token ratio
 
         return new ContextStats
         {
             TurnCount = turnCount,
             EstimatedTokens = estimatedTokens,
-            TotalDuration = TimeSpan.Zero // Duration tracked per-message in SimpleAgent
+            TotalDuration = TimeSpan.Zero, // Duration tracked per-message in SimpleAgent
+            LastInputTokens = _lastInputTokens,
+            LastOutputTokens = _lastOutputTokens
         };
+    }
+
+    /// <summary>
+    /// Estimate token count from text length.
+    /// Uses a conservative ratio of 4 characters per token (typical for English text).
+    /// </summary>
+    private static int EstimateTokens(int characterCount)
+    {
+        // Conservative estimate: 1 token ≈ 4 characters
+        return Math.Max(1, characterCount / 4);
     }
 
     private static string FormatDuration(TimeSpan elapsed)
