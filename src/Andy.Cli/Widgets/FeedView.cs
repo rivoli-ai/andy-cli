@@ -402,8 +402,7 @@ namespace Andy.Cli.Widgets
             if (w <= 0 || h <= 0) return;
 
             b.PushClip(new DL.ClipPush(x, y, w, h));
-            var bg = new DL.Rgb24(0, 0, 0);
-            b.DrawRect(new DL.Rect(x, y, w, h, bg));
+            // No background rectangle - use transparent terminal background
             // Focus indicator on left margin
             if (_focused)
             {
@@ -701,7 +700,7 @@ namespace Andy.Cli.Widgets
                 else if (inCode) { fg = new DL.Rgb24(180, 180, 180); }
                 else { fg = new DL.Rgb24(220, 220, 220); }
                 string t = line.Length > width ? line.Substring(0, width) : line;
-                b.DrawText(new DL.TextRun(x, y + printed, t, fg, new DL.Rgb24(0, 0, 0), attr));
+                b.DrawText(new DL.TextRun(x, y + printed, t, fg, null, attr));
                 printed++;
             }
         }
@@ -1002,13 +1001,13 @@ namespace Andy.Cli.Widgets
                 {
                     // top border with rounded corners
                     int inner = Math.Max(0, width - 2);
-                    b.DrawText(new DL.TextRun(x, row, "╭" + new string('─', inner) + "╮", borderColor, new DL.Rgb24(0, 0, 0), DL.CellAttrFlags.None));
+                    b.DrawText(new DL.TextRun(x, row, "╭" + new string('─', inner) + "╮", borderColor, null, DL.CellAttrFlags.None));
                 }
                 else if (i == total - 1)
                 {
                     // bottom border with rounded corners
                     int inner = Math.Max(0, width - 2);
-                    b.DrawText(new DL.TextRun(x, row, "╰" + new string('─', inner) + "╯", borderColor, new DL.Rgb24(0, 0, 0), DL.CellAttrFlags.None));
+                    b.DrawText(new DL.TextRun(x, row, "╰" + new string('─', inner) + "╯", borderColor, null, DL.CellAttrFlags.None));
                 }
                 else
                 {
@@ -1018,19 +1017,19 @@ namespace Andy.Cli.Widgets
                     {
                         // show label on first content row
                         string label = "You:";
-                        b.DrawText(new DL.TextRun(x + 2, row, label + " ", labelColor, new DL.Rgb24(0, 0, 0), DL.CellAttrFlags.Bold));
+                        b.DrawText(new DL.TextRun(x + 2, row, label + " ", labelColor, null, DL.CellAttrFlags.Bold));
                         int available = Math.Max(0, width - 4 - (label.Length + 1));
                         string t = available > 0 ? (content.Length > available ? content.Substring(0, available) : content) : string.Empty;
-                        b.DrawText(new DL.TextRun(x + 2 + label.Length + 1, row, t, new DL.Rgb24(220, 220, 220), new DL.Rgb24(0, 0, 0), DL.CellAttrFlags.None));
+                        b.DrawText(new DL.TextRun(x + 2 + label.Length + 1, row, t, new DL.Rgb24(220, 220, 220), null, DL.CellAttrFlags.None));
                     }
                     else
                     {
                         int available = Math.Max(0, width - 4);
                         string t = content.Length > available ? content.Substring(0, available) : content;
-                        b.DrawText(new DL.TextRun(x + 2, row, t, new DL.Rgb24(220, 220, 220), new DL.Rgb24(0, 0, 0), DL.CellAttrFlags.None));
+                        b.DrawText(new DL.TextRun(x + 2, row, t, new DL.Rgb24(220, 220, 220), null, DL.CellAttrFlags.None));
                     }
-                    if (width >= 1) b.DrawText(new DL.TextRun(x, row, "│", borderColor, new DL.Rgb24(0, 0, 0), DL.CellAttrFlags.None));
-                    if (width >= 2) b.DrawText(new DL.TextRun(x + width - 1, row, "│", borderColor, new DL.Rgb24(0, 0, 0), DL.CellAttrFlags.None));
+                    if (width >= 1) b.DrawText(new DL.TextRun(x, row, "│", borderColor, null, DL.CellAttrFlags.None));
+                    if (width >= 2) b.DrawText(new DL.TextRun(x + width - 1, row, "│", borderColor, null, DL.CellAttrFlags.None));
                 }
             }
         }

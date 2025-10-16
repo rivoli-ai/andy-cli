@@ -1036,7 +1036,7 @@ class Program
                 // Render placeholder + CLI widgets
                 var b = new DL.DisplayListBuilder();
                 b.PushClip(new DL.ClipPush(0, 0, viewport.Width, viewport.Height));
-                b.DrawRect(new DL.Rect(0, 0, viewport.Width, viewport.Height, new DL.Rgb24(0, 0, 0)));
+                // No background rectangle - use transparent terminal background
 
                 // Draw header with full-width background
                 var headerBg = new DL.Rgb24(30, 35, 50); // Dark blue-gray background
