@@ -26,6 +26,7 @@ public class CommandPalette
         public string Description { get; set; } = "";
         public string Category { get; set; } = "";
         public Action<string[]>? Action { get; set; }
+        public Func<string[], Task>? AsyncAction { get; set; }
         public string[] Aliases { get; set; } = Array.Empty<string>();
         public string[] RequiredParams { get; set; } = Array.Empty<string>();
         public string ParameterHint { get; set; } = "";
@@ -110,7 +111,7 @@ public class CommandPalette
         return null;
     }
 
-    public void ExecuteSelected(string args = "")
+    public async Task ExecuteSelectedAsync(string args = "")
     {
         if (_waitingForParams && _selectedCommand != null)
         {
@@ -132,13 +133,21 @@ public class CommandPalette
             var argArray = string.IsNullOrWhiteSpace(paramToUse)
                 ? Array.Empty<string>()
                 : paramToUse.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            _selectedCommand.Action?.Invoke(argArray);
+
+            if (_selectedCommand.AsyncAction != null)
+            {
+                await _selectedCommand.AsyncAction(argArray);
+            }
+            else
+            {
+                _selectedCommand.Action?.Invoke(argArray);
+            }
             Close();
         }
         else
         {
             var selected = GetSelected();
-            if (selected?.Action != null)
+            if (selected != null && (selected.Action != null || selected.AsyncAction != null))
             {
                 // Check if command needs parameters
                 if (selected.RequiredParams.Length > 0)
@@ -157,7 +166,15 @@ public class CommandPalette
                     var argArray = string.IsNullOrWhiteSpace(args)
                         ? Array.Empty<string>()
                         : args.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                    selected.Action(argArray);
+
+                    if (selected.AsyncAction != null)
+                    {
+                        await selected.AsyncAction(argArray);
+                    }
+                    else
+                    {
+                        selected.Action?.Invoke(argArray);
+                    }
                     Close();
                 }
             }
