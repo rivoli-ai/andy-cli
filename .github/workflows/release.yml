@@ -1,0 +1,189 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.0.0)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            runtime: osx-arm64
+            artifact_name: andy-cli-macos-arm64
+          - os: macos-13
+            runtime: osx-x64
+            artifact_name: andy-cli-macos-x64
+          - os: ubuntu-latest
+            runtime: linux-x64
+            artifact_name: andy-cli-linux-x64
+          - os: ubuntu-latest
+            runtime: linux-arm64
+            artifact_name: andy-cli-linux-arm64
+          - os: windows-latest
+            runtime: win-x64
+            artifact_name: andy-cli-windows-x64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Run tests
+        run: dotnet test --no-restore --verbosity normal
+
+      - name: Publish release build
+        run: |
+          dotnet publish src/Andy.Cli/Andy.Cli.csproj \
+            --configuration Release \
+            --runtime ${{ matrix.runtime }} \
+            --self-contained true \
+            --output ./publish/${{ matrix.artifact_name }} \
+            -p:PublishTrimmed=true \
+            -p:PublishSingleFile=true
+
+      - name: Create tarball (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          cd publish/${{ matrix.artifact_name }}
+          chmod +x andy-cli
+          tar -czf ../${{ matrix.artifact_name }}.tar.gz *
+          cd ..
+          shasum -a 256 ${{ matrix.artifact_name }}.tar.gz > ${{ matrix.artifact_name }}.tar.gz.sha256
+
+      - name: Create zip (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          cd publish/${{ matrix.artifact_name }}
+          Compress-Archive -Path * -DestinationPath ../${{ matrix.artifact_name }}.zip
+          cd ..
+          Get-FileHash ${{ matrix.artifact_name }}.zip -Algorithm SHA256 | Select-Object Hash | Out-File ${{ matrix.artifact_name }}.zip.sha256
+
+      - name: Upload artifacts (Unix)
+        if: matrix.os != 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            publish/${{ matrix.artifact_name }}.tar.gz
+            publish/${{ matrix.artifact_name }}.tar.gz.sha256
+
+      - name: Upload artifacts (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            publish/${{ matrix.artifact_name }}.zip
+            publish/${{ matrix.artifact_name }}.zip.sha256
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.sha256" \) -exec cp {} release-assets/ \;
+          ls -lah release-assets/
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          cat > release-notes.md << 'EOF'
+          ## Andy CLI ${{ inputs.version }}
+
+          ### Downloads
+
+          Choose the appropriate binary for your platform:
+
+          **macOS:**
+          - Apple Silicon (M1/M2/M3): `andy-cli-macos-arm64.tar.gz`
+          - Intel: `andy-cli-macos-x64.tar.gz`
+
+          **Linux:**
+          - x64: `andy-cli-linux-x64.tar.gz`
+          - ARM64: `andy-cli-linux-arm64.tar.gz`
+
+          **Windows:**
+          - x64: `andy-cli-windows-x64.zip`
+
+          ### Installation
+
+          **macOS/Linux:**
+          ```bash
+          # Extract the archive
+          tar -xzf andy-cli-<platform>.tar.gz
+
+          # Make executable (if needed)
+          chmod +x andy-cli
+
+          # Verify checksum
+          shasum -a 256 -c andy-cli-<platform>.tar.gz.sha256
+
+          # Move to your PATH (optional)
+          sudo mv andy-cli /usr/local/bin/
+          ```
+
+          **Windows:**
+          ```powershell
+          # Extract the zip file
+          Expand-Archive andy-cli-windows-x64.zip
+
+          # Verify checksum
+          Get-FileHash andy-cli.exe -Algorithm SHA256
+
+          # Add to PATH or run directly
+          ```
+
+          ### What's Changed
+
+          <!-- Add your release notes here -->
+
+          **Full Changelog**: https://github.com/${{ github.repository }}/compare/previous...${{ inputs.version }}
+          EOF
+
+          echo "Release notes generated"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ inputs.version }}
+          name: Release ${{ inputs.version }}
+          body_path: release-notes.md
+          draft: false
+          prerelease: ${{ inputs.prerelease }}
+          files: release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

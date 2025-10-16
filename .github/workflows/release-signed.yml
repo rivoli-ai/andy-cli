@@ -1,0 +1,341 @@
+name: Release (Signed)
+
+# This workflow includes code signing for production releases
+# Requires additional secrets to be configured in GitHub repository settings
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.0.0)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build-macos:
+    name: Build and Sign macOS
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            runtime: osx-arm64
+            artifact_name: andy-cli-macos-arm64
+          - os: macos-13
+            runtime: osx-x64
+            artifact_name: andy-cli-macos-x64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Run tests
+        run: dotnet test --no-restore --verbosity normal
+
+      - name: Publish release build
+        run: |
+          dotnet publish src/Andy.Cli/Andy.Cli.csproj \
+            --configuration Release \
+            --runtime ${{ matrix.runtime }} \
+            --self-contained true \
+            --output ./publish/${{ matrix.artifact_name }} \
+            -p:PublishTrimmed=true \
+            -p:PublishSingleFile=true
+
+      # Optional: Code signing with Apple Developer certificate
+      # Uncomment and configure the following steps when ready to sign
+      #
+      # - name: Import Code-Signing Certificate
+      #   if: env.MACOS_CERTIFICATE != ''
+      #   env:
+      #     MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+      #     MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+      #   run: |
+      #     echo $MACOS_CERTIFICATE | base64 --decode > certificate.p12
+      #     security create-keychain -p actions temp.keychain
+      #     security default-keychain -s temp.keychain
+      #     security unlock-keychain -p actions temp.keychain
+      #     security import certificate.p12 -k temp.keychain -P $MACOS_CERTIFICATE_PWD -T /usr/bin/codesign
+      #     security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions temp.keychain
+      #     rm -f certificate.p12
+      #
+      # - name: Sign the binary
+      #   if: env.MACOS_CERTIFICATE != ''
+      #   env:
+      #     MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+      #     DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
+      #   run: |
+      #     /usr/bin/codesign --force -s "$DEVELOPER_ID" --options runtime ./publish/${{ matrix.artifact_name }}/andy-cli -v
+      #
+      # - name: Notarize the binary
+      #   if: env.MACOS_CERTIFICATE != ''
+      #   env:
+      #     APPLE_ID: ${{ secrets.APPLE_ID }}
+      #     APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+      #     APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      #   run: |
+      #     # Create a zip for notarization
+      #     cd ./publish/${{ matrix.artifact_name }}
+      #     zip -r andy-cli.zip andy-cli
+      #     xcrun notarytool submit andy-cli.zip --apple-id "$APPLE_ID" --password "$APPLE_ID_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
+      #     xcrun stapler staple andy-cli
+      #     rm andy-cli.zip
+      #     cd ../..
+
+      - name: Create tarball
+        run: |
+          cd publish/${{ matrix.artifact_name }}
+          chmod +x andy-cli
+          tar -czf ../${{ matrix.artifact_name }}.tar.gz *
+          cd ..
+          shasum -a 256 ${{ matrix.artifact_name }}.tar.gz > ${{ matrix.artifact_name }}.tar.gz.sha256
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            publish/${{ matrix.artifact_name }}.tar.gz
+            publish/${{ matrix.artifact_name }}.tar.gz.sha256
+
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - runtime: linux-x64
+            artifact_name: andy-cli-linux-x64
+          - runtime: linux-arm64
+            artifact_name: andy-cli-linux-arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Run tests
+        run: dotnet test --no-restore --verbosity normal
+
+      - name: Publish release build
+        run: |
+          dotnet publish src/Andy.Cli/Andy.Cli.csproj \
+            --configuration Release \
+            --runtime ${{ matrix.runtime }} \
+            --self-contained true \
+            --output ./publish/${{ matrix.artifact_name }} \
+            -p:PublishTrimmed=true \
+            -p:PublishSingleFile=true
+
+      # Optional: GPG signing for Linux binaries
+      # Uncomment and configure when ready
+      #
+      # - name: Import GPG key
+      #   if: env.GPG_PRIVATE_KEY != ''
+      #   env:
+      #     GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+      #     GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+      #   run: |
+      #     echo "$GPG_PRIVATE_KEY" | base64 --decode | gpg --batch --import
+      #     echo "allow-preset-passphrase" >> ~/.gnupg/gpg-agent.conf
+      #     gpg-connect-agent reloadagent /bye
+      #
+      # - name: Sign the binary
+      #   if: env.GPG_PRIVATE_KEY != ''
+      #   env:
+      #     GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+      #   run: |
+      #     cd ./publish/${{ matrix.artifact_name }}
+      #     echo "$GPG_PASSPHRASE" | gpg --batch --yes --passphrase-fd 0 --detach-sign --armor andy-cli
+      #     cd ../..
+
+      - name: Create tarball
+        run: |
+          cd publish/${{ matrix.artifact_name }}
+          chmod +x andy-cli
+          tar -czf ../${{ matrix.artifact_name }}.tar.gz *
+          cd ..
+          sha256sum ${{ matrix.artifact_name }}.tar.gz > ${{ matrix.artifact_name }}.tar.gz.sha256
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            publish/${{ matrix.artifact_name }}.tar.gz
+            publish/${{ matrix.artifact_name }}.tar.gz.sha256
+
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Run tests
+        run: dotnet test --no-restore --verbosity normal
+
+      - name: Publish release build
+        run: |
+          dotnet publish src/Andy.Cli/Andy.Cli.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            --output ./publish/andy-cli-windows-x64 `
+            -p:PublishTrimmed=true `
+            -p:PublishSingleFile=true
+
+      # Optional: Authenticode signing for Windows binaries
+      # Uncomment and configure when ready
+      #
+      # - name: Sign Windows executable
+      #   if: env.WINDOWS_CERTIFICATE != ''
+      #   env:
+      #     WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+      #     WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      #   run: |
+      #     # Install signtool (usually available on Windows runners)
+      #     # Decode and import certificate
+      #     [System.Convert]::FromBase64String($env:WINDOWS_CERTIFICATE) | Set-Content -Path cert.pfx -AsByteStream
+      #
+      #     # Sign the executable
+      #     & "C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64\signtool.exe" sign /f cert.pfx /p $env:WINDOWS_CERTIFICATE_PASSWORD /tr http://timestamp.digicert.com /td sha256 /fd sha256 ./publish/andy-cli-windows-x64/andy-cli.exe
+      #
+      #     # Clean up certificate
+      #     Remove-Item cert.pfx
+
+      - name: Create zip
+        run: |
+          cd publish/andy-cli-windows-x64
+          Compress-Archive -Path * -DestinationPath ../andy-cli-windows-x64.zip
+          cd ..
+          Get-FileHash andy-cli-windows-x64.zip -Algorithm SHA256 | Select-Object Hash | Out-File andy-cli-windows-x64.zip.sha256
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: andy-cli-windows-x64
+          path: |
+            publish/andy-cli-windows-x64.zip
+            publish/andy-cli-windows-x64.zip.sha256
+
+  release:
+    name: Create GitHub Release
+    needs: [build-macos, build-linux, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.sha256" -o -name "*.asc" \) -exec cp {} release-assets/ \;
+          ls -lah release-assets/
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          cat > release-notes.md << 'EOF'
+          ## Andy CLI ${{ inputs.version }}
+
+          ### Downloads
+
+          Choose the appropriate binary for your platform:
+
+          **macOS:**
+          - Apple Silicon (M1/M2/M3): `andy-cli-macos-arm64.tar.gz`
+          - Intel: `andy-cli-macos-x64.tar.gz`
+
+          **Linux:**
+          - x64: `andy-cli-linux-x64.tar.gz`
+          - ARM64: `andy-cli-linux-arm64.tar.gz`
+
+          **Windows:**
+          - x64: `andy-cli-windows-x64.zip`
+
+          ### Installation
+
+          **macOS/Linux:**
+          ```bash
+          # Extract the archive
+          tar -xzf andy-cli-<platform>.tar.gz
+
+          # Make executable (if needed)
+          chmod +x andy-cli
+
+          # Verify checksum
+          shasum -a 256 -c andy-cli-<platform>.tar.gz.sha256
+
+          # Move to your PATH (optional)
+          sudo mv andy-cli /usr/local/bin/
+          ```
+
+          **Windows:**
+          ```powershell
+          # Extract the zip file
+          Expand-Archive andy-cli-windows-x64.zip
+
+          # Verify checksum
+          Get-FileHash andy-cli.exe -Algorithm SHA256
+
+          # Add to PATH or run directly
+          ```
+
+          ### What's Changed
+
+          <!-- Add your release notes here -->
+
+          **Full Changelog**: https://github.com/${{ github.repository }}/compare/previous...${{ inputs.version }}
+          EOF
+
+          echo "Release notes generated"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ inputs.version }}
+          name: Release ${{ inputs.version }}
+          body_path: release-notes.md
+          draft: false
+          prerelease: ${{ inputs.prerelease }}
+          files: release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

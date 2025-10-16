@@ -82,3 +82,10 @@ container/rootfs-safe/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+# Release artifacts
+release-artifacts/
+publish/
+*.tar.gz
+*.zip
+*.sha256
