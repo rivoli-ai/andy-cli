@@ -156,6 +156,7 @@ public class SimpleAssistantService : IDisposable
 
             // Complete any running tools
             var toolsToComplete = _runningTools.ToList();
+            var toolsWereExecuted = toolsToComplete.Count > 0;
             foreach (var tool in toolsToComplete)
             {
                 var elapsed = DateTime.UtcNow - tool.Value.startTime;
@@ -194,7 +195,28 @@ public class SimpleAssistantService : IDisposable
                         {
                             resultSummary = executionInfo.Result;
                         }
-                        // Otherwise try to extract from ResultData
+                        // Check if ResultData is an anonymous type (common for datetime results)
+                        else if (executionInfo.ResultData != null && executionInfo.ResultData.GetType().Name.Contains("AnonymousType"))
+                        {
+                            // Try to extract formatted field from anonymous type using reflection
+                            var resultType = executionInfo.ResultData.GetType();
+                            foreach (var propName in new[] { "formatted", "output", "result", "value" })
+                            {
+                                var prop = resultType.GetProperty(propName);
+                                if (prop != null)
+                                {
+                                    var value = prop.GetValue(executionInfo.ResultData);
+                                    if (value != null)
+                                    {
+                                        resultSummary = value.ToString();
+                                        _logger?.LogInformation("[TOOL_COMPLETE] Extracted '{PropName}' from anonymous type: {Value}",
+                                            propName, resultSummary);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        // Otherwise try to extract from ResultData if it's a Dictionary
                         else if (executionInfo.ResultData is Dictionary<string, object?> resultDict)
                         {
                             if (resultDict.TryGetValue("result", out var res) && res != null)
@@ -332,6 +354,11 @@ public class SimpleAssistantService : IDisposable
             // Add response to pipeline
             if (!string.IsNullOrEmpty(result.Response))
             {
+                // Add blank line after tools if they were executed
+                if (toolsWereExecuted)
+                {
+                    _feed.AddMarkdownRich("");
+                }
                 pipeline.AddRawContent(result.Response);
             }
             else if (!result.Success)
