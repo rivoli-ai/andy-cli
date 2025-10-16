@@ -363,29 +363,54 @@ namespace Andy.Cli.Services
                     // For failed operations, try to extract detailed error information
                     resultMessage = result.Message ?? "";
 
+                    // Log the raw error data for debugging
+                    _logger?.LogError("[UI_EXECUTOR] Tool {ToolId} failed. Message: '{Message}', Data type: {DataType}, Data: {Data}",
+                        toolId, result.Message, result.Data?.GetType().Name ?? "null", result.Data);
+
                     // If no message but we have data, try to extract error details
                     if (string.IsNullOrEmpty(resultMessage) && result.Data != null)
                     {
                         if (result.Data is Dictionary<string, object?> errorDict)
                         {
+                            // Log all keys in the error dictionary for debugging
+                            _logger?.LogError("[UI_EXECUTOR] Error dictionary keys: {Keys}",
+                                string.Join(", ", errorDict.Keys));
+
                             // Try to extract error message from common error fields
-                            string[] errorKeys = { "error", "message", "error_message", "details", "exception" };
+                            string[] errorKeys = { "error", "message", "error_message", "details", "exception", "reason", "description" };
                             foreach (var key in errorKeys)
                             {
                                 if (errorDict.TryGetValue(key, out var errorVal) && errorVal != null)
                                 {
                                     var errorStr = errorVal.ToString();
-                                    if (!string.IsNullOrEmpty(errorStr))
+                                    if (!string.IsNullOrEmpty(errorStr) && !errorStr.StartsWith("System."))
                                     {
                                         resultMessage = errorStr;
+                                        _logger?.LogError("[UI_EXECUTOR] Extracted error from key '{Key}': {Error}", key, errorStr);
                                         break;
                                     }
                                 }
+                            }
+
+                            // If no standard error field found, try to build a message from available data
+                            if (string.IsNullOrEmpty(resultMessage) && errorDict.Count > 0)
+                            {
+                                var firstEntry = errorDict.First();
+                                resultMessage = $"{firstEntry.Key}: {firstEntry.Value}";
                             }
                         }
                         else if (result.Data is string errorStr && !string.IsNullOrEmpty(errorStr))
                         {
                             resultMessage = errorStr;
+                        }
+                        else
+                        {
+                            // Try to get a string representation of the data
+                            var dataStr = result.Data.ToString();
+                            if (!string.IsNullOrEmpty(dataStr) && !dataStr.StartsWith("System."))
+                            {
+                                resultMessage = dataStr;
+                            }
                         }
                     }
 
@@ -393,6 +418,18 @@ namespace Andy.Cli.Services
                     if (string.IsNullOrEmpty(resultMessage))
                     {
                         resultMessage = "Operation failed";
+                        // Try to add tool-specific context
+                        if (parameters != null && parameters.Count > 0)
+                        {
+                            var paramSummary = string.Join(", ", parameters
+                                .Where(p => !p.Key.StartsWith("__"))
+                                .Take(2)
+                                .Select(p => $"{p.Key}={p.Value}"));
+                            if (!string.IsNullOrEmpty(paramSummary))
+                            {
+                                resultMessage = $"Operation failed ({paramSummary})";
+                            }
+                        }
                     }
 
                     _logger?.LogWarning("[UI_EXECUTOR] Tool {ToolId} failed with message: {Message}", toolId, resultMessage);
