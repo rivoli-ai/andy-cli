@@ -313,11 +313,8 @@ public class SimpleAssistantService : IDisposable
             // Calculate actual duration
             var duration = DateTime.UtcNow - startTime;
 
-            // Clear the processing indicator
+            // Clear the processing indicator (which has built-in spacing)
             _feed.ClearProcessingIndicator();
-
-            // Add blank line before technical summary
-            _feed.AddMarkdownRich("");
 
             // Add technical summary of what happened with metadata color
             var technicalSummary = $"Processing completed in {duration.TotalSeconds:F1}s | Model: {_modelName} | Provider: {_providerName}";
@@ -326,6 +323,9 @@ public class SimpleAssistantService : IDisposable
                 technicalSummary += $" | Status: Failed - {result.StopReason}";
             }
             _feed.AddMarkdownRich(Commands.ConsoleColors.Metadata(technicalSummary));
+
+            // Add blank line after technical summary to separate from response
+            _feed.AddMarkdownRich("");
 
             _logger?.LogInformation("Agent result - Success: {Success}, Response: '{Response}', StopReason: {StopReason}",
                 result.Success, result.Response, result.StopReason);
@@ -352,6 +352,9 @@ public class SimpleAssistantService : IDisposable
                     result.Success, result.StopReason);
                 pipeline.AddRawContent($"[No response received. StopReason: {result.StopReason}]");
             }
+
+            // Add blank line before context stats for separation
+            pipeline.AddSystemMessage("", SystemMessageType.Context, priority: 1999);
 
             // Show context stats with actual duration (with metadata color)
             var stats = GetContextStats();
