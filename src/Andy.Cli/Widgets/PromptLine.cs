@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Andy.Cli.Themes;
 using DL = Andy.Tui.DisplayList;
 using L = Andy.Tui.Layout;
 
@@ -17,10 +18,6 @@ namespace Andy.Cli.Widgets
         private readonly List<string> _history = new();
         private int _historyIndex = -1; // -1 = current editing
         private Func<string, string?>? _suggest;
-        private DL.Rgb24 _bg = new DL.Rgb24(0, 0, 0);
-        private DL.Rgb24 _fg = new DL.Rgb24(150, 200, 255);
-        private DL.Rgb24 _ghost = new DL.Rgb24(100, 100, 100);
-        private DL.Rgb24 _border = new DL.Rgb24(80, 80, 80);
         private bool _showCaret = true;
         private bool _showBorder = true;
         private bool _useTerminalCursor = true;
@@ -28,10 +25,8 @@ namespace Andy.Cli.Widgets
 
         /// <summary>Provide a suggestion function for ghost text.</summary>
         public void SetSuggestionProvider(Func<string, string?>? provider) => _suggest = provider;
-        /// <summary>Colors for text, background and ghost suggestion.</summary>
-        public void SetColors(DL.Rgb24 fg, DL.Rgb24 bg, DL.Rgb24 ghost) { _fg = fg; _bg = bg; _ghost = ghost; }
-        /// <summary>Enable border and optionally specify its color.</summary>
-        public void SetBorder(bool show, DL.Rgb24? color = null) { _showBorder = show; if (color is DL.Rgb24 c) _border = c; }
+        /// <summary>Enable border display.</summary>
+        public void SetBorder(bool show) { _showBorder = show; }
         /// <summary>Show or hide the caret; when terminal cursor is used, the caret character is not drawn.</summary>
         public void SetShowCaret(bool show) { _showCaret = show; }
         /// <summary>Set focus state; used for rendering and suggestion visibility.</summary>
@@ -96,13 +91,14 @@ namespace Andy.Cli.Widgets
         /// <summary>Render the prompt within the provided rectangle.</summary>
         public void Render(in L.Rect rect, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
+            var theme = Theme.Current;
             int x = (int)rect.X, y = (int)rect.Y, w = (int)rect.Width, h = (int)rect.Height;
             int innerW = Math.Max(0, w - 2);
             _lastX = x; _lastY = y; _lastInnerW = innerW;
             b.PushClip(new DL.ClipPush(x, y, w, h));
             // background and optional border
-            b.DrawRect(new DL.Rect(x, y, w, h, _bg));
-            if (_showBorder) b.DrawBorder(new DL.Border(x, y, w, h, "single", _border));
+            b.DrawRect(new DL.Rect(x, y, w, h, theme.PromptBackground));
+            if (_showBorder) b.DrawBorder(new DL.Border(x, y, w, h, "single", theme.Border));
             // Lines and caret placement
             var lines = _text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
             int total = lines.Length;
@@ -113,7 +109,7 @@ namespace Andy.Cli.Widgets
             {
                 string line = lines[startLine + i];
                 string snippet = line.Length > innerW ? line.Substring(0, innerW) : line;
-                b.DrawText(new DL.TextRun(x + 1, y + i, snippet, _fg, _bg, DL.CellAttrFlags.None));
+                b.DrawText(new DL.TextRun(x + 1, y + i, snippet, theme.Primary, theme.PromptBackground, DL.CellAttrFlags.None));
             }
             // ghost suggestion only on last visible row
             if (_suggest is not null && _focused && visible > 0)
@@ -126,7 +122,7 @@ namespace Andy.Cli.Widgets
                     int room = Math.Max(0, innerW - Math.Min(innerW, lastLine.Length));
                     string ghost = sug!;
                     if (ghost.Length > room) ghost = ghost.Substring(0, room);
-                    b.DrawText(new DL.TextRun(x + 1 + Math.Min(innerW, lastLine.Length), lastRow, ghost, _ghost, _bg, DL.CellAttrFlags.None));
+                    b.DrawText(new DL.TextRun(x + 1 + Math.Min(innerW, lastLine.Length), lastRow, ghost, theme.Ghost, theme.PromptBackground, DL.CellAttrFlags.None));
                 }
             }
             // caret glyph if not using terminal cursor
@@ -137,7 +133,7 @@ namespace Andy.Cli.Widgets
                 if (rowInViewport >= 0 && rowInViewport < h)
                 {
                     int caretCol = Math.Clamp(cc, 0, innerW - 1);
-                    b.DrawText(new DL.TextRun(x + 1 + caretCol, y + rowInViewport, "|", _fg, _bg, DL.CellAttrFlags.None));
+                    b.DrawText(new DL.TextRun(x + 1 + caretCol, y + rowInViewport, "|", theme.Primary, theme.PromptBackground, DL.CellAttrFlags.None));
                 }
             }
             b.Pop();

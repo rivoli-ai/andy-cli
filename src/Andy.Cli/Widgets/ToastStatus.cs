@@ -1,4 +1,5 @@
 using System;
+using Andy.Cli.Themes;
 using DL = Andy.Tui.DisplayList;
 
 namespace Andy.Cli.Widgets
@@ -10,8 +11,6 @@ namespace Andy.Cli.Widgets
     {
         private string _text = string.Empty;
         private int _ttlFrames;
-        private DL.Rgb24 _fg = new DL.Rgb24(255, 255, 255);
-        private DL.Rgb24 _bg = new DL.Rgb24(60, 60, 20);
 
         /// <summary>Show a toast for the specified number of frames.</summary>
         public void Show(string text, int ttlFrames = 90) { _text = text ?? string.Empty; _ttlFrames = ttlFrames; }
@@ -23,10 +22,11 @@ namespace Andy.Cli.Widgets
         public void RenderAt(int x, int y, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
             if (!IsVisible) return;
+            var theme = Theme.Current;
             int w = Math.Max(8, _text.Length + 4);
             b.PushClip(new DL.ClipPush(x, y, w, 1));
-            b.DrawRect(new DL.Rect(x, y, w, 1, _bg));
-            b.DrawText(new DL.TextRun(x + 2, y, _text, _fg, _bg, DL.CellAttrFlags.Bold));
+            b.DrawRect(new DL.Rect(x, y, w, 1, theme.ToastBackground));
+            b.DrawText(new DL.TextRun(x + 2, y, _text, theme.TextBright, theme.ToastBackground, DL.CellAttrFlags.Bold));
             b.Pop();
         }
     }
@@ -40,8 +40,6 @@ namespace Andy.Cli.Widgets
         private bool _spinner;
         private int _tick;
         private readonly char[] _frames = new[] { '|', '/', '-', '\\' };
-        private DL.Rgb24 _fg = new DL.Rgb24(180, 180, 180);
-        private DL.Rgb24 _bg = new DL.Rgb24(10, 10, 10);
 
         /// <summary>Set the message and optionally enable a spinner.</summary>
         public void Set(string text, bool spinner = false)
@@ -53,19 +51,20 @@ namespace Andy.Cli.Widgets
         /// <summary>Render the status line aligned to the last row of the viewport.</summary>
         public void Render((int Width, int Height) viewport, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
+            var theme = Theme.Current;
             int y = Math.Max(0, viewport.Height - 2);
             int x = 0; int w = viewport.Width;
             b.PushClip(new DL.ClipPush(x, y, w, 1));
-            b.DrawRect(new DL.Rect(x, y, w, 1, _bg));
+            b.DrawRect(new DL.Rect(x, y, w, 1, theme.StatusLineBackground));
             int cx = x + 1;
             if (_spinner)
             {
-                b.DrawText(new DL.TextRun(cx, y, _frames[_tick].ToString(), _fg, _bg, DL.CellAttrFlags.Bold));
+                b.DrawText(new DL.TextRun(cx, y, _frames[_tick].ToString(), theme.TextDim, theme.StatusLineBackground, DL.CellAttrFlags.Bold));
                 cx += 2;
             }
             string msg = _text;
             if (msg.Length > w - 2) msg = msg.Substring(0, w - 2);
-            b.DrawText(new DL.TextRun(cx, y, msg, _fg, _bg, DL.CellAttrFlags.None));
+            b.DrawText(new DL.TextRun(cx, y, msg, theme.TextDim, theme.StatusLineBackground, DL.CellAttrFlags.None));
             b.Pop();
         }
     }
