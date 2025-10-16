@@ -1037,9 +1037,7 @@ class Program
                 b.PushClip(new DL.ClipPush(0, 0, viewport.Width, viewport.Height));
                 // No background rectangle - use transparent terminal background
 
-                // Draw header with full-width background
-                var headerBg = new DL.Rgb24(30, 35, 50); // Dark blue-gray background
-                b.DrawRect(new DL.Rect(0, 0, viewport.Width, 1, headerBg)); // Full width header background (single row)
+                // Header (no background - transparent)
 
                 // Prepare header components
                 var gitInfo = GetGitInfo();
@@ -1073,28 +1071,28 @@ class Program
                 int xPos = padding;
 
                 // Title
-                b.DrawText(new DL.TextRun(xPos, 0, title, new DL.Rgb24(250, 250, 100), headerBg, DL.CellAttrFlags.Bold));
+                b.DrawText(new DL.TextRun(xPos, 0, title, new DL.Rgb24(250, 250, 100), null, DL.CellAttrFlags.Bold));
                 xPos += titleLen;
 
                 // Delimiter after title
-                b.DrawText(new DL.TextRun(xPos, 0, delimiter, new DL.Rgb24(100, 100, 120), headerBg, DL.CellAttrFlags.None));
+                b.DrawText(new DL.TextRun(xPos, 0, delimiter, new DL.Rgb24(100, 100, 120), null, DL.CellAttrFlags.None));
                 xPos += delimiterLen;
 
                 // Current path (if there's room)
                 if (!string.IsNullOrEmpty(displayPath))
                 {
-                    b.DrawText(new DL.TextRun(xPos, 0, displayPath, new DL.Rgb24(150, 180, 200), headerBg, DL.CellAttrFlags.None));
+                    b.DrawText(new DL.TextRun(xPos, 0, displayPath, new DL.Rgb24(150, 180, 200), null, DL.CellAttrFlags.None));
                     xPos += displayPath.Length;
 
                     // Delimiter after path
-                    b.DrawText(new DL.TextRun(xPos, 0, delimiter, new DL.Rgb24(100, 100, 120), headerBg, DL.CellAttrFlags.None));
+                    b.DrawText(new DL.TextRun(xPos, 0, delimiter, new DL.Rgb24(100, 100, 120), null, DL.CellAttrFlags.None));
                     xPos += delimiterLen;
                 }
 
                 // Git info
                 if (xPos + gitLen < viewport.Width - padding)
                 {
-                    b.DrawText(new DL.TextRun(xPos, 0, gitInfoText, new DL.Rgb24(200, 200, 50), headerBg, DL.CellAttrFlags.None));
+                    b.DrawText(new DL.TextRun(xPos, 0, gitInfoText, new DL.Rgb24(200, 200, 50), null, DL.CellAttrFlags.None));
                 }
 
                 // Draw a subtle separator line below the header

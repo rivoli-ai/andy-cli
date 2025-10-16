@@ -11,7 +11,7 @@ namespace Andy.Cli.Widgets
         private string _text = string.Empty;
         private int _ttlFrames;
         private DL.Rgb24 _fg = new DL.Rgb24(255, 255, 255);
-        private DL.Rgb24 _bg = new DL.Rgb24(60, 60, 20);
+        private DL.Rgb24? _bg = null; // Transparent background
 
         /// <summary>Show a toast for the specified number of frames.</summary>
         public void Show(string text, int ttlFrames = 90) { _text = text ?? string.Empty; _ttlFrames = ttlFrames; }
@@ -25,7 +25,7 @@ namespace Andy.Cli.Widgets
             if (!IsVisible) return;
             int w = Math.Max(8, _text.Length + 4);
             b.PushClip(new DL.ClipPush(x, y, w, 1));
-            b.DrawRect(new DL.Rect(x, y, w, 1, _bg));
+            // No background rectangle - use transparent terminal background
             b.DrawText(new DL.TextRun(x + 2, y, _text, _fg, _bg, DL.CellAttrFlags.Bold));
             b.Pop();
         }
@@ -41,7 +41,7 @@ namespace Andy.Cli.Widgets
         private int _tick;
         private readonly char[] _frames = new[] { '|', '/', '-', '\\' };
         private DL.Rgb24 _fg = new DL.Rgb24(180, 180, 180);
-        private DL.Rgb24 _bg = new DL.Rgb24(10, 10, 10);
+        private DL.Rgb24? _bg = null; // Transparent background
 
         /// <summary>Set the message and optionally enable a spinner.</summary>
         public void Set(string text, bool spinner = false)
@@ -56,7 +56,7 @@ namespace Andy.Cli.Widgets
             int y = Math.Max(0, viewport.Height - 2);
             int x = 0; int w = viewport.Width;
             b.PushClip(new DL.ClipPush(x, y, w, 1));
-            b.DrawRect(new DL.Rect(x, y, w, 1, _bg));
+            // No background rectangle - use transparent terminal background
             int cx = x + 1;
             if (_spinner)
             {
