@@ -1414,7 +1414,11 @@ namespace Andy.Cli.Widgets
 
         public void AddDetail(string detail)
         {
-            _details.Add(detail);
+            // Avoid adding duplicate details
+            if (!_details.Contains(detail))
+            {
+                _details.Add(detail);
+            }
         }
 
         private void ExtractStatistics(string? result)
