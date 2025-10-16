@@ -50,6 +50,8 @@ namespace Andy.Cli.Widgets
             // Add spacing before user messages for better readability
             AddItem(new SpacerItem(1));
             AddItem(new UserBubbleItem(text));
+            // Add spacing after user messages to separate from response
+            AddItem(new SpacerItem(1));
         }
         /// <summary>Append a response separator with token information.</summary>
         public void AddResponseSeparator(int inputTokens = 0, int outputTokens = 0, string pattern = "━━ ◆ ━━") => AddItem(new ResponseSeparatorItem(inputTokens, outputTokens, pattern));

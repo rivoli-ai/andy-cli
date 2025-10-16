@@ -55,8 +55,8 @@ public class FeedContentRenderer : IContentRenderer
 
         _feedView.AddMarkdownRich(block.Content);
 
-        // Add spacing after content blocks
-        _feedView.AddMarkdownRich("");
+        // Don't add spacing after text blocks - let the caller manage spacing
+        // This prevents double blank lines when system messages follow
 
         _logger?.LogTrace("Rendered text block {BlockId} with {Length} characters",
             block.Id, block.Content.Length);
@@ -74,18 +74,17 @@ public class FeedContentRenderer : IContentRenderer
 
     private void RenderSystemMessageBlock(SystemMessageBlock block)
     {
-        // Handle empty messages as spacers
+        // Handle empty messages as spacers - but don't add extra blank lines
         if (string.IsNullOrWhiteSpace(block.Message))
         {
-            _feedView.AddMarkdownRich(" "); // Add a space for vertical separation
+            _feedView.AddMarkdownRich(""); // Add minimal spacing
             return;
         }
 
         // Render context messages with subdued formatting
         if (block.Type == SystemMessageType.Context)
         {
-            // Single line before context (not too much spacing)
-            // No underscores - just show plain context info
+            // Just show context info, no extra formatting or spacing
             _feedView.AddMarkdownRich(block.Message);
         }
         else

@@ -353,9 +353,8 @@ public class SimpleAssistantService : IDisposable
                 pipeline.AddRawContent($"[No response received. StopReason: {result.StopReason}]");
             }
 
-            // Show context stats with actual duration (with metadata color and proper spacing)
+            // Show context stats with actual duration (with metadata color)
             var stats = GetContextStats();
-            pipeline.AddSystemMessage("", SystemMessageType.Context, priority: 1999);
             var contextInfo = Commands.ConsoleColors.Metadata($"Context: {stats.TurnCount} turns, ~{stats.EstimatedTokens} tokens, Duration: {duration.TotalSeconds:F1}s");
             pipeline.AddSystemMessage(contextInfo, SystemMessageType.Context, priority: 2000);
 
