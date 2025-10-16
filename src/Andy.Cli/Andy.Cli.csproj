@@ -9,6 +9,8 @@
     <RootNamespace>Andy.Cli</RootNamespace>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>false</SelfContained>
+    <!-- Enable JSON reflection for trimming compatibility -->
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
   </PropertyGroup>
 
   <ItemGroup>
@@ -28,6 +30,20 @@
     <None Update="appsettings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <TrimmerRootDescriptor Include="ILLink.Descriptors.xml" />
+  </ItemGroup>
+
+  <!-- Disable trimming for Andy.* assemblies to avoid anonymous type issues -->
+  <ItemGroup>
+    <TrimmerRootAssembly Include="Andy.Tools" />
+    <TrimmerRootAssembly Include="Andy.Llm" />
+    <TrimmerRootAssembly Include="Andy.Engine" />
+    <TrimmerRootAssembly Include="Andy.Model" />
+    <TrimmerRootAssembly Include="Andy.Tui" />
+    <TrimmerRootAssembly Include="Andy.Context" />
   </ItemGroup>
 
 </Project>

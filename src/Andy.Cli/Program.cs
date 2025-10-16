@@ -233,25 +233,8 @@ class Program
                 AutoDiscoverTools = false
             });
 
-            // Register built-in tools
-            services.AddBuiltInTools();
-
-            // Register custom tools
-            services.AddSingleton(new ToolRegistrationInfo
-            {
-                ToolType = typeof(Andy.Cli.Tools.CreateDirectoryTool),
-                Configuration = new Dictionary<string, object?>()
-            });
-            services.AddSingleton(new ToolRegistrationInfo
-            {
-                ToolType = typeof(Andy.Cli.Tools.BashCommandTool),
-                Configuration = new Dictionary<string, object?>()
-            });
-            services.AddSingleton(new ToolRegistrationInfo
-            {
-                ToolType = typeof(Andy.Cli.Tools.CodeIndexTool),
-                Configuration = new Dictionary<string, object?>()
-            });
+            // Register all tools using the trim-safe ToolCatalog
+            ToolCatalog.RegisterAllTools(services);
 
             // Register code indexing service
             services.AddSingleton<CodeIndexingService>();
@@ -1309,15 +1292,8 @@ class Program
             AutoDiscoverTools = false
         });
 
-        // Register built-in tools
-        services.AddBuiltInTools();
-
-        // Register custom tools
-        services.AddSingleton(new ToolRegistrationInfo
-        {
-            ToolType = typeof(Andy.Cli.Tools.CreateDirectoryTool),
-            Configuration = new Dictionary<string, object?>()
-        });
+        // Register all tools using the trim-safe ToolCatalog
+        ToolCatalog.RegisterAllTools(services);
 
         var serviceProvider = services.BuildServiceProvider();
 

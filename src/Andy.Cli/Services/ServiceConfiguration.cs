@@ -37,8 +37,8 @@ public static class ServiceConfiguration
         services.AddSingleton<ISecurityManager, SecurityManager>();
         services.AddSingleton<IPermissionProfileService, PermissionProfileService>();
 
-        // Register built-in tools
-        services.AddBuiltInTools();
+        // Register all tools using the trim-safe ToolCatalog
+        ToolCatalog.RegisterAllTools(services);
 
         var serviceProvider = services.BuildServiceProvider();
 

@@ -162,7 +162,7 @@ public class CodeIndexTool : ToolBase
     private async Task<object> SearchSymbolsAsync(string pattern, string scope, bool includePrivate, CancellationToken cancellationToken)
     {
         var symbols = await _indexingService!.SearchSymbolsAsync(pattern, cancellationToken);
-        
+
         if (!includePrivate)
         {
             symbols = symbols.Where(s => s.IsPublic).ToList();
@@ -173,73 +173,73 @@ public class CodeIndexTool : ToolBase
             symbols = symbols.Where(s => s.FilePath.Contains(scope, StringComparison.OrdinalIgnoreCase)).ToList();
         }
 
-        return new
+        return new Dictionary<string, object?>
         {
-            query = pattern,
-            scope = scope,
-            count = symbols.Count,
-            symbols = symbols.Select(s => new
+            ["query"] = pattern,
+            ["scope"] = scope,
+            ["count"] = symbols.Count,
+            ["symbols"] = symbols.Select(s => new Dictionary<string, object?>
             {
-                name = s.Name,
-                kind = s.Kind,
-                filePath = s.FilePath,
-                line = s.Line,
-                @namespace = s.Namespace,
-                isPublic = s.IsPublic,
-                signature = s.Signature
-            }).Take(100) // Limit results
+                ["name"] = s.Name,
+                ["kind"] = s.Kind,
+                ["filePath"] = s.FilePath,
+                ["line"] = s.Line,
+                ["namespace"] = s.Namespace,
+                ["isPublic"] = s.IsPublic,
+                ["signature"] = s.Signature
+            }).Take(100).ToList() // Limit results
         };
     }
 
     private async Task<object> GetProjectStructureAsync(string scope, CancellationToken cancellationToken)
     {
         var structure = await _indexingService!.GetProjectStructureAsync(cancellationToken);
-        
+
         if (scope != "all")
         {
             // Filter structure to specific scope
             structure = FilterStructureByScope(structure, scope);
         }
 
-        return new
+        return new Dictionary<string, object?>
         {
-            scope = scope,
-            structure = structure
+            ["scope"] = scope,
+            ["structure"] = structure
         };
     }
 
     private async Task<object> FindReferencesAsync(string symbolName, string scope, CancellationToken cancellationToken)
     {
         var references = await _indexingService!.FindReferencesAsync(symbolName, cancellationToken);
-        
+
         if (scope != "all")
         {
             references = references.Where(r => r.FilePath.Contains(scope, StringComparison.OrdinalIgnoreCase)).ToList();
         }
 
-        return new
+        return new Dictionary<string, object?>
         {
-            symbol = symbolName,
-            scope = scope,
-            count = references.Count,
-            references = references.Select(r => new
+            ["symbol"] = symbolName,
+            ["scope"] = scope,
+            ["count"] = references.Count,
+            ["references"] = references.Select(r => new Dictionary<string, object?>
             {
-                filePath = r.FilePath,
-                line = r.Line,
-                column = r.Column,
-                context = r.Context
-            }).Take(100) // Limit results
+                ["filePath"] = r.FilePath,
+                ["line"] = r.Line,
+                ["column"] = r.Column,
+                ["context"] = r.Context
+            }).Take(100).ToList() // Limit results
         };
     }
 
     private async Task<object> GetClassHierarchyAsync(string className, CancellationToken cancellationToken)
     {
         var hierarchy = await _indexingService!.GetClassHierarchyAsync(className, cancellationToken);
-        
-        return new
+
+        return new Dictionary<string, object?>
         {
-            className = className,
-            hierarchy = hierarchy
+            ["className"] = className,
+            ["hierarchy"] = hierarchy
         };
     }
 

@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<linker>
+  <!-- Preserve all tool types in Andy.Tools library that we register -->
+  <assembly fullname="Andy.Tools">
+    <!-- FileSystem tools -->
+    <type fullname="Andy.Tools.Library.FileSystem.CopyFileTool" preserve="all" />
+    <type fullname="Andy.Tools.Library.FileSystem.DeleteFileTool" preserve="all" />
+    <type fullname="Andy.Tools.Library.FileSystem.ListDirectoryTool" preserve="all" />
+    <type fullname="Andy.Tools.Library.FileSystem.MoveFileTool" preserve="all" />
+    <type fullname="Andy.Tools.Library.FileSystem.ReadFileTool" preserve="all" />
+    <type fullname="Andy.Tools.Library.FileSystem.WriteFileTool" preserve="all" />
+
+    <!-- Git tools -->
+    <type fullname="Andy.Tools.Library.Git.GitDiffTool" preserve="all" />
+
+    <!-- System tools -->
+    <type fullname="Andy.Tools.Library.System.ProcessInfoTool" preserve="all" />
+    <type fullname="Andy.Tools.Library.System.SystemInfoTool" preserve="all" />
+
+    <!-- Text processing tools -->
+    <type fullname="Andy.Tools.Library.Text.FormatTextTool" preserve="all" />
+    <type fullname="Andy.Tools.Library.Text.ReplaceTextTool" preserve="all" />
+    <type fullname="Andy.Tools.Library.Text.SearchTextTool" preserve="all" />
+
+    <!-- Utility tools -->
+    <type fullname="Andy.Tools.Library.Utilities.DateTimeTool" preserve="all" />
+    <type fullname="Andy.Tools.Library.Utilities.EncodingTool" preserve="all" />
+
+    <!-- Web tools -->
+    <type fullname="Andy.Tools.Library.Web.HttpRequestTool" preserve="all" />
+    <type fullname="Andy.Tools.Library.Web.JsonProcessorTool" preserve="all" />
+
+    <!-- Todo management -->
+    <type fullname="Andy.Tools.Library.TodoManagementTool" preserve="all" />
+
+    <!-- Core framework types needed for tool execution -->
+    <type fullname="Andy.Tools.Registry.ToolRegistry" preserve="all" />
+    <type fullname="Andy.Tools.Execution.ToolExecutor" preserve="all" />
+    <type fullname="Andy.Tools.Validation.ToolValidator" preserve="all" />
+  </assembly>
+
+  <!-- Preserve custom CLI tools -->
+  <assembly fullname="andy-cli">
+    <type fullname="Andy.Cli.Tools.CreateDirectoryTool" preserve="all" />
+    <type fullname="Andy.Cli.Tools.BashCommandTool" preserve="all" />
+    <type fullname="Andy.Cli.Tools.CodeIndexTool" preserve="all" />
+  </assembly>
+
+  <!-- Preserve System.Text.Json for reflection-based serialization -->
+  <assembly fullname="System.Text.Json">
+    <type fullname="*" preserve="all" />
+  </assembly>
+
+  <!-- Preserve reflection support -->
+  <assembly fullname="System.Runtime">
+    <type fullname="System.Reflection.*" preserve="all" />
+  </assembly>
+
+  <!-- Preserve Andy.Model types for JSON serialization -->
+  <assembly fullname="Andy.Model">
+    <type fullname="Andy.Model.Model.*" preserve="all" />
+  </assembly>
+
+  <!-- Preserve Andy.Llm types for JSON serialization -->
+  <assembly fullname="Andy.Llm">
+    <type fullname="*" preserve="all" />
+  </assembly>
+
+  <!-- Preserve Andy.Engine types -->
+  <assembly fullname="Andy.Engine">
+    <type fullname="*" preserve="all" />
+  </assembly>
+
+  <!-- Preserve Andy.Tui types -->
+  <assembly fullname="Andy.Tui">
+    <type fullname="*" preserve="all" />
+  </assembly>
+
+  <!-- Preserve Andy.Context types -->
+  <assembly fullname="Andy.Context">
+    <type fullname="*" preserve="all" />
+  </assembly>
+
+  <!-- Preserve all anonymous types globally -->
+  <assembly fullname="mscorlib">
+    <type fullname="&lt;&gt;f__AnonymousType*" preserve="all" />
+  </assembly>
+  <assembly fullname="System.Private.CoreLib">
+    <type fullname="&lt;&gt;f__AnonymousType*" preserve="all" />
+  </assembly>
+  <assembly fullname="andy-cli">
+    <type fullname="&lt;&gt;*" preserve="all" />
+  </assembly>
+  <assembly fullname="Andy.Tools">
+    <type fullname="&lt;&gt;*" preserve="all" />
+  </assembly>
+</linker>
