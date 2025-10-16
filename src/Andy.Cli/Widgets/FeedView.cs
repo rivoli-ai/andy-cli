@@ -1386,13 +1386,16 @@ namespace Andy.Cli.Widgets
             catch { }
 
             // Extract file path if present
-            if (parameters.TryGetValue("file_path", out var path))
+            if (parameters != null)
             {
-                _filePath = path?.ToString() ?? "";
-            }
-            else if (parameters.TryGetValue("path", out var altPath))
-            {
-                _filePath = altPath?.ToString() ?? "";
+                if (parameters.TryGetValue("file_path", out var path))
+                {
+                    _filePath = path?.ToString() ?? "";
+                }
+                else if (parameters.TryGetValue("path", out var altPath))
+                {
+                    _filePath = altPath?.ToString() ?? "";
+                }
             }
         }
 

@@ -1039,29 +1039,37 @@ class Program
                 // No background rectangle - use transparent terminal background
 
                 // Draw header with full-width background
-                var headerBg = new DL.Rgb24(30, 35, 50); // Dark blue-gray background
-                b.DrawRect(new DL.Rect(0, 0, viewport.Width, 1, headerBg)); // Full width header background (single row)
+                var theme = Andy.Cli.Themes.Theme.Current;
+                b.DrawRect(new DL.Rect(0, 0, viewport.Width, 1, theme.HeaderBackground));
 
                 // Prepare header components
                 var gitInfo = GetGitInfo();
-                var title = "Andy CLI";
-                var gitInfoText = $"[{gitInfo.branch}@{gitInfo.commit}]";
+
+                // Get version from assembly (only in release builds)
+                string version = "";
+                #if RELEASE
+                var assemblyVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+                version = assemblyVersion != null ? $" v{assemblyVersion.Major}.{assemblyVersion.Minor}.{assemblyVersion.Build}" : "";
+                #endif
+
+                var leftSection = $"Andy CLI{version}";
+                var rightSection = $"[{gitInfo.branch}@{gitInfo.commit}]";
                 var currentPath = Directory.GetCurrentDirectory();
 
-                // Use pipe as delimiter
-                var delimiter = " │ "; // Unicode box drawing character for vertical line
-                int delimiterLen = delimiter.Length;
-
-                // Calculate available space for path
-                int titleLen = title.Length;
-                int gitLen = gitInfoText.Length;
+                // Calculate available space for centered path
+                int leftLen = leftSection.Length;
+                int rightLen = rightSection.Length;
                 int padding = 2; // Padding from edges
-                int availableForPath = viewport.Width - titleLen - gitLen - (delimiterLen * 2) - (padding * 2);
 
-                // Truncate path if necessary, showing the right part
+                // Reserve space: left padding + left section + padding + right section + right padding
+                int reservedSpace = padding + leftLen + padding + padding + rightLen + padding;
+                int availableForPath = Math.Max(0, viewport.Width - reservedSpace);
+
+                // Truncate path if necessary, showing the end part (most relevant)
                 string displayPath = currentPath;
                 if (availableForPath > 10 && displayPath.Length > availableForPath)
                 {
+                    // Truncate from the left, showing the end
                     displayPath = "..." + displayPath.Substring(displayPath.Length - availableForPath + 3);
                 }
                 else if (availableForPath <= 10)
@@ -1070,39 +1078,34 @@ class Program
                     displayPath = "";
                 }
 
-                // Render header components
-                int xPos = padding;
+                // Render left section (Andy CLI with version)
+                b.DrawText(new DL.TextRun(padding, 0, leftSection, theme.HeaderTitle, theme.HeaderBackground, DL.CellAttrFlags.Bold));
 
-                // Title
-                b.DrawText(new DL.TextRun(xPos, 0, title, new DL.Rgb24(250, 250, 100), headerBg, DL.CellAttrFlags.Bold));
-                xPos += titleLen;
-
-                // Delimiter after title
-                b.DrawText(new DL.TextRun(xPos, 0, delimiter, new DL.Rgb24(100, 100, 120), headerBg, DL.CellAttrFlags.None));
-                xPos += delimiterLen;
-
-                // Current path (if there's room)
+                // Render centered path (if there's room)
                 if (!string.IsNullOrEmpty(displayPath))
                 {
-                    b.DrawText(new DL.TextRun(xPos, 0, displayPath, new DL.Rgb24(150, 180, 200), headerBg, DL.CellAttrFlags.None));
-                    xPos += displayPath.Length;
-
-                    // Delimiter after path
-                    b.DrawText(new DL.TextRun(xPos, 0, delimiter, new DL.Rgb24(100, 100, 120), headerBg, DL.CellAttrFlags.None));
-                    xPos += delimiterLen;
+                    int pathX = (viewport.Width - displayPath.Length) / 2;
+                    // Ensure path doesn't overlap with left section
+                    pathX = Math.Max(pathX, padding + leftLen + padding);
+                    // Ensure path doesn't overlap with right section
+                    if (pathX + displayPath.Length + padding + rightLen + padding <= viewport.Width)
+                    {
+                        b.DrawText(new DL.TextRun(pathX, 0, displayPath, theme.HeaderPath, theme.HeaderBackground, DL.CellAttrFlags.None));
+                    }
                 }
 
-                // Git info
-                if (xPos + gitLen < viewport.Width - padding)
+                // Render right section (git info)
+                int gitX = viewport.Width - rightLen - padding;
+                // Ensure git info doesn't overlap with left section
+                if (gitX > padding + leftLen + padding)
                 {
-                    b.DrawText(new DL.TextRun(xPos, 0, gitInfoText, new DL.Rgb24(200, 200, 50), headerBg, DL.CellAttrFlags.None));
+                    b.DrawText(new DL.TextRun(gitX, 0, rightSection, theme.HeaderGitInfo, theme.HeaderBackground, DL.CellAttrFlags.None));
                 }
 
                 // Draw a subtle separator line below the header
-                var separatorColor = new DL.Rgb24(50, 55, 70);
                 for (int i = 0; i < viewport.Width; i++)
                 {
-                    b.DrawText(new DL.TextRun(i, 1, "─", separatorColor, null, DL.CellAttrFlags.None)); // Box drawing horizontal line
+                    b.DrawText(new DL.TextRun(i, 1, "─", theme.Separator, null, DL.CellAttrFlags.None));
                 }
                 var baseDl = b.Build();
                 var wb = new DL.DisplayListBuilder();

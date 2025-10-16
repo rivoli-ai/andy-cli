@@ -71,8 +71,8 @@ namespace Andy.Cli.Services
                 }
             }
 
-            // Execute the actual tool
-            var result = await _innerExecutor.ExecuteAsync(toolId, parameters, context);
+            // Execute the actual tool (parameters cannot be null here based on interface contract)
+            var result = await _innerExecutor.ExecuteAsync(toolId, parameters ?? new Dictionary<string, object?>(), context);
 
             // DEBUG: Write the raw result to file
             try
@@ -308,7 +308,7 @@ namespace Andy.Cli.Services
 
         public Task<int> CancelExecutionsAsync(string? toolId = null)
         {
-            return _innerExecutor.CancelExecutionsAsync(toolId);
+            return _innerExecutor.CancelExecutionsAsync(toolId ?? string.Empty);
         }
 
         public IReadOnlyList<RunningExecutionInfo> GetRunningExecutions()
