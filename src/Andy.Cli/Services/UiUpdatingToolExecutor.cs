@@ -45,9 +45,28 @@ namespace Andy.Cli.Services
             _logger?.LogWarning("[UI_EXECUTOR] Executing tool {ToolId} with {ParamCount} parameters",
                 toolId, parameters?.Count ?? 0);
 
-            // Find the UI tool ID for this tool
-            var uiToolId = ToolExecutionTracker.Instance.GetToolIdForName(toolId);
-            _logger?.LogWarning("[UI_EXECUTOR] Found UI ID {UiId} for tool {ToolId}", uiToolId, toolId);
+            // Ensure we have a context with a correlation ID
+            context ??= new ToolExecutionContext();
+
+            // If no correlation ID is set, create a unique one for this execution
+            if (string.IsNullOrEmpty(context.CorrelationId))
+            {
+                context.CorrelationId = Guid.NewGuid().ToString("N")[..8];
+            }
+
+            _logger?.LogWarning("[UI_EXECUTOR] Using correlation ID {CorrelationId} for {ToolId}",
+                context.CorrelationId, toolId);
+
+            // Find the UI tool ID for this tool - try multiple strategies:
+            // 1. Dequeue the next pending execution for this tool (handles parallel executions correctly)
+            // 2. Check correlation ID mapping (if agent set a correlation ID we registered)
+            // 3. Fall back to tool name mapping (last resort, may be wrong for parallel executions)
+            var uiToolId = ToolExecutionTracker.Instance.DequeuePendingTool(toolId)
+                        ?? ToolExecutionTracker.Instance.GetToolIdForCorrelation(context.CorrelationId)
+                        ?? ToolExecutionTracker.Instance.GetToolIdForName(toolId);
+
+            _logger?.LogWarning("[UI_EXECUTOR] Found UI ID {UiId} for tool {ToolId} with correlation {CorrelationId}",
+                uiToolId, toolId, context.CorrelationId);
 
             // CRITICAL: Track the tool start so we can track completion later
             if (!string.IsNullOrEmpty(uiToolId))
@@ -63,11 +82,10 @@ namespace Andy.Cli.Services
             {
                 if (!string.IsNullOrEmpty(uiToolId) && parameters != null)
                 {
-                    _logger?.LogWarning("[UI_EXECUTOR] Updating UI with real parameters");
+                    _logger?.LogWarning("[UI_EXECUTOR] Updating UI tool {UiToolId} with real parameters", uiToolId);
 
-                    // Update the UI with real parameters
+                    // Update ONLY this specific tool by exact ID (critical for parallel executions)
                     feedView.UpdateToolByExactId(uiToolId, parameters);
-                    feedView.ForceUpdateAllMatchingTools(uiToolId, toolId, parameters);
                 }
             }
 
@@ -75,13 +93,10 @@ namespace Andy.Cli.Services
             var result = await _innerExecutor.ExecuteAsync(toolId, parameters ?? new Dictionary<string, object?>(), context);
 
             // Track completion and update UI with result
-            // The toolId parameter is the actual tool name (e.g., "datetime_tool")
-            // We need to find the UI ID that was registered for this execution
-            var uiId = ToolExecutionTracker.Instance.GetToolIdForName(toolId);
-
             // IMPORTANT: We must track completion BEFORE SimpleAssistantService tries to read it
             // Store the result immediately in the tracker
-            if (!string.IsNullOrEmpty(uiId))
+            // Use the SAME uiToolId we got from the queue - don't look it up again!
+            if (!string.IsNullOrEmpty(uiToolId))
             {
                 // Format a meaningful result message
                 string resultMessage = result.Message ?? "";
@@ -439,10 +454,10 @@ namespace Andy.Cli.Services
                 _logger?.LogWarning("[UI_EXECUTOR] Extracted result for {ToolId}: '{Result}' from Data type {DataType}",
                     toolId, resultMessage, result.Data?.GetType().Name ?? "null");
 
-                _logger?.LogWarning("[UI_EXECUTOR] Tracking completion for {ToolId} with result: '{Result}'",
-                    uiId, resultMessage);
+                _logger?.LogWarning("[UI_EXECUTOR] Tracking completion for {UiToolId} with result: '{Result}'",
+                    uiToolId, resultMessage);
 
-                ToolExecutionTracker.Instance.TrackToolComplete(uiId, result.IsSuccessful, resultMessage, result.Data);
+                ToolExecutionTracker.Instance.TrackToolComplete(uiToolId, result.IsSuccessful, resultMessage, result.Data);
             }
 
             return result;

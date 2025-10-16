@@ -71,6 +71,9 @@ public class SimpleAssistantService : IDisposable
             var baseToolId = e.ToolName.ToLower().Replace(" ", "_").Replace("-", "_");
             var toolId = $"{baseToolId}_{++_toolCallCounter}";
 
+            // Generate a unique correlation ID for this specific tool execution
+            var correlationId = Guid.NewGuid().ToString("N")[..12]; // Longer ID for uniqueness
+
             // Track this tool
             _runningTools[toolId] = (DateTime.UtcNow, null);
 
@@ -78,14 +81,24 @@ public class SimpleAssistantService : IDisposable
             ToolExecutionTracker.Instance.SetLastActiveToolId(toolId);
             ToolExecutionTracker.Instance.SetFeedView(_feed);
 
-            // Register multiple variations of the tool name to ensure we can find it
+            // IMPORTANT: Enqueue this tool execution so UiUpdatingToolExecutor can claim it
+            // This ensures the correct UI tool ID is used even with parallel executions
+            ToolExecutionTracker.Instance.EnqueuePendingTool(e.ToolName, toolId);
+
+            // Register the correlation ID mapping (in case the agent uses it)
+            ToolExecutionTracker.Instance.RegisterCorrelationMapping(correlationId, toolId);
+
+            // Also register the correlation ID as a tool name mapping (for fallback)
+            ToolExecutionTracker.Instance.RegisterToolMapping(correlationId, toolId);
+
+            // Register multiple variations of the tool name to ensure we can find it (fallback)
             ToolExecutionTracker.Instance.RegisterToolMapping(e.ToolName, toolId);
             ToolExecutionTracker.Instance.RegisterToolMapping(e.ToolName.Replace("-", "_"), toolId);
             ToolExecutionTracker.Instance.RegisterToolMapping(e.ToolName.Replace("_", "-"), toolId);
             ToolExecutionTracker.Instance.RegisterToolMapping(baseToolId, toolId);
 
-            _logger?.LogWarning("[TOOL_CALLED_EVENT] Tool: {ToolName}, ID: {ToolId} - Registered mappings, creating UI",
-                e.ToolName, toolId);
+            _logger?.LogWarning("[TOOL_CALLED_EVENT] Tool: {ToolName}, ID: {ToolId}, Correlation: {CorrelationId} - Registered mappings, creating UI",
+                e.ToolName, toolId, correlationId);
 
             // CREATE UI IMMEDIATELY - parameters will be filled in by ToolAdapter
             var initialParams = new Dictionary<string, object?>
@@ -351,14 +364,15 @@ public class SimpleAssistantService : IDisposable
             _logger?.LogDebug("Success={Success}, Response.Length={Length}, StopReason={StopReason}",
                 result.Success, result.Response?.Length ?? 0, result.StopReason);
 
+            // Add blank line after tools if they were executed
+            if (toolsWereExecuted)
+            {
+                _feed.AddMarkdownRich("");
+            }
+
             // Add response to pipeline
             if (!string.IsNullOrEmpty(result.Response))
             {
-                // Add blank line after tools if they were executed
-                if (toolsWereExecuted)
-                {
-                    _feed.AddMarkdownRich("");
-                }
                 pipeline.AddRawContent(result.Response);
             }
             else if (!result.Success)

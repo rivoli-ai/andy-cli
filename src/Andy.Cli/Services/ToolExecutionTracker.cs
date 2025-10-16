@@ -13,6 +13,9 @@ public class ToolExecutionTracker
     private readonly Dictionary<string, ToolExecutionInfo> _executions = new();
     private readonly Dictionary<string, Dictionary<string, object?>> _pendingParameters = new(); // Store parameters immediately
     private readonly Dictionary<string, string> _toolNameToIdMap = new(); // Map tool names to their UI IDs
+    private readonly Dictionary<string, string> _correlationIdToUiIdMap = new(); // Map correlation IDs to UI IDs
+    private readonly Dictionary<string, Queue<string>> _pendingToolExecutions = new(); // Queue of UI IDs per tool name
+    private readonly object _pendingToolsLock = new();
     private FeedView? _feedView;
     private string? _lastActiveToolId; // Track the last tool started from UI
     private int _parameterUpdateCounter = 0;
@@ -39,9 +42,56 @@ public class ToolExecutionTracker
         _toolNameToIdMap[toolName.ToLower()] = uiToolId;
     }
 
+    public void RegisterCorrelationMapping(string correlationId, string uiToolId)
+    {
+        if (!string.IsNullOrEmpty(correlationId))
+        {
+            _correlationIdToUiIdMap[correlationId] = uiToolId;
+        }
+    }
+
+    public string? GetToolIdForCorrelation(string? correlationId)
+    {
+        if (string.IsNullOrEmpty(correlationId))
+            return null;
+        return _correlationIdToUiIdMap.TryGetValue(correlationId, out var id) ? id : null;
+    }
+
     public string? GetToolIdForName(string toolName)
     {
         return _toolNameToIdMap.TryGetValue(toolName.ToLower(), out var id) ? id : null;
+    }
+
+    /// <summary>
+    /// Enqueue a pending tool execution (called when ToolCalled event fires)
+    /// </summary>
+    public void EnqueuePendingTool(string toolName, string uiToolId)
+    {
+        lock (_pendingToolsLock)
+        {
+            var key = toolName.ToLower();
+            if (!_pendingToolExecutions.ContainsKey(key))
+            {
+                _pendingToolExecutions[key] = new Queue<string>();
+            }
+            _pendingToolExecutions[key].Enqueue(uiToolId);
+        }
+    }
+
+    /// <summary>
+    /// Dequeue the next pending tool execution for a tool name (called when tool actually executes)
+    /// </summary>
+    public string? DequeuePendingTool(string toolName)
+    {
+        lock (_pendingToolsLock)
+        {
+            var key = toolName.ToLower();
+            if (_pendingToolExecutions.TryGetValue(key, out var queue) && queue.Count > 0)
+            {
+                return queue.Dequeue();
+            }
+            return null;
+        }
     }
 
     public FeedView? GetFeedView()
@@ -108,24 +158,8 @@ public class ToolExecutionTracker
             _executions[_lastActiveToolId] = info;
         }
 
-        // Always update the UI with parameters - try multiple approaches
-        if (_feedView != null && parameters != null)
-        {
-            // First, try to update by exact ID if we have it
-            if (!string.IsNullOrEmpty(_lastActiveToolId))
-            {
-                _feedView.UpdateToolByExactId(_lastActiveToolId, parameters);
-            }
-
-            // Also update by tool name
-            _feedView.UpdateRunningToolParameters(toolName, parameters);
-
-            // Try to update any active tool with the base tool ID
-            _feedView.UpdateActiveToolWithParameters(toolId, parameters);
-
-            // Force update all matching tools
-            _feedView.ForceUpdateAllMatchingTools(toolId, toolName, parameters);
-        }
+        // NOTE: UI parameter update is now handled by UiUpdatingToolExecutor using exact tool ID
+        // This ensures correct parameter display for parallel tool executions
     }
 
     public ToolExecutionInfo? GetExecutionInfo(string toolId)
@@ -162,11 +196,15 @@ public class ToolExecutionTracker
             info.Result = result;
             info.ResultData = resultData;
 
-            // Format a meaningful result summary based on tool type and data
-            var resultSummary = FormatResultSummary(info.ToolName, info.Parameters, resultData, result);
-            if (!string.IsNullOrEmpty(resultSummary))
+            // Only format a result summary for successful operations
+            // For failures, preserve the detailed error message that was extracted
+            if (success)
             {
-                info.Result = resultSummary;
+                var resultSummary = FormatResultSummary(info.ToolName, info.Parameters, resultData, result);
+                if (!string.IsNullOrEmpty(resultSummary))
+                {
+                    info.Result = resultSummary;
+                }
             }
 
             // For datetime_tool, capture the actual result
