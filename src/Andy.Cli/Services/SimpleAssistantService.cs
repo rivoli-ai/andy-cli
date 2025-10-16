@@ -313,17 +313,20 @@ public class SimpleAssistantService : IDisposable
             // Calculate actual duration
             var duration = DateTime.UtcNow - startTime;
 
-            // Clear the processing indicator (which has built-in spacing)
+            // Clear the processing indicator (now has zero built-in spacing)
             _feed.ClearProcessingIndicator();
 
-            // Add technical summary of what happened (without color to avoid rendering issues)
+            // Add blank line after clearing processing indicator
+            _feed.AddMarkdownRich("");
+
+            // Add technical summary with gray color (matching context line)
             var technicalSummary = $"Processing completed in {duration.TotalSeconds:F1}s | Model: {_modelName} | Provider: {_providerName}";
             if (!result.Success)
             {
                 technicalSummary += $" | Status: Failed - {result.StopReason}";
             }
-            // Use plain AddMarkdown without color codes to avoid ANSI interference
-            _feed.AddMarkdown(technicalSummary);
+            // Use AddMarkdownRich with gray color - now works because content is not from LLM
+            _feed.AddMarkdownRich(Commands.ConsoleColors.Dim(technicalSummary));
 
             // Add blank line after technical summary to separate from response
             _feed.AddMarkdownRich("");
