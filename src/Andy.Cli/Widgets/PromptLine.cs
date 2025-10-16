@@ -17,7 +17,7 @@ namespace Andy.Cli.Widgets
         private readonly List<string> _history = new();
         private int _historyIndex = -1; // -1 = current editing
         private Func<string, string?>? _suggest;
-        private DL.Rgb24 _bg = new DL.Rgb24(0, 0, 0);
+        private DL.Rgb24? _bg = null; // Transparent background
         private DL.Rgb24 _fg = new DL.Rgb24(150, 200, 255);
         private DL.Rgb24 _ghost = new DL.Rgb24(100, 100, 100);
         private DL.Rgb24 _border = new DL.Rgb24(80, 80, 80);
@@ -100,8 +100,7 @@ namespace Andy.Cli.Widgets
             int innerW = Math.Max(0, w - 2);
             _lastX = x; _lastY = y; _lastInnerW = innerW;
             b.PushClip(new DL.ClipPush(x, y, w, h));
-            // background and optional border
-            b.DrawRect(new DL.Rect(x, y, w, h, _bg));
+            // No background rectangle - use transparent terminal background
             if (_showBorder) b.DrawBorder(new DL.Border(x, y, w, h, "single", _border));
             // Lines and caret placement
             var lines = _text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
