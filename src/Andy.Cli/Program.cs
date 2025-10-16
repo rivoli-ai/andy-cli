@@ -109,8 +109,7 @@ class Program
         var pty = new LocalStdoutPty();
         Console.Write("\u001b[?1049h\u001b[?25l\u001b[?7l");
 
-        // Set console background to black after entering alternate screen
-        Console.BackgroundColor = ConsoleColor.Black;
+        // Use terminal's default background color
         Console.Clear();
 
         try
