@@ -360,8 +360,41 @@ namespace Andy.Cli.Services
                 }
                 else if (!result.IsSuccessful)
                 {
-                    // For failed operations, use the error message
-                    resultMessage = result.Message ?? "Failed";
+                    // For failed operations, try to extract detailed error information
+                    resultMessage = result.Message ?? "";
+
+                    // If no message but we have data, try to extract error details
+                    if (string.IsNullOrEmpty(resultMessage) && result.Data != null)
+                    {
+                        if (result.Data is Dictionary<string, object?> errorDict)
+                        {
+                            // Try to extract error message from common error fields
+                            string[] errorKeys = { "error", "message", "error_message", "details", "exception" };
+                            foreach (var key in errorKeys)
+                            {
+                                if (errorDict.TryGetValue(key, out var errorVal) && errorVal != null)
+                                {
+                                    var errorStr = errorVal.ToString();
+                                    if (!string.IsNullOrEmpty(errorStr))
+                                    {
+                                        resultMessage = errorStr;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        else if (result.Data is string errorStr && !string.IsNullOrEmpty(errorStr))
+                        {
+                            resultMessage = errorStr;
+                        }
+                    }
+
+                    // If still no message, use a generic fallback
+                    if (string.IsNullOrEmpty(resultMessage))
+                    {
+                        resultMessage = "Operation failed";
+                    }
+
                     _logger?.LogWarning("[UI_EXECUTOR] Tool {ToolId} failed with message: {Message}", toolId, resultMessage);
                 }
 
