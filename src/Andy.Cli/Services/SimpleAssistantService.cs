@@ -316,13 +316,14 @@ public class SimpleAssistantService : IDisposable
             // Clear the processing indicator (which has built-in spacing)
             _feed.ClearProcessingIndicator();
 
-            // Add technical summary of what happened with metadata color
+            // Add technical summary of what happened (without color to avoid rendering issues)
             var technicalSummary = $"Processing completed in {duration.TotalSeconds:F1}s | Model: {_modelName} | Provider: {_providerName}";
             if (!result.Success)
             {
                 technicalSummary += $" | Status: Failed - {result.StopReason}";
             }
-            _feed.AddMarkdown(Commands.ConsoleColors.Metadata(technicalSummary));
+            // Use plain AddMarkdown without color codes to avoid ANSI interference
+            _feed.AddMarkdown(technicalSummary);
 
             // Add blank line after technical summary to separate from response
             _feed.AddMarkdownRich("");
