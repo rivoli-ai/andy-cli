@@ -31,6 +31,7 @@ The workflow will:
 - Linux x64
 - Linux ARM64
 - Windows x64
+- Windows ARM64
 
 **Artifacts generated:**
 - Trimmed, single-file binaries
@@ -182,6 +183,7 @@ Typical sizes:
 - Linux x64: ~28 MB
 - Linux ARM64: ~28 MB
 - Windows x64: ~28 MB
+- Windows ARM64: ~28 MB
 
 ### Code signing fails
 

@@ -188,6 +188,13 @@ jobs:
   build-windows:
     name: Build Windows
     runs-on: windows-latest
+    strategy:
+      matrix:
+        include:
+          - runtime: win-x64
+            artifact_name: andy-cli-windows-x64
+          - runtime: win-arm64
+            artifact_name: andy-cli-windows-arm64
 
     steps:
       - name: Checkout code
@@ -208,9 +215,9 @@ jobs:
         run: |
           dotnet publish src/Andy.Cli/Andy.Cli.csproj `
             --configuration Release `
-            --runtime win-x64 `
+            --runtime ${{ matrix.runtime }} `
             --self-contained true `
-            --output ./publish/andy-cli-windows-x64 `
+            --output ./publish/${{ matrix.artifact_name }} `
             -p:PublishTrimmed=true `
             -p:PublishSingleFile=true
 
@@ -228,25 +235,25 @@ jobs:
       #     [System.Convert]::FromBase64String($env:WINDOWS_CERTIFICATE) | Set-Content -Path cert.pfx -AsByteStream
       #
       #     # Sign the executable
-      #     & "C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64\signtool.exe" sign /f cert.pfx /p $env:WINDOWS_CERTIFICATE_PASSWORD /tr http://timestamp.digicert.com /td sha256 /fd sha256 ./publish/andy-cli-windows-x64/andy-cli.exe
+      #     & "C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64\signtool.exe" sign /f cert.pfx /p $env:WINDOWS_CERTIFICATE_PASSWORD /tr http://timestamp.digicert.com /td sha256 /fd sha256 ./publish/${{ matrix.artifact_name }}/andy-cli.exe
       #
       #     # Clean up certificate
       #     Remove-Item cert.pfx
 
       - name: Create zip
         run: |
-          cd publish/andy-cli-windows-x64
-          Compress-Archive -Path * -DestinationPath ../andy-cli-windows-x64.zip
+          cd publish/${{ matrix.artifact_name }}
+          Compress-Archive -Path * -DestinationPath ../${{ matrix.artifact_name }}.zip
           cd ..
-          Get-FileHash andy-cli-windows-x64.zip -Algorithm SHA256 | Select-Object Hash | Out-File andy-cli-windows-x64.zip.sha256
+          Get-FileHash ${{ matrix.artifact_name }}.zip -Algorithm SHA256 | Select-Object Hash | Out-File ${{ matrix.artifact_name }}.zip.sha256
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: andy-cli-windows-x64
+          name: ${{ matrix.artifact_name }}
           path: |
-            publish/andy-cli-windows-x64.zip
-            publish/andy-cli-windows-x64.zip.sha256
+            publish/${{ matrix.artifact_name }}.zip
+            publish/${{ matrix.artifact_name }}.zip.sha256
 
   release:
     name: Create GitHub Release
@@ -290,6 +297,7 @@ jobs:
 
           **Windows:**
           - x64: `andy-cli-windows-x64.zip`
+          - ARM64: `andy-cli-windows-arm64.zip`
 
           ### Installation
 

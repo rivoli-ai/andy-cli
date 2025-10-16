@@ -7,7 +7,7 @@ Your Andy CLI project now has a complete automated release system set up!
 ### 1. GitHub Actions Workflows
 
 **`.github/workflows/release.yml`** - Standard unsigned releases
-- Builds for 5 platforms (macOS ARM64/x64, Linux x64/ARM64, Windows x64)
+- Builds for 6 platforms (macOS ARM64/x64, Linux x64/ARM64, Windows x64/ARM64)
 - Runs tests before building
 - Creates trimmed, single-file binaries (~29MB each)
 - Generates checksums
@@ -63,7 +63,7 @@ Your Andy CLI project now has a complete automated release system set up!
 
 5. **Check the Release**
    - Go to Releases tab
-   - See your new release with 5 platform binaries
+   - See your new release with 6 platform binaries
    - Edit to add release notes
 
 ### Option 2: Test Locally First
@@ -88,6 +88,7 @@ Each release includes:
 - `andy-cli-linux-x64.tar.gz` - Linux 64-bit
 - `andy-cli-linux-arm64.tar.gz` - Linux ARM
 - `andy-cli-windows-x64.zip` - Windows 64-bit
+- `andy-cli-windows-arm64.zip` - Windows ARM64
 
 ### Checksums
 - SHA256 checksums for all binaries
@@ -100,7 +101,7 @@ Each release includes:
 ## Key Features
 
 ✅ **Manual Control** - Release when YOU want, not on every merge
-✅ **Multi-Platform** - 5 platforms in one click
+✅ **Multi-Platform** - 6 platforms in one click
 ✅ **Tested** - Tests run before building
 ✅ **Small Binaries** - Trimmed to ~29MB (was 98MB)
 ✅ **Checksums** - SHA256 for security
@@ -161,7 +162,7 @@ See `RELEASE.md` for detailed setup instructions.
 ## Summary
 
 You now have a **professional, automated release system** that:
-- Builds 5 platforms automatically
+- Builds 6 platforms automatically
 - Runs tests before releasing
 - Creates professional GitHub releases
 - Is triggered manually (you control timing)

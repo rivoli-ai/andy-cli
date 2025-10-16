@@ -35,6 +35,9 @@ jobs:
           - os: windows-latest
             runtime: win-x64
             artifact_name: andy-cli-windows-x64
+          - os: windows-latest
+            runtime: win-arm64
+            artifact_name: andy-cli-windows-arm64
 
     steps:
       - name: Checkout code
@@ -138,6 +141,7 @@ jobs:
 
           **Windows:**
           - x64: `andy-cli-windows-x64.zip`
+          - ARM64: `andy-cli-windows-arm64.zip`
 
           ### Installation
 

@@ -22,6 +22,7 @@ declare -a PLATFORMS=(
     "linux-x64:andy-cli-linux-x64"
     "linux-arm64:andy-cli-linux-arm64"
     "win-x64:andy-cli-windows-x64"
+    "win-arm64:andy-cli-windows-arm64"
 )
 
 # Build each platform
