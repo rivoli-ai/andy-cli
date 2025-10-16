@@ -34,6 +34,11 @@
     <Compile Include="Commands/ModelCommandTests.cs" />
     <Compile Include="Services/ProviderDetectionServiceTests.cs" />
     <Compile Include="ModelCommandProviderSwitchTests.cs" />
+    <!-- Tool rendering tests -->
+    <Compile Include="Widgets/ToolRenderingTestBase.cs" />
+    <Compile Include="Widgets/FileSystemToolRenderingTests.cs" />
+    <Compile Include="Widgets/TextAndSystemToolRenderingTests.cs" />
+    <Compile Include="Widgets/ProductivityAndCliToolRenderingTests.cs" />
   </ItemGroup>
 
 </Project>

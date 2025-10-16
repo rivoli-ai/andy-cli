@@ -1891,10 +1891,16 @@ namespace Andy.Cli.Widgets
             // Try to provide more specific summaries based on tool type
             if (_toolName.Contains("list_directory") || _toolName.Contains("ListDirectory"))
             {
+                // Check for error first, before checking details
+                if (!_isSuccess && !string.IsNullOrEmpty(_result))
+                    return FirstLine(_result);
+
                 if (_details.Any())
                     return _details.First();
                 else if (!string.IsNullOrEmpty(_result))
+                {
                     return ExtractDirectoryStats(_result);
+                }
                 else if (!string.IsNullOrEmpty(_filePath))
                     return $"Listed {GetShortPath(_filePath)}";
                 else
@@ -1902,10 +1908,16 @@ namespace Andy.Cli.Widgets
             }
             else if (_toolName.Contains("code_index") || _toolName.Contains("CodeIndex"))
             {
+                // Check for error first, before checking details
+                if (!_isSuccess && !string.IsNullOrEmpty(_result))
+                    return FirstLine(_result);
+
                 if (_details.Any())
                     return _details.First();
                 else if (!string.IsNullOrEmpty(_result))
+                {
                     return ExtractCodeIndexStats(_result);
+                }
                 else
                     return ""; // Don't show generic message
             }
@@ -1913,6 +1925,9 @@ namespace Andy.Cli.Widgets
             {
                 if (!string.IsNullOrEmpty(_result))
                 {
+                    // Check if this is an error result (failed execution)
+                    if (!_isSuccess)
+                        return FirstLine(_result);
                     var lines = _result.Split('\n').Length;
                     return $"Command executed ({lines} lines output)";
                 }
@@ -1947,6 +1962,12 @@ namespace Andy.Cli.Widgets
 
         private string ExtractDirectoryStats(string result)
         {
+            // Check for empty directory message
+            if (result.Contains("empty", StringComparison.OrdinalIgnoreCase))
+            {
+                return result; // Return the message as-is (e.g., "Directory is empty")
+            }
+
             // Try to extract meaningful stats from result
             var fileCount = System.Text.RegularExpressions.Regex.Matches(result, @"""type"":\s*""file""").Count;
             var dirCount = System.Text.RegularExpressions.Regex.Matches(result, @"""type"":\s*""directory""").Count;
@@ -2134,6 +2155,26 @@ namespace Andy.Cli.Widgets
                 return "current directory";
             }
             else if (_toolName.Contains("read_file", StringComparison.OrdinalIgnoreCase))
+            {
+                // Look for file path parameter
+                var fileParam = realParams.FirstOrDefault(p => p.Key.Contains("file", StringComparison.OrdinalIgnoreCase) ||
+                                                               p.Key.Contains("path", StringComparison.OrdinalIgnoreCase));
+                if (fileParam.Value != null)
+                {
+                    return GetShortPath(fileParam.Value.ToString() ?? "");
+                }
+            }
+            else if (_toolName.Contains("write_file", StringComparison.OrdinalIgnoreCase))
+            {
+                // Look for file path parameter (don't show content for privacy)
+                var fileParam = realParams.FirstOrDefault(p => p.Key.Contains("file", StringComparison.OrdinalIgnoreCase) ||
+                                                               p.Key.Contains("path", StringComparison.OrdinalIgnoreCase));
+                if (fileParam.Value != null)
+                {
+                    return GetShortPath(fileParam.Value.ToString() ?? "");
+                }
+            }
+            else if (_toolName.Contains("delete_file", StringComparison.OrdinalIgnoreCase))
             {
                 // Look for file path parameter
                 var fileParam = realParams.FirstOrDefault(p => p.Key.Contains("file", StringComparison.OrdinalIgnoreCase) ||
