@@ -11,7 +11,7 @@ namespace Andy.Cli.Widgets
     public sealed class KeyHintsBar
     {
         private readonly List<(string key, string action)> _hints = new();
-        private DL.Rgb24? _bg = null; // Transparent background
+        private DL.Rgb24 _bg = new DL.Rgb24(15, 15, 15);
         private DL.Rgb24 _fg = new DL.Rgb24(180, 180, 180);
         private DL.Rgb24 _key = new DL.Rgb24(200, 200, 80);
 
@@ -34,7 +34,7 @@ namespace Andy.Cli.Widgets
             int y = Math.Max(0, viewport.Height - 1);
             int x = 0; int w = viewport.Width;
             b.PushClip(new DL.ClipPush(x, y, w, 1));
-            // No background rectangle - use transparent terminal background
+            b.DrawRect(new DL.Rect(x, y, w, 1, _bg));
             int cx = x + 1;
             for (int i = 0; i < _hints.Count && cx < x + w - 1; i++)
             {
