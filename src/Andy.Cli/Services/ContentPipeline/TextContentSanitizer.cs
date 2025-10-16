@@ -32,9 +32,13 @@ public class TextContentSanitizer : IContentSanitizer
     private TextBlock SanitizeTextBlock(TextBlock block)
     {
         var content = block.Content;
+
+        // Normalize line endings first - convert all \r\n and \r to \n
+        content = content?.Replace("\r\n", "\n").Replace("\r", "\n") ?? "";
+
         // Redact any internal tool disclosure before other processing
         content = RedactToolMentions(content);
-        
+
         // Remove empty JSON blocks
         content = EmptyJsonPattern.Replace(content, "");
         content = EmptyTripleJsonPattern.Replace(content, "");

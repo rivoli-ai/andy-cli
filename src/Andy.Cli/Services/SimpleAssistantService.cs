@@ -322,7 +322,7 @@ public class SimpleAssistantService : IDisposable
             {
                 technicalSummary += $" | Status: Failed - {result.StopReason}";
             }
-            _feed.AddMarkdownRich(Commands.ConsoleColors.Metadata(technicalSummary));
+            _feed.AddMarkdown(Commands.ConsoleColors.Metadata(technicalSummary));
 
             // Add blank line after technical summary to separate from response
             _feed.AddMarkdownRich("");
@@ -353,7 +353,7 @@ public class SimpleAssistantService : IDisposable
                 pipeline.AddRawContent($"[No response received. StopReason: {result.StopReason}]");
             }
 
-            // Add blank line before context stats for separation
+            // Add blank line after response content to separate from context
             pipeline.AddSystemMessage("", SystemMessageType.Context, priority: 1999);
 
             // Show context stats with actual duration (with metadata color)

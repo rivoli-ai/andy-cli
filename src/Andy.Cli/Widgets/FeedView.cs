@@ -1274,7 +1274,7 @@ namespace Andy.Cli.Widgets
 
         public int MeasureLineCount(int width)
         {
-            return 3; // One line indicator + 2 blank lines for spacing
+            return 1; // Just the indicator line, no built-in spacing
         }
 
         public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
