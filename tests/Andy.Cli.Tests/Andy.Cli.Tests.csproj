@@ -39,6 +39,8 @@
     <Compile Include="Widgets/FileSystemToolRenderingTests.cs" />
     <Compile Include="Widgets/TextAndSystemToolRenderingTests.cs" />
     <Compile Include="Widgets/ProductivityAndCliToolRenderingTests.cs" />
+    <!-- Markdown rendering tests -->
+    <Compile Include="Widgets/MarkdownRenderingTests.cs" />
   </ItemGroup>
 
 </Project>
