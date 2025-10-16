@@ -43,4 +43,7 @@ public static class ConsoleColors
     public static string WarningPrefix(string message) => $"{Yellow}Warning:{Reset} {message}";
     public static string NotePrefix(string message) => $"{Cyan}Note:{Reset} {message}";
     public static string SuccessPrefix(string message) => $"{Green}Success:{Reset} {message}";
+
+    // Metadata/technical information (timing, stats, etc.)
+    public static string Metadata(string text) => $"{Gray}{text}{Reset}";
 }

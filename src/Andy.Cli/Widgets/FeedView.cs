@@ -332,8 +332,7 @@ namespace Andy.Cli.Widgets
                         {
                             runningTool.SetResult(result);
                         }
-                        // Add spacing after tool execution
-                        _items.Add(new SpacerItem(1));
+                        // Don't add spacing here - spacing is managed by the caller
                         break;
                     }
                 }

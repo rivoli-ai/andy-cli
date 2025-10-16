@@ -316,14 +316,16 @@ public class SimpleAssistantService : IDisposable
             // Clear the processing indicator
             _feed.ClearProcessingIndicator();
 
-            // Add technical summary of what happened
+            // Add blank line before technical summary
+            _feed.AddMarkdownRich("");
+
+            // Add technical summary of what happened with metadata color
             var technicalSummary = $"Processing completed in {duration.TotalSeconds:F1}s | Model: {_modelName} | Provider: {_providerName}";
             if (!result.Success)
             {
                 technicalSummary += $" | Status: Failed - {result.StopReason}";
             }
-            _feed.AddMarkdownRich(technicalSummary);
-            _feed.AddMarkdownRich(""); // Blank line after technical info
+            _feed.AddMarkdownRich(Commands.ConsoleColors.Metadata(technicalSummary));
 
             _logger?.LogInformation("Agent result - Success: {Success}, Response: '{Response}', StopReason: {StopReason}",
                 result.Success, result.Response, result.StopReason);
@@ -351,10 +353,10 @@ public class SimpleAssistantService : IDisposable
                 pipeline.AddRawContent($"[No response received. StopReason: {result.StopReason}]");
             }
 
-            // Show context stats with actual duration
+            // Show context stats with actual duration (with metadata color and proper spacing)
             var stats = GetContextStats();
             pipeline.AddSystemMessage("", SystemMessageType.Context, priority: 1999);
-            var contextInfo = $"Context: {stats.TurnCount} turns, ~{stats.EstimatedTokens} tokens, Duration: {duration.TotalSeconds:F1}s";
+            var contextInfo = Commands.ConsoleColors.Metadata($"Context: {stats.TurnCount} turns, ~{stats.EstimatedTokens} tokens, Duration: {duration.TotalSeconds:F1}s");
             pipeline.AddSystemMessage(contextInfo, SystemMessageType.Context, priority: 2000);
 
             await pipeline.FinalizeAsync();
