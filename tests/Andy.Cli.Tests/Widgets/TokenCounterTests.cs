@@ -15,13 +15,13 @@ public class TokenCounterTests
         // Act
         var width = counter.GetWidth();
 
-        // Assert - Format should be: "Total: 638→512,493 (513,131)"
-        var expectedText = "Total: 638→512,493 (513,131)";
+        // Assert - Format should be: "Total: 512,493→638 (513,131)"
+        var expectedText = "Total: 512,493→638 (513,131)";
         Assert.Equal(expectedText.Length, width);
     }
 
     [Fact]
-    public void TokenDisplay_OutputTokensFirst_ThenInputTokens()
+    public void TokenDisplay_InputTokensFirst_ThenOutputTokens()
     {
         // Arrange
         var counter = new TokenCounter();
@@ -30,9 +30,9 @@ public class TokenCounterTests
         // Act
         var width = counter.GetWidth();
 
-        // Assert - Format should show output (500) before input (100,000)
-        // Expected: "Total: 500→100,000 (100,500)"
-        var expectedText = "Total: 500→100,000 (100,500)";
+        // Assert - Format should show input (100,000) before output (500)
+        // Expected: "Total: 100,000→500 (100,500)"
+        var expectedText = "Total: 100,000→500 (100,500)";
         Assert.Equal(expectedText.Length, width);
     }
 
@@ -47,8 +47,8 @@ public class TokenCounterTests
         var width = counter.GetWidth();
 
         // Assert - Should format with thousands separators
-        // Expected: "Total: 89,012→1,234,567 (1,323,579)"
-        var expectedText = "Total: 89,012→1,234,567 (1,323,579)";
+        // Expected: "Total: 1,234,567→89,012 (1,323,579)"
+        var expectedText = "Total: 1,234,567→89,012 (1,323,579)";
         Assert.Equal(expectedText.Length, width);
     }
 
@@ -66,8 +66,8 @@ public class TokenCounterTests
         var width = counter.GetWidth();
 
         // Assert - Total should be 6000 input + 600 output = 6600
-        // Expected: "Total: 600→6,000 (6,600)"
-        var expectedText = "Total: 600→6,000 (6,600)";
+        // Expected: "Total: 6,000→600 (6,600)"
+        var expectedText = "Total: 6,000→600 (6,600)";
         Assert.Equal(expectedText.Length, width);
     }
 
