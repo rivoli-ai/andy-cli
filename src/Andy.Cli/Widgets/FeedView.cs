@@ -686,6 +686,7 @@ namespace Andy.Cli.Widgets
         /// <inheritdoc />
         public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
+            var theme = Themes.Theme.Current;
             bool inCode = false;
             int printed = 0;
             for (int i = startLine; i < _lines.Length && printed < maxLines; i++)
@@ -700,7 +701,7 @@ namespace Andy.Cli.Widgets
                 else if (inCode) { fg = new DL.Rgb24(180, 180, 180); }
                 else { fg = new DL.Rgb24(220, 220, 220); }
                 string t = line.Length > width ? line.Substring(0, width) : line;
-                b.DrawText(new DL.TextRun(x, y + printed, t, fg, null, attr));
+                b.DrawText(new DL.TextRun(x, y + printed, t, fg, theme.Background, attr));
                 printed++;
             }
         }
