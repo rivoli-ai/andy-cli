@@ -242,10 +242,7 @@ public class SimpleAssistantService : IDisposable
                                 resultSummary = isSuccess ? "Directory listed" : "Directory operation failed";
                             }
                         }
-                        else if (baseToolName.Contains("code_index"))
-                        {
-                            resultSummary = isSuccess ? "Code repository indexed" : "Failed to index repository";
-                        }
+                        // code_index tool result is now handled by UiUpdatingToolExecutor and available in executionInfo.Result
                     }
                 }
 

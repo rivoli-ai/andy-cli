@@ -1506,39 +1506,49 @@ namespace Andy.Cli.Widgets
             {
                 try
                 {
-                    // Parse more detailed statistics from result
-                    var indexedMatch = System.Text.RegularExpressions.Regex.Match(result, @"Indexed\s+(\d+)\s+code\s+files\s+out\s+of\s+(\d+)\s+total");
-                    if (indexedMatch.Success)
+                    // Check if the result is already a detailed message (from UiUpdatingToolExecutor)
+                    if (!string.IsNullOrEmpty(result) &&
+                        (result.StartsWith("Found ") || result.StartsWith("Structure indexed:") || result.StartsWith("Retrieved hierarchy")))
                     {
-                        _details.Add($"Indexed {indexedMatch.Groups[1].Value} code files");
-                        _details.Add($"Total {indexedMatch.Groups[2].Value} files in repository");
+                        // Use it directly - it's already detailed from UiUpdatingToolExecutor
+                        _details.Add(result);
                     }
                     else
                     {
-                        // Look for file counts
-                        var fileMatch = System.Text.RegularExpressions.Regex.Match(result, @"(\d+)\s+files?");
-                        var codeFileMatch = System.Text.RegularExpressions.Regex.Match(result, @"(\d+)\s+code\s+files?");
-                        var classMatch = System.Text.RegularExpressions.Regex.Match(result, @"(\d+)\s+class");
-                        var methodMatch = System.Text.RegularExpressions.Regex.Match(result, @"(\d+)\s+method");
-                        var lineMatch = System.Text.RegularExpressions.Regex.Match(result, @"(\d+)\s+lines?");
-
-                        var stats = new List<string>();
-                        if (codeFileMatch.Success)
-                            stats.Add($"{codeFileMatch.Groups[1].Value} code files");
-                        else if (fileMatch.Success)
-                            stats.Add($"{fileMatch.Groups[1].Value} files");
-
-                        if (classMatch.Success) stats.Add($"{classMatch.Groups[1].Value} classes");
-                        if (methodMatch.Success) stats.Add($"{methodMatch.Groups[1].Value} methods");
-                        if (lineMatch.Success) stats.Add($"{lineMatch.Groups[1].Value} lines");
-
-                        if (stats.Any())
+                        // Legacy regex parsing for backward compatibility
+                        var indexedMatch = System.Text.RegularExpressions.Regex.Match(result, @"Indexed\s+(\d+)\s+code\s+files\s+out\s+of\s+(\d+)\s+total");
+                        if (indexedMatch.Success)
                         {
-                            _details.Add($"Indexed: {string.Join(", ", stats)}");
+                            _details.Add($"Indexed {indexedMatch.Groups[1].Value} code files");
+                            _details.Add($"Total {indexedMatch.Groups[2].Value} files in repository");
                         }
                         else
                         {
-                            _details.Add("Code repository indexed");
+                            // Look for file counts
+                            var fileMatch = System.Text.RegularExpressions.Regex.Match(result, @"(\d+)\s+files?");
+                            var codeFileMatch = System.Text.RegularExpressions.Regex.Match(result, @"(\d+)\s+code\s+files?");
+                            var classMatch = System.Text.RegularExpressions.Regex.Match(result, @"(\d+)\s+class");
+                            var methodMatch = System.Text.RegularExpressions.Regex.Match(result, @"(\d+)\s+method");
+                            var lineMatch = System.Text.RegularExpressions.Regex.Match(result, @"(\d+)\s+lines?");
+
+                            var stats = new List<string>();
+                            if (codeFileMatch.Success)
+                                stats.Add($"{codeFileMatch.Groups[1].Value} code files");
+                            else if (fileMatch.Success)
+                                stats.Add($"{fileMatch.Groups[1].Value} files");
+
+                            if (classMatch.Success) stats.Add($"{classMatch.Groups[1].Value} classes");
+                            if (methodMatch.Success) stats.Add($"{methodMatch.Groups[1].Value} methods");
+                            if (lineMatch.Success) stats.Add($"{lineMatch.Groups[1].Value} lines");
+
+                            if (stats.Any())
+                            {
+                                _details.Add($"Indexed: {string.Join(", ", stats)}");
+                            }
+                            else
+                            {
+                                _details.Add("Code repository indexed");
+                            }
                         }
                     }
 

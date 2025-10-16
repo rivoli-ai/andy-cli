@@ -74,28 +74,6 @@ namespace Andy.Cli.Services
             // Execute the actual tool (parameters cannot be null here based on interface contract)
             var result = await _innerExecutor.ExecuteAsync(toolId, parameters ?? new Dictionary<string, object?>(), context);
 
-            // DEBUG: Write the raw result to file
-            try
-            {
-                var debugInfo = $"[{DateTime.Now:HH:mm:ss.fff}] Tool {toolId} raw result:\n";
-                debugInfo += $"  IsSuccessful: {result.IsSuccessful}\n";
-                debugInfo += $"  Message: '{result.Message}'\n";
-                debugInfo += $"  Data type: {result.Data?.GetType().Name ?? "null"}\n";
-                if (result.Data != null)
-                {
-                    debugInfo += $"  Data ToString(): '{result.Data}'\n";
-                    if (result.Data is Dictionary<string, object?> dict)
-                    {
-                        foreach (var kvp in dict.Take(10))
-                        {
-                            debugInfo += $"    {kvp.Key}: {kvp.Value}\n";
-                        }
-                    }
-                }
-                System.IO.File.AppendAllText("/tmp/tool_executor_debug.txt", debugInfo + "\n");
-            }
-            catch { }
-
             // Track completion and update UI with result
             // The toolId parameter is the actual tool name (e.g., "datetime_tool")
             // We need to find the UI ID that was registered for this execution
@@ -181,13 +159,122 @@ namespace Andy.Cli.Services
                         }
                         else if (toolId.Contains("code_index"))
                         {
+                            // Extract detailed information about the code index query
+                            var queryType = dataDict.GetValueOrDefault("query_type")?.ToString() ?? "unknown";
+
                             if (dataDict.TryGetValue("data", out var data) && data != null)
                             {
-                                resultMessage = $"Indexed: {data}";
+                                // Try to convert to dictionary if it's not already
+                                Dictionary<string, object?>? dataContent = data as Dictionary<string, object?>;
+
+                                if (dataContent == null && data is System.Collections.IDictionary dict)
+                                {
+                                    dataContent = new Dictionary<string, object?>();
+                                    foreach (var key in dict.Keys)
+                                    {
+                                        dataContent[key.ToString() ?? ""] = dict[key];
+                                    }
+                                }
+
+                                if (dataContent != null)
+                                {
+
+                                    // Different result formats based on query type
+                                    switch (queryType)
+                                {
+                                    case "structure":
+                                        // Structure query: show namespace and file counts
+                                        var scope = dataContent.GetValueOrDefault("scope")?.ToString() ?? "all";
+                                        var structure = dataContent.GetValueOrDefault("structure");
+
+                                        // Handle ProjectStructure type directly
+                                        if (structure != null)
+                                        {
+                                            var structureType = structure.GetType();
+                                            var namespaceCount = 0;
+                                            var fileCount = 0;
+
+                                            // Try to get Namespaces property
+                                            var namespacesProp = structureType.GetProperty("Namespaces");
+                                            if (namespacesProp != null)
+                                            {
+                                                var namespaces = namespacesProp.GetValue(structure);
+                                                if (namespaces is System.Collections.IList nsList)
+                                                {
+                                                    namespaceCount = nsList.Count;
+                                                }
+                                            }
+
+                                            // Try to get Files property
+                                            var filesProp = structureType.GetProperty("Files");
+                                            if (filesProp != null)
+                                            {
+                                                var files = filesProp.GetValue(structure);
+                                                if (files is System.Collections.IList filesList)
+                                                {
+                                                    fileCount = filesList.Count;
+                                                }
+                                            }
+
+                                            resultMessage = $"Structure indexed: {namespaceCount} namespaces, {fileCount} files (scope: {scope})";
+                                        }
+                                        else
+                                        {
+                                            resultMessage = $"Structure indexed for scope: {scope}";
+                                        }
+                                        break;
+
+                                    case "symbols":
+                                        // Symbol search: show count and query pattern
+                                        var pattern = dataContent.GetValueOrDefault("query")?.ToString() ?? "*";
+                                        var symbolScope = dataContent.GetValueOrDefault("scope")?.ToString() ?? "all";
+                                        var count = 0;
+
+                                        if (dataContent.TryGetValue("count", out var countObj) && countObj != null)
+                                        {
+                                            count = Convert.ToInt32(countObj);
+                                        }
+
+                                        resultMessage = $"Found {count} symbols matching '{pattern}' (scope: {symbolScope})";
+                                        break;
+
+                                    case "references":
+                                        // Reference search: show count and symbol name
+                                        var symbol = dataContent.GetValueOrDefault("symbol")?.ToString() ?? "unknown";
+                                        var refScope = dataContent.GetValueOrDefault("scope")?.ToString() ?? "all";
+                                        var refCount = 0;
+
+                                        if (dataContent.TryGetValue("count", out var refCountObj) && refCountObj != null)
+                                        {
+                                            refCount = Convert.ToInt32(refCountObj);
+                                        }
+
+                                        resultMessage = $"Found {refCount} references to '{symbol}' (scope: {refScope})";
+                                        break;
+
+                                    case "hierarchy":
+                                        // Class hierarchy: show class name
+                                        var className = dataContent.GetValueOrDefault("className")?.ToString() ?? "unknown";
+                                        resultMessage = $"Retrieved hierarchy for class '{className}'";
+                                        break;
+
+                                    default:
+                                        resultMessage = $"Code index query completed: {queryType}";
+                                        break;
+                                    }
+                                }
                             }
-                            else if (dataDict.TryGetValue("query_type", out var queryType))
+
+                            if (string.IsNullOrEmpty(resultMessage))
                             {
-                                resultMessage = $"Query type: {queryType}";
+                                if (dataDict.TryGetValue("query_type", out var qt))
+                                {
+                                    resultMessage = $"Code index query: {qt}";
+                                }
+                                else
+                                {
+                                    resultMessage = "Code repository indexed";
+                                }
                             }
                         }
                         else if (toolId.Contains("list_directory"))
@@ -238,9 +325,9 @@ namespace Andy.Cli.Services
                                     string.Join(", ", dataDict.Take(5).Select(kvp => $"{kvp.Key}={kvp.Value}")));
                             }
                         }
-                        else
+                        else if (string.IsNullOrEmpty(resultMessage))
                         {
-                            // Generic extraction for other tools
+                            // Generic extraction for other tools (only if no result message set yet)
                             string[] resultKeys = { "output", "result", "data", "formatted", "content", "value", "message" };
                             foreach (var key in resultKeys)
                             {
