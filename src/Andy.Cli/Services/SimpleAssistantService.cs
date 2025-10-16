@@ -14,6 +14,7 @@ public class SimpleAssistantService : IDisposable
 {
     private readonly SimpleAgent _agent;
     private readonly FeedView _feed;
+    private readonly TokenCounter? _tokenCounter;
     private readonly ILogger<SimpleAssistantService>? _logger;
     private readonly string _modelName;
     private readonly string _providerName;
@@ -29,9 +30,11 @@ public class SimpleAssistantService : IDisposable
         FeedView feed,
         string modelName,
         string providerName,
+        TokenCounter? tokenCounter = null,
         ILogger<SimpleAssistantService>? logger = null)
     {
         _feed = feed;
+        _tokenCounter = tokenCounter;
         _logger = logger;
         _modelName = modelName;
         _providerName = providerName;
@@ -161,11 +164,17 @@ public class SimpleAssistantService : IDisposable
             var userMessageLength = userMessage.Length;
             _lastInputTokens = EstimateTokens(contextLength + userMessageLength);
 
+            // Update token counter with input tokens immediately
+            _tokenCounter?.AddTokens(_lastInputTokens, 0);
+
             // Process message through SimpleAgent
             var result = await _agent.ProcessMessageAsync(userMessage, cancellationToken);
 
             // Estimate output tokens from response
             _lastOutputTokens = EstimateTokens(result.Response?.Length ?? 0);
+
+            // Update token counter with output tokens
+            _tokenCounter?.AddTokens(0, _lastOutputTokens);
 
             // Complete any running tools
             var toolsToComplete = _runningTools.ToList();

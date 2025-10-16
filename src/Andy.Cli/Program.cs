@@ -294,6 +294,7 @@ class Program
                     feed,
                     currentModel,
                     currentProvider,
+                    tokenCounter,
                     logger);
 
                 var providerUrl = GetProviderUrl(currentProvider);
@@ -402,6 +403,7 @@ class Program
                                         feed,
                                         newModel,
                                         newProvider,
+                                        tokenCounter,
                                         logger);
                                 }
 
@@ -859,6 +861,7 @@ class Program
                                                     feed,
                                                     newModel,
                                                     newProvider,
+                                                    tokenCounter,
                                                     logger);
                                             }
 
@@ -979,9 +982,7 @@ class Program
                                     // Process message with tool support (streaming disabled until properly implemented)
                                     var response = await aiService.ProcessMessageAsync(cmd, enableStreaming: false);
 
-                                    // Get context stats for token counting
-                                    var stats = aiService.GetContextStats();
-                                    tokenCounter.AddTokens(stats.LastInputTokens, stats.LastOutputTokens);
+                                    // Token counter is now updated in real-time by SimpleAssistantService
 
                                     statusMessage.SetMessage("Ready for next question", animated: false);
                                 }
