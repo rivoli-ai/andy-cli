@@ -819,7 +819,6 @@ namespace Andy.Cli.Widgets
         /// <inheritdoc />
         public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
-            var bg = new DL.Rgb24(20, 20, 30);
             var fg = new DL.Rgb24(200, 200, 220);
             var lineNumColor = new DL.Rgb24(120, 140, 160); // Subtle blue-gray for line numbers
             var lineNumSeparatorColor = new DL.Rgb24(80, 90, 100); // Darker separator
@@ -828,9 +827,8 @@ namespace Andy.Cli.Widgets
             int contentX = x + lineNumWidth;
             int contentWidth = Math.Max(1, width - lineNumWidth);
 
-            // background block (includes line number area)
+            // No background - use transparent terminal background
             b.PushClip(new DL.ClipPush(x - 1, y, width + 2, maxLines));
-            b.DrawRect(new DL.Rect(x - 1, y, width + 2, maxLines, bg));
 
             int currentVisualLine = 0;
 
@@ -866,8 +864,8 @@ namespace Andy.Cli.Widgets
                     if (logLine == logicalLineIndex && visualLineOffset > 0) continue;
 
                     string lineNumText = lineNumber.ToString().PadLeft(3);
-                    b.DrawText(new DL.TextRun(x, y + renderedLines, lineNumText, lineNumColor, bg, DL.CellAttrFlags.None));
-                    b.DrawText(new DL.TextRun(x + 3, y + renderedLines, " ", lineNumSeparatorColor, bg, DL.CellAttrFlags.None));
+                    b.DrawText(new DL.TextRun(x, y + renderedLines, lineNumText, lineNumColor, null, DL.CellAttrFlags.None));
+                    b.DrawText(new DL.TextRun(x + 3, y + renderedLines, " ", lineNumSeparatorColor, null, DL.CellAttrFlags.None));
                     renderedLines++;
                 }
                 else
@@ -886,15 +884,15 @@ namespace Andy.Cli.Widgets
                         if (wrapIndex == 0)
                         {
                             string lineNumText = lineNumber.ToString().PadLeft(3);
-                            b.DrawText(new DL.TextRun(x, y + renderedLines, lineNumText, lineNumColor, bg, DL.CellAttrFlags.None));
+                            b.DrawText(new DL.TextRun(x, y + renderedLines, lineNumText, lineNumColor, null, DL.CellAttrFlags.None));
                         }
                         else
                         {
                             // Blank space for continuation lines
-                            b.DrawText(new DL.TextRun(x, y + renderedLines, "   ", lineNumColor, bg, DL.CellAttrFlags.None));
+                            b.DrawText(new DL.TextRun(x, y + renderedLines, "   ", lineNumColor, null, DL.CellAttrFlags.None));
                         }
 
-                        b.DrawText(new DL.TextRun(x + 3, y + renderedLines, " ", lineNumSeparatorColor, bg, DL.CellAttrFlags.None));
+                        b.DrawText(new DL.TextRun(x + 3, y + renderedLines, " ", lineNumSeparatorColor, null, DL.CellAttrFlags.None));
 
                         // Render code content with syntax highlighting
                         int cx = contentX;
@@ -905,7 +903,7 @@ namespace Andy.Cli.Widgets
                             if (t.Length > (contentX + contentWidth - cx)) t = t.Substring(0, (contentX + contentWidth - cx));
                             if (t.Length > 0)
                             {
-                                b.DrawText(new DL.TextRun(cx, y + renderedLines, t, color, bg, attr));
+                                b.DrawText(new DL.TextRun(cx, y + renderedLines, t, color, null, attr));
                                 cx += t.Length;
                             }
                         }

@@ -18,7 +18,7 @@ namespace Andy.Cli.Widgets
         private int _animSpeed = 2;     // lines per frame
 
         private DL.Rgb24 _fg = new DL.Rgb24(220, 220, 220);
-        private DL.Rgb24 _bg = new DL.Rgb24(0, 0, 0);
+        private DL.Rgb24? _bg = null; // Transparent background
         private DL.Rgb24 _h = new DL.Rgb24(200, 200, 80);
 
         /// <summary>When true and not scrolled up, keep view pinned to bottom.</summary>
@@ -66,7 +66,7 @@ namespace Andy.Cli.Widgets
         {
             int x = (int)rect.X, y = (int)rect.Y, w = (int)rect.Width, h = (int)rect.Height;
             b.PushClip(new DL.ClipPush(x, y, w, h));
-            b.DrawRect(new DL.Rect(x, y, w, h, _bg));
+            // No background rectangle - use transparent terminal background
             var lines = _linesCache;
             int total = lines.Length;
             int visible = Math.Min(h, total);
@@ -89,19 +89,19 @@ namespace Andy.Cli.Widgets
                 if (line.StartsWith("```")) { inCode = !inCode; continue; }
                 if (inCode)
                 {
-                    DrawLine(line, new DL.Rgb24(180, 180, 180), _bg, x + 1, cy++, w - 2, b);
+                    DrawLine(line, new DL.Rgb24(180, 180, 180), null, x + 1, cy++, w - 2, b);
                     continue;
                 }
                 if (line.StartsWith("# "))
-                { DrawLine(line.Substring(2), _h, _bg, x + 1, cy++, w - 2, b, DL.CellAttrFlags.Bold); continue; }
+                { DrawLine(line.Substring(2), _h, null, x + 1, cy++, w - 2, b, DL.CellAttrFlags.Bold); continue; }
                 if (line.StartsWith("## "))
-                { DrawLine(line.Substring(3), _h, _bg, x + 1, cy++, w - 2, b, DL.CellAttrFlags.Bold); continue; }
-                DrawLine(line, _fg, _bg, x + 1, cy++, w - 2, b);
+                { DrawLine(line.Substring(3), _h, null, x + 1, cy++, w - 2, b, DL.CellAttrFlags.Bold); continue; }
+                DrawLine(line, _fg, null, x + 1, cy++, w - 2, b);
             }
             b.Pop();
         }
 
-        private static void DrawLine(string text, DL.Rgb24 fg, DL.Rgb24 bg, int x, int y, int w, DL.DisplayListBuilder b, DL.CellAttrFlags attr = DL.CellAttrFlags.None)
+        private static void DrawLine(string text, DL.Rgb24 fg, DL.Rgb24? bg, int x, int y, int w, DL.DisplayListBuilder b, DL.CellAttrFlags attr = DL.CellAttrFlags.None)
         {
             if (w <= 0) return;
             string t = text.Length > w ? text.Substring(0, w) : text;

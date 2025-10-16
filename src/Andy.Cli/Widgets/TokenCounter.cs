@@ -9,7 +9,7 @@ namespace Andy.Cli.Widgets
         private int _totalInputTokens;
         private int _totalOutputTokens;
         private DL.Rgb24 _fg = new DL.Rgb24(180, 180, 180);
-        private DL.Rgb24 _bg = new DL.Rgb24(0, 0, 0);
+        private DL.Rgb24? _bg = null; // Transparent background
         private DL.Rgb24 _accent = new DL.Rgb24(120, 200, 120);
 
         /// <summary>Add tokens to the running total.</summary>
