@@ -38,13 +38,13 @@ namespace Andy.Cli.Widgets
         public void RenderAt(int x, int y, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
             int totalTokens = _totalInputTokens + _totalOutputTokens;
-            string text = $"Total: {_totalInputTokens}→{_totalOutputTokens} ({totalTokens})";
+            string text = $"Total: {FormatNumber(_totalInputTokens)}→{FormatNumber(_totalOutputTokens)} ({FormatNumber(totalTokens)})";
 
             for (int i = 0; i < text.Length; i++)
             {
                 char ch = text[i];
-                var color = (ch == '→' || char.IsDigit(ch)) ? _accent : _fg;
-                var attrs = char.IsDigit(ch) ? DL.CellAttrFlags.Bold : DL.CellAttrFlags.None;
+                var color = (ch == '→' || char.IsDigit(ch) || ch == ',') ? _accent : _fg;
+                var attrs = (char.IsDigit(ch) || ch == ',') ? DL.CellAttrFlags.Bold : DL.CellAttrFlags.None;
 
                 b.DrawText(new DL.TextRun(x + i, y, ch.ToString(), color, _bg, attrs));
             }
@@ -54,7 +54,13 @@ namespace Andy.Cli.Widgets
         public int GetWidth()
         {
             int totalTokens = _totalInputTokens + _totalOutputTokens;
-            return $"Total: {_totalInputTokens}→{_totalOutputTokens} ({totalTokens})".Length;
+            return $"Total: {FormatNumber(_totalInputTokens)}→{FormatNumber(_totalOutputTokens)} ({FormatNumber(totalTokens)})".Length;
+        }
+
+        /// <summary>Format a number with thousands separators.</summary>
+        private static string FormatNumber(int number)
+        {
+            return number.ToString("N0");
         }
     }
 }
