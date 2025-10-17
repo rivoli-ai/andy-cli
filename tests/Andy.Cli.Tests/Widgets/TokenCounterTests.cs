@@ -10,13 +10,13 @@ public class TokenCounterTests
     {
         // Arrange
         var counter = new TokenCounter();
-        counter.AddTokens(inputTokens: 512493, outputTokens: 638);
+        counter.AddTokens(inputTokens: 638, outputTokens: 512493);
 
         // Act
         var width = counter.GetWidth();
 
-        // Assert - Format should be: "Total: 512,493→638 (513,131)"
-        var expectedText = "Total: 512,493→638 (513,131)";
+        // Assert - Format should be: "Total: 638→512,493 (513,131)"
+        var expectedText = "Total: 638→512,493 (513,131)";
         Assert.Equal(expectedText.Length, width);
     }
 
@@ -25,14 +25,14 @@ public class TokenCounterTests
     {
         // Arrange
         var counter = new TokenCounter();
-        counter.AddTokens(inputTokens: 100000, outputTokens: 500);
+        counter.AddTokens(inputTokens: 500, outputTokens: 100000);
 
         // Act
         var width = counter.GetWidth();
 
-        // Assert - Format should show input (100,000) before output (500)
-        // Expected: "Total: 100,000→500 (100,500)"
-        var expectedText = "Total: 100,000→500 (100,500)";
+        // Assert - Format should show input (500) before output (100,000)
+        // Expected: "Total: 500→100,000 (100,500)"
+        var expectedText = "Total: 500→100,000 (100,500)";
         Assert.Equal(expectedText.Length, width);
     }
 
@@ -41,14 +41,14 @@ public class TokenCounterTests
     {
         // Arrange
         var counter = new TokenCounter();
-        counter.AddTokens(inputTokens: 1234567, outputTokens: 89012);
+        counter.AddTokens(inputTokens: 89012, outputTokens: 1234567);
 
         // Act
         var width = counter.GetWidth();
 
         // Assert - Should format with thousands separators
-        // Expected: "Total: 1,234,567→89,012 (1,323,579)"
-        var expectedText = "Total: 1,234,567→89,012 (1,323,579)";
+        // Expected: "Total: 89,012→1,234,567 (1,323,579)"
+        var expectedText = "Total: 89,012→1,234,567 (1,323,579)";
         Assert.Equal(expectedText.Length, width);
     }
 
@@ -59,15 +59,15 @@ public class TokenCounterTests
         var counter = new TokenCounter();
 
         // Act
-        counter.AddTokens(inputTokens: 1000, outputTokens: 100);
-        counter.AddTokens(inputTokens: 2000, outputTokens: 200);
-        counter.AddTokens(inputTokens: 3000, outputTokens: 300);
+        counter.AddTokens(inputTokens: 100, outputTokens: 1000);
+        counter.AddTokens(inputTokens: 200, outputTokens: 2000);
+        counter.AddTokens(inputTokens: 300, outputTokens: 3000);
 
         var width = counter.GetWidth();
 
-        // Assert - Total should be 6000 input + 600 output = 6600
-        // Expected: "Total: 6,000→600 (6,600)"
-        var expectedText = "Total: 6,000→600 (6,600)";
+        // Assert - Total should be 600 input + 6000 output = 6600
+        // Expected: "Total: 600→6,000 (6,600)"
+        var expectedText = "Total: 600→6,000 (6,600)";
         Assert.Equal(expectedText.Length, width);
     }
 

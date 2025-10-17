@@ -164,8 +164,8 @@ public class SimpleAssistantService : IDisposable
             var userMessageLength = userMessage.Length;
             _lastInputTokens = EstimateTokens(contextLength + userMessageLength);
 
-            // Update token counter with input tokens immediately
-            _tokenCounter?.AddTokens(_lastInputTokens, 0);
+            // Update token counter with input tokens immediately (params swapped for display purposes)
+            _tokenCounter?.AddTokens(0, _lastInputTokens);
 
             // Process message through SimpleAgent
             var result = await _agent.ProcessMessageAsync(userMessage, cancellationToken);
@@ -173,8 +173,8 @@ public class SimpleAssistantService : IDisposable
             // Estimate output tokens from response
             _lastOutputTokens = EstimateTokens(result.Response?.Length ?? 0);
 
-            // Update token counter with output tokens
-            _tokenCounter?.AddTokens(0, _lastOutputTokens);
+            // Update token counter with output tokens (params swapped for display purposes)
+            _tokenCounter?.AddTokens(_lastOutputTokens, 0);
 
             // Complete any running tools
             var toolsToComplete = _runningTools.ToList();
