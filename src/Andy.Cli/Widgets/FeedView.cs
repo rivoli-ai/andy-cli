@@ -948,8 +948,8 @@ namespace Andy.Cli.Widgets
             var table = new Andy.Tui.Widgets.Table();
             table.SetColumns(_headers.ToArray());
 
-            // Calculate column widths based on actual content
-            var minWidths = new int[_headers.Count];
+            // Calculate desired column widths based on content
+            var desiredWidths = new int[_headers.Count];
             for (int i = 0; i < _headers.Count; i++)
             {
                 // Start with header width
@@ -964,11 +964,39 @@ namespace Andy.Cli.Widgets
                     }
                 }
 
-                // Add padding and clamp to reasonable min/max
-                minWidths[i] = Math.Clamp(maxWidth + 2, 8, 50);
+                // Add padding
+                desiredWidths[i] = maxWidth + 2;
             }
 
-            table.SetMinColumnWidths(minWidths);
+            // Account for table borders and separators (rough estimate: 3 chars per column + 2 for outer borders)
+            int tableOverhead = (_headers.Count * 3) + 2;
+            int availableWidth = Math.Max(10, width - tableOverhead);
+
+            // Calculate actual column widths
+            int totalDesired = desiredWidths.Sum();
+            var actualWidths = new int[_headers.Count];
+
+            if (totalDesired <= availableWidth)
+            {
+                // We have enough space - use desired widths
+                for (int i = 0; i < _headers.Count; i++)
+                {
+                    actualWidths[i] = desiredWidths[i];
+                }
+            }
+            else
+            {
+                // Not enough space - distribute proportionally with minimum widths
+                int minColWidth = 8;
+                for (int i = 0; i < _headers.Count; i++)
+                {
+                    // Proportional allocation, but respect minimum
+                    double proportion = (double)desiredWidths[i] / totalDesired;
+                    actualWidths[i] = Math.Max(minColWidth, (int)(availableWidth * proportion));
+                }
+            }
+
+            table.SetMinColumnWidths(actualWidths);
 
             // Add rows
             table.SetRows(_rows);
