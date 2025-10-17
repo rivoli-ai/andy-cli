@@ -1130,7 +1130,7 @@ class Program
                 // Ensure we have enough space to render
                 if (viewport.Width > 10 && viewport.Height > 8)
                 {
-                    int promptH = Math.Clamp(prompt.GetLineCount(), 1, Math.Max(1, viewport.Height / 2));
+                    int promptH = Math.Min(prompt.GetDesiredHeight(), Math.Max(3, viewport.Height / 2));
                     int outputH = Math.Max(1, viewport.Height - 5 - 2);
                     // allocate space for variable-height prompt
                     outputH = Math.Max(1, viewport.Height - 5 - (promptH + 1));

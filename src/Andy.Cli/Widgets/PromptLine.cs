@@ -99,17 +99,19 @@ namespace Andy.Cli.Widgets
             // background and optional border
             b.DrawRect(new DL.Rect(x, y, w, h, theme.PromptBackground));
             if (_showBorder) b.DrawBorder(new DL.Border(x, y, w, h, "single", theme.Border));
-            // Lines and caret placement
+            // Lines and caret placement (account for borders taking 2 rows)
             var lines = _text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
             int total = lines.Length;
-            int visible = Math.Min(h, total);
+            int maxContentLines = _showBorder ? Math.Max(1, h - 2) : h;
+            int visible = Math.Min(maxContentLines, total);
             int startLine = Math.Max(0, total - visible);
             _lastStart = startLine; // reuse as start line for cursor calc
+            int textStartY = _showBorder ? y + 1 : y; // Start after top border
             for (int i = 0; i < visible; i++)
             {
                 string line = lines[startLine + i];
                 string snippet = line.Length > innerW ? line.Substring(0, innerW) : line;
-                b.DrawText(new DL.TextRun(x + 1, y + i, snippet, theme.Primary, theme.PromptBackground, DL.CellAttrFlags.None));
+                b.DrawText(new DL.TextRun(x + 1, textStartY + i, snippet, theme.Primary, theme.PromptBackground, DL.CellAttrFlags.None));
             }
             // ghost suggestion only on last visible row
             if (_suggest is not null && _focused && visible > 0)
@@ -117,7 +119,7 @@ namespace Andy.Cli.Widgets
                 var sug = _suggest(_text);
                 if (!string.IsNullOrEmpty(sug))
                 {
-                    int lastRow = y + visible - 1;
+                    int lastRow = textStartY + visible - 1;
                     string lastLine = lines.Length > 0 ? lines[^1] : string.Empty;
                     int room = Math.Max(0, innerW - Math.Min(innerW, lastLine.Length));
                     string ghost = sug!;
@@ -130,10 +132,26 @@ namespace Andy.Cli.Widgets
             {
                 var (cr, cc) = GetCaretRowCol();
                 int rowInViewport = cr - startLine;
-                if (rowInViewport >= 0 && rowInViewport < h)
+                if (rowInViewport >= 0 && rowInViewport < maxContentLines)
                 {
                     int caretCol = Math.Clamp(cc, 0, innerW - 1);
-                    b.DrawText(new DL.TextRun(x + 1 + caretCol, y + rowInViewport, "|", theme.Primary, theme.PromptBackground, DL.CellAttrFlags.None));
+                    b.DrawText(new DL.TextRun(x + 1 + caretCol, textStartY + rowInViewport, "|", theme.Primary, theme.PromptBackground, DL.CellAttrFlags.None));
+                }
+            }
+            // scrollbar when content exceeds max visible lines
+            if (_showBorder && total > 7)
+            {
+                int scrollbarX = x + w - 2;
+                int scrollbarHeight = maxContentLines;
+                int thumbSize = Math.Max(1, (maxContentLines * maxContentLines) / total);
+                int thumbPosition = (startLine * scrollbarHeight) / total;
+
+                for (int i = 0; i < scrollbarHeight; i++)
+                {
+                    int scrollY = textStartY + i;
+                    bool isThumb = i >= thumbPosition && i < thumbPosition + thumbSize;
+                    var scrollChar = isThumb ? "█" : "│";
+                    b.DrawText(new DL.TextRun(scrollbarX, scrollY, scrollChar, theme.Border, theme.PromptBackground, DL.CellAttrFlags.None));
                 }
             }
             b.Pop();
@@ -141,6 +159,14 @@ namespace Andy.Cli.Widgets
 
         /// <summary>Return how many visual lines are present (splitting on newlines).</summary>
         public int GetLineCount() => _text.Length == 0 ? 1 : _text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n').Length;
+
+        /// <summary>Get the desired height for the prompt area based on content (3-9 lines: 1 top border + 1-7 content + 1 bottom border).</summary>
+        public int GetDesiredHeight()
+        {
+            int contentLines = GetLineCount();
+            int clampedContent = Math.Clamp(contentLines, 1, 7);
+            return clampedContent + 2; // +2 for top and bottom borders
+        }
 
         private (int Row, int Col) GetCaretRowCol()
         {
