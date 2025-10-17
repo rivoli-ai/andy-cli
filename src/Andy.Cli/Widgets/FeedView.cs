@@ -671,6 +671,17 @@ namespace Andy.Cli.Widgets
             }
         }
 
+        private static string CleanCellContent(string cell)
+        {
+            // Remove HTML br tags and convert to space
+            cell = System.Text.RegularExpressions.Regex.Replace(cell, @"<br\s*/?>", " ", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            // Remove markdown bold markers
+            cell = cell.Replace("**", "");
+            // Collapse multiple spaces
+            cell = System.Text.RegularExpressions.Regex.Replace(cell, @"\s+", " ");
+            return cell.Trim();
+        }
+
         private static List<MarkdownPart> SplitMarkdownWithTables(string md)
         {
             var parts = new List<MarkdownPart>();
@@ -688,7 +699,7 @@ namespace Andy.Cli.Widgets
 
                     // Extract headers
                     var headers = headerLine.Split('|', StringSplitOptions.RemoveEmptyEntries)
-                        .Select(h => h.Trim())
+                        .Select(h => CleanCellContent(h))
                         .ToList();
 
                     if (headers.Count > 0)
@@ -700,12 +711,31 @@ namespace Andy.Cli.Widgets
                         while (i < lines.Length && lines[i].Contains('|'))
                         {
                             var cells = lines[i].Split('|', StringSplitOptions.RemoveEmptyEntries)
-                                .Select(c => c.Trim())
+                                .Select(c => CleanCellContent(c))
                                 .ToArray();
 
                             if (cells.Length > 0)
                             {
-                                rows.Add(cells);
+                                // Pad cells to match header count
+                                if (cells.Length < headers.Count)
+                                {
+                                    var paddedCells = new string[headers.Count];
+                                    Array.Copy(cells, paddedCells, cells.Length);
+                                    for (int j = cells.Length; j < headers.Count; j++)
+                                    {
+                                        paddedCells[j] = "";
+                                    }
+                                    rows.Add(paddedCells);
+                                }
+                                else if (cells.Length > headers.Count)
+                                {
+                                    // Truncate extra cells
+                                    rows.Add(cells.Take(headers.Count).ToArray());
+                                }
+                                else
+                                {
+                                    rows.Add(cells);
+                                }
                             }
                             i++;
                         }
@@ -918,12 +948,26 @@ namespace Andy.Cli.Widgets
             var table = new Andy.Tui.Widgets.Table();
             table.SetColumns(_headers.ToArray());
 
-            // Set minimum column widths based on content
+            // Calculate column widths based on actual content
             var minWidths = new int[_headers.Count];
             for (int i = 0; i < _headers.Count; i++)
             {
-                minWidths[i] = Math.Max(8, _headers[i].Length + 2);
+                // Start with header width
+                int maxWidth = _headers[i].Length;
+
+                // Check all row data for this column
+                foreach (var row in _rows)
+                {
+                    if (i < row.Length)
+                    {
+                        maxWidth = Math.Max(maxWidth, row[i].Length);
+                    }
+                }
+
+                // Add padding and clamp to reasonable min/max
+                minWidths[i] = Math.Clamp(maxWidth + 2, 8, 50);
             }
+
             table.SetMinColumnWidths(minWidths);
 
             // Add rows
