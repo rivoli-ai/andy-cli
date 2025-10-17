@@ -131,6 +131,17 @@ class Program
             feed.SetFocused(false);
             feed.SetAnimationSpeed(8); // faster scroll-in
 
+            // Initialize inline command help for slash commands
+            var inlineCommandHelp = new InlineCommandHelp();
+            inlineCommandHelp.SetCommands(new[]
+            {
+                new InlineCommandHelp.CommandInfo { Name = "model", Description = "Manage AI models (list, switch, info, test)", Aliases = new[] { "m" } },
+                new InlineCommandHelp.CommandInfo { Name = "tools", Description = "Manage and list available tools", Aliases = new[] { "tool", "t" } },
+                new InlineCommandHelp.CommandInfo { Name = "clear", Description = "Clear conversation history", Aliases = Array.Empty<string>() },
+                new InlineCommandHelp.CommandInfo { Name = "help", Description = "Show help information", Aliases = new[] { "?" } },
+                new InlineCommandHelp.CommandInfo { Name = "exit", Description = "Exit the application", Aliases = new[] { "quit", "bye" } }
+            });
+
             // Initialize the tool execution tracker with the feed view
             ToolExecutionTracker.Instance.SetFeedView(feed);
             feed.AddMarkdownRich("**Ready to assist!** What can I help you learn or explore today?");
@@ -1130,14 +1141,25 @@ class Program
                 // Ensure we have enough space to render
                 if (viewport.Width > 10 && viewport.Height > 8)
                 {
+                    // Update inline command help filter based on current prompt text
+                    inlineCommandHelp.UpdateFilter(prompt.Text);
+                    int helpH = inlineCommandHelp.GetHeight();
+
                     int promptH = Math.Min(prompt.GetDesiredHeight(), Math.Max(3, viewport.Height / 2));
                     int outputH = Math.Max(1, viewport.Height - 5 - 2);
-                    // allocate space for variable-height prompt
-                    outputH = Math.Max(1, viewport.Height - 5 - (promptH + 1));
+                    // allocate space for variable-height prompt and help widget
+                    outputH = Math.Max(1, viewport.Height - 5 - (promptH + helpH + 1));
                     // main area: stacked feed with bottom-follow and animation
                     feed.Tick();
                     feed.Render(new L.Rect(2, 3, Math.Max(1, viewport.Width - 4), outputH), baseDl, wb);
                     prompt.Render(new L.Rect(2, 3 + outputH + 1, Math.Max(1, viewport.Width - 4), promptH), baseDl, wb);
+
+                    // Render inline command help below the prompt (if visible)
+                    if (helpH > 0)
+                    {
+                        int helpY = 3 + outputH + 1 + promptH;
+                        inlineCommandHelp.Render(2, helpY, Math.Max(1, viewport.Width - 4), baseDl, wb);
+                    }
                 }
                 else
                 {
