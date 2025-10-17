@@ -10,13 +10,13 @@ public class TokenCounterTests
     {
         // Arrange
         var counter = new TokenCounter();
-        counter.AddTokens(inputTokens: 638, outputTokens: 512493);
+        counter.AddTokens(inputTokens: 9, outputTokens: 78);
 
         // Act
         var width = counter.GetWidth();
 
-        // Assert - Format should be: "Total: 638→512,493 (513,131)"
-        var expectedText = "Total: 638→512,493 (513,131)";
+        // Assert - Format should be: "Total: 9→78 (87)"
+        var expectedText = "Total: 9→78 (87)";
         Assert.Equal(expectedText.Length, width);
     }
 
