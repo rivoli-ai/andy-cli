@@ -44,7 +44,8 @@ namespace Andy.Cli.Widgets
             int innerW = Math.Max(0, _lastInnerW);
             int col = Math.Clamp(caretCol, 0, innerW);
             int borderOffset = _showBorder ? 1 : 0; // Account for top border
-            col1 = _lastX + 1 + col + 1; // 1-based including left margin
+            const int promptPrefixWidth = 3; // " > " = 3 characters
+            col1 = _lastX + 1 + promptPrefixWidth + col + 1; // 1-based including left margin + prompt prefix
             row1 = _lastY + 1 + borderOffset + Math.Max(0, caretRow - visibleStart);
             return true;
         }
@@ -94,7 +95,8 @@ namespace Andy.Cli.Widgets
         {
             var theme = Theme.Current;
             int x = (int)rect.X, y = (int)rect.Y, w = (int)rect.Width, h = (int)rect.Height;
-            int innerW = Math.Max(0, w - 2);
+            const int promptPrefixWidth = 3; // " > " = 3 characters
+            int innerW = Math.Max(0, w - 2 - promptPrefixWidth); // Account for borders + prompt prefix
             _lastX = x; _lastY = y; _lastInnerW = innerW;
             b.PushClip(new DL.ClipPush(x, y, w, h));
             // background and optional border
@@ -108,11 +110,19 @@ namespace Andy.Cli.Widgets
             int startLine = Math.Max(0, total - visible);
             _lastStart = startLine; // reuse as start line for cursor calc
             int textStartY = _showBorder ? y + 1 : y; // Start after top border
+            int textStartX = x + 1 + promptPrefixWidth; // Start after border + prompt prefix
             for (int i = 0; i < visible; i++)
             {
+                // Draw prompt prefix " > " on first visible line
+                if (i == 0)
+                {
+                    b.DrawText(new DL.TextRun(x + 1, textStartY + i, " ", theme.Primary, theme.PromptBackground, DL.CellAttrFlags.None));
+                    b.DrawText(new DL.TextRun(x + 2, textStartY + i, ">", theme.Accent, theme.PromptBackground, DL.CellAttrFlags.Bold));
+                    b.DrawText(new DL.TextRun(x + 3, textStartY + i, " ", theme.Primary, theme.PromptBackground, DL.CellAttrFlags.None));
+                }
                 string line = lines[startLine + i];
                 string snippet = line.Length > innerW ? line.Substring(0, innerW) : line;
-                b.DrawText(new DL.TextRun(x + 1, textStartY + i, snippet, theme.Primary, theme.PromptBackground, DL.CellAttrFlags.None));
+                b.DrawText(new DL.TextRun(textStartX, textStartY + i, snippet, theme.Primary, theme.PromptBackground, DL.CellAttrFlags.None));
             }
             // ghost suggestion only on last visible row
             if (_suggest is not null && _focused && visible > 0)
@@ -125,7 +135,7 @@ namespace Andy.Cli.Widgets
                     int room = Math.Max(0, innerW - Math.Min(innerW, lastLine.Length));
                     string ghost = sug!;
                     if (ghost.Length > room) ghost = ghost.Substring(0, room);
-                    b.DrawText(new DL.TextRun(x + 1 + Math.Min(innerW, lastLine.Length), lastRow, ghost, theme.Ghost, theme.PromptBackground, DL.CellAttrFlags.None));
+                    b.DrawText(new DL.TextRun(textStartX + Math.Min(innerW, lastLine.Length), lastRow, ghost, theme.Ghost, theme.PromptBackground, DL.CellAttrFlags.None));
                 }
             }
             // caret glyph if not using terminal cursor
@@ -136,7 +146,7 @@ namespace Andy.Cli.Widgets
                 if (rowInViewport >= 0 && rowInViewport < maxContentLines)
                 {
                     int caretCol = Math.Clamp(cc, 0, innerW - 1);
-                    b.DrawText(new DL.TextRun(x + 1 + caretCol, textStartY + rowInViewport, "|", theme.Primary, theme.PromptBackground, DL.CellAttrFlags.None));
+                    b.DrawText(new DL.TextRun(textStartX + caretCol, textStartY + rowInViewport, "|", theme.Primary, theme.PromptBackground, DL.CellAttrFlags.None));
                 }
             }
             // scrollbar when content exceeds max visible lines

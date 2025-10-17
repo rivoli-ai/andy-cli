@@ -1158,13 +1158,13 @@ class Program
                 foreach (var op in wb.Build().Ops) Append(op, builder);
                 foreach (var op in overlay.Build().Ops) Append(op, builder);
                 await scheduler.RenderOnceAsync(builder.Build(), viewport, caps, pty, CancellationToken.None);
-                // Position terminal cursor as a thin bar inside the prompt (only when not processing)
+                // Position terminal cursor as a block inside the prompt (only when not processing)
                 if (!isProcessingMessage && prompt.TryGetTerminalCursor(out int col1, out int row1))
                 {
                     if (!cursorStyledShown)
                     {
-                        // Set steady bar cursor once and show cursor once; also disable terminal blink (DECSCUSR 6 is steady bar)
-                        Console.Write("\u001b[6 q\u001b[?25h");
+                        // Set steady block cursor once and show cursor once (DECSCUSR 2 is steady block)
+                        Console.Write("\u001b[2 q\u001b[?25h");
                         cursorStyledShown = true;
                     }
                     Console.Write($"\u001b[{row1};{col1}H");
