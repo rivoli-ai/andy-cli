@@ -43,8 +43,9 @@ namespace Andy.Cli.Widgets
             int visibleStart = _lastStart; // reused to store start line for multiline
             int innerW = Math.Max(0, _lastInnerW);
             int col = Math.Clamp(caretCol, 0, innerW);
+            int borderOffset = _showBorder ? 1 : 0; // Account for top border
             col1 = _lastX + 1 + col + 1; // 1-based including left margin
-            row1 = _lastY + 1 + Math.Max(0, caretRow - visibleStart);
+            row1 = _lastY + 1 + borderOffset + Math.Max(0, caretRow - visibleStart);
             return true;
         }
 
