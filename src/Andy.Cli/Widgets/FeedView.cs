@@ -40,8 +40,23 @@ namespace Andy.Cli.Widgets
         }
         /// <summary>Convenience: append markdown item.</summary>
         public void AddMarkdown(string md) => AddItem(new MarkdownItem(md));
-        /// <summary>Convenience: append markdown using Andy.Tui.Widgets.MarkdownRenderer to better handle inline formatting.</summary>
-        public void AddMarkdownRich(string md) => AddItem(new MarkdownRendererItem(md));
+        /// <summary>Convenience: append markdown using Andy.Tui.Widgets.MarkdownRenderer to better handle inline formatting. Detects and renders markdown tables separately.</summary>
+        public void AddMarkdownRich(string md)
+        {
+            // Split markdown by tables and render each part appropriately
+            var parts = SplitMarkdownWithTables(md);
+            foreach (var part in parts)
+            {
+                if (part.IsTable)
+                {
+                    AddItem(new TableItem(part.Headers!, part.Rows!, part.Title));
+                }
+                else if (!string.IsNullOrWhiteSpace(part.Content))
+                {
+                    AddItem(new MarkdownRendererItem(part.Content));
+                }
+            }
+        }
         /// <summary>Convenience: append code block item.</summary>
         public void AddCode(string code, string? language = null) => AddItem(new CodeBlockItem(code, language));
         /// <summary>Append a user message bubble with a rounded frame and label.</summary>
@@ -655,6 +670,93 @@ namespace Andy.Cli.Widgets
                 }
             }
         }
+
+        private static List<MarkdownPart> SplitMarkdownWithTables(string md)
+        {
+            var parts = new List<MarkdownPart>();
+            var lines = md.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+            int i = 0;
+
+            while (i < lines.Length)
+            {
+                // Look for table start (line with pipes)
+                if (lines[i].Contains('|') && i + 1 < lines.Length && lines[i + 1].Contains('|') && lines[i + 1].Contains('-'))
+                {
+                    // Found potential table - parse it
+                    var headerLine = lines[i];
+                    var separatorLine = lines[i + 1];
+
+                    // Extract headers
+                    var headers = headerLine.Split('|', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(h => h.Trim())
+                        .ToList();
+
+                    if (headers.Count > 0)
+                    {
+                        // Extract rows
+                        var rows = new List<string[]>();
+                        i += 2; // Skip header and separator
+
+                        while (i < lines.Length && lines[i].Contains('|'))
+                        {
+                            var cells = lines[i].Split('|', StringSplitOptions.RemoveEmptyEntries)
+                                .Select(c => c.Trim())
+                                .ToArray();
+
+                            if (cells.Length > 0)
+                            {
+                                rows.Add(cells);
+                            }
+                            i++;
+                        }
+
+                        parts.Add(new MarkdownPart
+                        {
+                            IsTable = true,
+                            Headers = headers,
+                            Rows = rows
+                        });
+                        continue;
+                    }
+                }
+
+                // Not a table - accumulate regular markdown
+                var mdLines = new List<string>();
+                while (i < lines.Length)
+                {
+                    // Check if next line starts a table
+                    if (i + 1 < lines.Length &&
+                        lines[i].Contains('|') &&
+                        lines[i + 1].Contains('|') &&
+                        lines[i + 1].Contains('-'))
+                    {
+                        break;
+                    }
+                    mdLines.Add(lines[i]);
+                    i++;
+                }
+
+                if (mdLines.Count > 0)
+                {
+                    parts.Add(new MarkdownPart
+                    {
+                        IsTable = false,
+                        Content = string.Join("\n", mdLines)
+                    });
+                }
+            }
+
+            return parts;
+        }
+
+        private class MarkdownPart
+        {
+            public bool IsTable { get; set; }
+            public string? Content { get; set; }
+            public List<string>? Headers { get; set; }
+            public List<string[]>? Rows { get; set; }
+            public string? Title { get; set; }
+        }
     }
 
     /// <summary>Contract for a line-oriented feed item that can render any slice of its lines.</summary>
@@ -786,6 +888,49 @@ namespace Andy.Cli.Widgets
             link.EnableOsc8(true);
             link.Render(new L.Rect(x, y, Math.Max(1, width), 1), baseDl, b);
             return true;
+        }
+    }
+
+    /// <summary>Markdown table feed item using Andy.Tui.Widgets.Table.</summary>
+    public sealed class TableItem : IFeedItem
+    {
+        private readonly List<string> _headers;
+        private readonly List<string[]> _rows;
+        private readonly string? _title;
+
+        public TableItem(List<string> headers, List<string[]> rows, string? title = null)
+        {
+            _headers = headers;
+            _rows = rows;
+            _title = title;
+        }
+
+        public int MeasureLineCount(int width)
+        {
+            // Table needs: 1 for header + 1 for separator + N data rows + 2 for borders
+            return _rows.Count + 4;
+        }
+
+        public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
+        {
+            if (width <= 0 || maxLines <= 0) return;
+
+            var table = new Andy.Tui.Widgets.Table();
+            table.SetColumns(_headers.ToArray());
+
+            // Set minimum column widths based on content
+            var minWidths = new int[_headers.Count];
+            for (int i = 0; i < _headers.Count; i++)
+            {
+                minWidths[i] = Math.Max(8, _headers[i].Length + 2);
+            }
+            table.SetMinColumnWidths(minWidths);
+
+            // Add rows
+            table.SetRows(_rows);
+
+            // Render the table
+            table.Render(new L.Rect(x, y, width, maxLines), baseDl, b);
         }
     }
 
