@@ -116,6 +116,13 @@ public class InstrumentationServer : IDisposable
             return Results.Ok(new { message = "Event history cleared" });
         });
 
+        // Endpoint: Get system prompt
+        _app.MapGet("/system-prompt", () =>
+        {
+            var systemPrompt = InstrumentationHub.Instance.GetSystemPrompt();
+            return Results.Json(new { systemPrompt = systemPrompt ?? string.Empty });
+        });
+
         // Endpoint: Serve the dashboard HTML
         _app.MapGet("/", () => Results.Content(GetDashboardHtml(), "text/html"));
 
@@ -424,11 +431,87 @@ public class InstrumentationServer : IDisposable
             background: linear-gradient(135deg, #ff6b6b 0%, #ff4757 100%);
             color: white;
         }
+        .system-prompt-section {
+            margin-bottom: 25px;
+            background: rgba(30, 30, 46, 0.7);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+        .system-prompt-header {
+            padding: 15px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            user-select: none;
+            background: rgba(124, 58, 237, 0.1);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .system-prompt-header:hover {
+            background: rgba(124, 58, 237, 0.15);
+        }
+        .system-prompt-title {
+            background: linear-gradient(135deg, #00d4ff 0%, #7c3aed 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-weight: 700;
+            font-size: 14px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+        .system-prompt-toggle {
+            color: #a1a1aa;
+            font-size: 20px;
+            transition: transform 0.2s ease;
+        }
+        .system-prompt-section.expanded .system-prompt-toggle {
+            transform: rotate(180deg);
+        }
+        .system-prompt-content {
+            display: none;
+            padding: 20px;
+            font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+            font-size: 12px;
+            line-height: 1.6;
+            color: #e4e4e7;
+            white-space: pre-wrap;
+            background: rgba(0, 0, 0, 0.2);
+            max-height: 400px;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: #667eea #1a1a2e;
+        }
+        .system-prompt-content::-webkit-scrollbar {
+            width: 6px;
+        }
+        .system-prompt-content::-webkit-scrollbar-track {
+            background: #1a1a2e;
+            border-radius: 3px;
+        }
+        .system-prompt-content::-webkit-scrollbar-thumb {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 3px;
+        }
+        .system-prompt-section.expanded .system-prompt-content {
+            display: block;
+        }
     </style>
 </head>
 <body>
     <div id=""status"" class=""connection-status disconnected"">Disconnected</div>
     <h1>Andy Engine Instrumentation</h1>
+
+    <div class=""system-prompt-section"" id=""systemPromptSection"">
+        <div class=""system-prompt-header"" onclick=""toggleSystemPrompt()"">
+            <span class=""system-prompt-title"">System Prompt</span>
+            <span class=""system-prompt-toggle"">▼</span>
+        </div>
+        <div class=""system-prompt-content"" id=""systemPromptContent"">Loading...</div>
+    </div>
 
     <div class=""stats"">
         <div class=""stat"">
@@ -689,6 +772,28 @@ public class InstrumentationServer : IDisposable
             autoscroll = !autoscroll;
             document.getElementById('autoscrollBtn').textContent = `Autoscroll: ${autoscroll ? 'ON' : 'OFF'}`;
         }
+
+        function toggleSystemPrompt() {
+            document.getElementById('systemPromptSection').classList.toggle('expanded');
+        }
+
+        // Fetch system prompt on page load
+        fetch('/system-prompt')
+            .then(response => response.json())
+            .then(data => {
+                const content = document.getElementById('systemPromptContent');
+                if (data.systemPrompt && data.systemPrompt.length > 0) {
+                    content.textContent = data.systemPrompt;
+                } else {
+                    content.textContent = 'No system prompt configured';
+                    content.style.fontStyle = 'italic';
+                    content.style.color = '#71717a';
+                }
+            })
+            .catch(error => {
+                console.error('Failed to fetch system prompt:', error);
+                document.getElementById('systemPromptContent').textContent = 'Failed to load system prompt';
+            });
     </script>
 </body>
 </html>";

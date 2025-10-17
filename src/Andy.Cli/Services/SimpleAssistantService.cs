@@ -53,6 +53,9 @@ public class SimpleAssistantService : IDisposable
         // Build system prompt using the new SystemPrompts helper
         var systemPrompt = SystemPrompts.GetDefaultCliPrompt();
 
+        // Store system prompt in instrumentation hub for dashboard display
+        InstrumentationHub.Instance.SetSystemPrompt(systemPrompt);
+
         // Wrap the tool executor to update UI when tools execute
         var uiExecutor = new UiUpdatingToolExecutor(toolExecutor, logger as ILogger<UiUpdatingToolExecutor>);
 

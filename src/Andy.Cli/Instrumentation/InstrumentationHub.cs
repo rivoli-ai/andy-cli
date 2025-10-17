@@ -16,8 +16,25 @@ public class InstrumentationHub
     private readonly ConcurrentQueue<InstrumentationEvent> _eventQueue = new();
     private readonly ConcurrentBag<Func<InstrumentationEvent, Task>> _subscribers = new();
     private readonly int _maxEventHistory = 1000;
+    private string? _systemPrompt;
 
     private InstrumentationHub() { }
+
+    /// <summary>
+    /// Set the system prompt for the current session
+    /// </summary>
+    public void SetSystemPrompt(string systemPrompt)
+    {
+        _systemPrompt = systemPrompt;
+    }
+
+    /// <summary>
+    /// Get the system prompt for the current session
+    /// </summary>
+    public string? GetSystemPrompt()
+    {
+        return _systemPrompt;
+    }
 
     /// <summary>
     /// Publish an event to all subscribers
