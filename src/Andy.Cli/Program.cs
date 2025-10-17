@@ -1159,6 +1159,11 @@ class Program
                 foreach (var op in overlay.Build().Ops) Append(op, builder);
                 await scheduler.RenderOnceAsync(builder.Build(), viewport, caps, pty, CancellationToken.None);
                 // Position terminal cursor as a block inside the prompt (only when not processing)
+                // NOTE: We're using direct Console.Write here instead of going through the TUI library (PTY).
+                // This works because cursor positioning happens after frame rendering and doesn't modify
+                // the display buffer. However, this creates mixed output paths which is not ideal
+                // architecturally. Consider refactoring to route cursor operations through the TUI
+                // library's PTY interface or checking if Andy.Tui has built-in cursor support.
                 if (!isProcessingMessage && prompt.TryGetTerminalCursor(out int col1, out int row1))
                 {
                     if (!cursorStyledShown)
