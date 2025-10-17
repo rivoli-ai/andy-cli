@@ -1,3 +1,4 @@
+using Andy.Cli.Instrumentation;
 using Andy.Cli.Services.ContentPipeline;
 using Andy.Cli.Widgets;
 using Andy.Engine;
@@ -79,6 +80,15 @@ public class SimpleAssistantService : IDisposable
 
             // Track this tool
             _runningTools[toolId] = (DateTime.UtcNow, null);
+
+            // INSTRUMENTATION: Publish tool call event
+            var toolCallEvent = new ToolCallEvent
+            {
+                ToolName = e.ToolName,
+                ToolId = toolId,
+                Parameters = new Dictionary<string, object?>() // Will be populated by UiUpdatingToolExecutor
+            };
+            InstrumentationHub.Instance.Publish(toolCallEvent);
 
             // Tell the tracker about this tool so the ToolAdapter can update it
             ToolExecutionTracker.Instance.SetLastActiveToolId(toolId);
@@ -167,8 +177,44 @@ public class SimpleAssistantService : IDisposable
             // Update token counter with input tokens immediately
             _tokenCounter?.AddTokens(_lastInputTokens, 0);
 
+            // INSTRUMENTATION: Publish LLM request event
+            var requestEvent = new LlmRequestEvent
+            {
+                Provider = _providerName,
+                Model = _modelName,
+                UserMessage = userMessage,
+                ConversationTurns = history.Count / 2,
+                EstimatedInputTokens = _lastInputTokens,
+                ConversationHistory = history.Select(m => new MessageSummary
+                {
+                    Role = m.Role.ToString(),
+                    Length = m.Content?.Length ?? 0,
+                    Preview = m.Content?.Length > 100 ? m.Content.Substring(0, 100) + "..." : m.Content ?? "",
+                    HasToolCalls = m.ToolCalls?.Any() ?? false,
+                    ToolCallCount = m.ToolCalls?.Count ?? 0
+                }).ToList()
+            };
+            InstrumentationHub.Instance.Publish(requestEvent);
+
             // Process message through SimpleAgent
+            var llmStartTime = DateTime.UtcNow;
             var result = await _agent.ProcessMessageAsync(userMessage, cancellationToken);
+            var llmDuration = DateTime.UtcNow - llmStartTime;
+
+            // INSTRUMENTATION: Publish LLM response event
+            var responseEvent = new LlmResponseEvent
+            {
+                RequestId = requestEvent.EventId,
+                Success = result.Success,
+                StopReason = result.StopReason,
+                Response = result.Response,
+                ResponseLength = result.Response?.Length ?? 0,
+                EstimatedOutputTokens = EstimateTokens(result.Response?.Length ?? 0),
+                Duration = llmDuration,
+                ActualInputTokens = null, // Not available from SimpleAgent yet
+                ActualOutputTokens = null
+            };
+            InstrumentationHub.Instance.Publish(responseEvent);
 
             // Estimate output tokens from response
             _lastOutputTokens = EstimateTokens(result.Response?.Length ?? 0);
@@ -347,6 +393,18 @@ public class SimpleAssistantService : IDisposable
                 _logger?.LogWarning("[TOOL_COMPLETE] Calling AddToolExecutionComplete for {ToolId} with result: '{Result}'",
                     tool.Key, resultSummary);
 
+                // INSTRUMENTATION: Publish tool complete event
+                var toolCompleteEvent = new ToolCompleteEvent
+                {
+                    ToolName = baseToolName,
+                    ToolId = tool.Key,
+                    Success = isSuccess,
+                    Result = resultSummary,
+                    ResultData = executionInfo?.ResultData,
+                    Duration = elapsed
+                };
+                InstrumentationHub.Instance.Publish(toolCompleteEvent);
+
                 _feed.AddToolExecutionComplete(tool.Key, isSuccess, durationStr, resultSummary);
                 _runningTools.Remove(tool.Key);
             }
@@ -374,9 +432,10 @@ public class SimpleAssistantService : IDisposable
                 result.Success, result.Response?.Length ?? 0, result.StopReason);
 
             // Add blank line after tools if they were executed
+            // Add it through the pipeline so it appears correctly before the response
             if (toolsWereExecuted)
             {
-                _feed.AddMarkdownRich("");
+                pipeline.AddRawContent("");
             }
 
             // Add response to pipeline

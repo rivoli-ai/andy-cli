@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Andy.Tools.Core;
 using Andy.Cli.Widgets;
+using Andy.Cli.Instrumentation;
 using Microsoft.Extensions.Logging;
 
 namespace Andy.Cli.Services
@@ -74,6 +75,15 @@ namespace Andy.Cli.Services
                 // Track the start of this tool execution
                 ToolExecutionTracker.Instance.TrackToolStart(uiToolId, toolId, parameters);
                 _logger?.LogWarning("[UI_EXECUTOR] Tracked tool start for {UiId}", uiToolId);
+
+                // INSTRUMENTATION: Publish tool execution start with actual parameters
+                var toolExecutionStartEvent = new ToolExecutionStartEvent
+                {
+                    ToolName = toolId,
+                    ToolId = uiToolId,
+                    Parameters = parameters ?? new Dictionary<string, object?>()
+                };
+                InstrumentationHub.Instance.Publish(toolExecutionStartEvent);
             }
 
             // Update the UI with the actual parameters
@@ -458,6 +468,20 @@ namespace Andy.Cli.Services
                     uiToolId, resultMessage);
 
                 ToolExecutionTracker.Instance.TrackToolComplete(uiToolId, result.IsSuccessful, resultMessage, result.Data);
+
+                // INSTRUMENTATION: Publish event when tool result is about to be sent back to LLM
+                var toolResultToLlmEvent = new ToolResultToLlmEvent
+                {
+                    ToolName = toolId,
+                    ToolId = uiToolId,
+                    Success = result.IsSuccessful,
+                    Result = resultMessage,
+                    ResultLength = resultMessage?.Length ?? 0,
+                    HasStructuredData = result.Data != null,
+                    DataType = result.Data?.GetType().Name,
+                    StructuredData = result.Data
+                };
+                InstrumentationHub.Instance.Publish(toolResultToLlmEvent);
             }
 
             return result;

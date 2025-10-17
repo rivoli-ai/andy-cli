@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Andy.Tui.Backend.Terminal;
+using Andy.Cli.Instrumentation;
 using Andy.Cli.Widgets;
 using Andy.Cli.Commands;
 using Andy.Cli.Services;
@@ -311,6 +312,11 @@ class Program
                 var providerUrl = GetProviderUrl(currentProvider);
 
                 feed.AddMarkdownRich($"[model] {currentModel} with {currentProvider} provider [{providerUrl}] (tool-enabled)");
+
+                // Start instrumentation server for real-time visibility
+                var instrumentationServer = new InstrumentationServer(port: 5555, logger: logger);
+                instrumentationServer.Start();
+                feed.AddMarkdownRich($"[instrumentation] Real-time dashboard available at http://localhost:5555");
             }
             catch (Exception ex)
             {
