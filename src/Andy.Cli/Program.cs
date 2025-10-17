@@ -121,7 +121,7 @@ class Program
             var toast = new Toast(); // Don't show initial toast as it interferes with prompt
             var tokenCounter = new TokenCounter();
             var statusMessage = new StatusMessage();
-            var status = new StatusLine(); status.Set("Idle", spinner: false);
+            var status = new StatusLine(); status.Set("", spinner: false);
             var prompt = new PromptLine();
             bool isProcessingMessage = false; // Track if we're processing a message
             prompt.SetBorder(true);
