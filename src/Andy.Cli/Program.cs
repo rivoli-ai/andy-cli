@@ -1163,8 +1163,8 @@ class Program
                 {
                     if (!cursorStyledShown)
                     {
-                        // Set steady block cursor once and show cursor once (DECSCUSR 2 is steady block)
-                        Console.Write("\u001b[2 q\u001b[?25h");
+                        // Set blinking block cursor once and show cursor once (DECSCUSR 1 is blinking block)
+                        Console.Write("\u001b[1 q\u001b[?25h");
                         cursorStyledShown = true;
                     }
                     Console.Write($"\u001b[{row1};{col1}H");
