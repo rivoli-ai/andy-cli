@@ -36,6 +36,63 @@ namespace Andy.Cli.Widgets
                 var (k, a) = _hints[i];
                 string ks = k ?? string.Empty;
                 string txt = a ?? string.Empty;
+
+                // If key is empty, this is a plain text item (like a URL)
+                if (string.IsNullOrEmpty(ks))
+                {
+                    int txtRoom = x + w - 1 - cx;
+                    string txtClipped = txt.Length > txtRoom ? txt.Substring(0, txtRoom) : txt;
+
+                    // Check if the text contains a URL
+                    if (txt.Contains("http://") || txt.Contains("https://"))
+                    {
+                        // Extract URL from text like "Instrumentation: http://localhost:5555"
+                        var urlStart = txt.IndexOf("http");
+                        if (urlStart >= 0)
+                        {
+                            var prefix = txt.Substring(0, urlStart);
+                            var url = txt.Substring(urlStart);
+
+                            // Render prefix normally
+                            if (prefix.Length > 0 && cx < x + w - 1)
+                            {
+                                int prefixRoom = x + w - 1 - cx;
+                                var clippedPrefix = prefix.Length > prefixRoom ? prefix.Substring(0, prefixRoom) : prefix;
+                                b.DrawText(new DL.TextRun(cx, y, clippedPrefix, theme.TextDim, theme.KeyHintsBackground, DL.CellAttrFlags.None));
+                                cx += clippedPrefix.Length;
+                            }
+
+                            // Render URL with hyperlink (OSC 8) and underline
+                            if (cx < x + w - 1)
+                            {
+                                int urlRoom = x + w - 1 - cx;
+                                var clippedUrl = url.Length > urlRoom ? url.Substring(0, urlRoom) : url;
+
+                                // OSC 8 hyperlink: \e]8;;URL\e\\TEXT\e]8;;\e\\
+                                var hyperlinkStart = $"\u001b]8;;{url}\u001b\\";
+                                var hyperlinkEnd = "\u001b]8;;\u001b\\";
+                                var hyperlinkText = hyperlinkStart + clippedUrl + hyperlinkEnd;
+
+                                // Use cyan color and underline for the link
+                                b.DrawText(new DL.TextRun(cx, y, hyperlinkText, new DL.Rgb24(100, 200, 255), theme.KeyHintsBackground, DL.CellAttrFlags.Underline));
+                                cx += clippedUrl.Length;
+                            }
+                        }
+                        else
+                        {
+                            b.DrawText(new DL.TextRun(cx, y, txtClipped, theme.TextDim, theme.KeyHintsBackground, DL.CellAttrFlags.None));
+                            cx += txtClipped.Length;
+                        }
+                    }
+                    else
+                    {
+                        b.DrawText(new DL.TextRun(cx, y, txtClipped, theme.TextDim, theme.KeyHintsBackground, DL.CellAttrFlags.None));
+                        cx += txtClipped.Length;
+                    }
+                    cx += 3; // spacing
+                    continue;
+                }
+
                 // Render like: [F1] Help   [Q] Quit
                 string bracket = "[" + ks + "] ";
                 b.DrawText(new DL.TextRun(cx, y, bracket, theme.KeyHighlight, theme.KeyHintsBackground, DL.CellAttrFlags.Bold));

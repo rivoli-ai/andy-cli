@@ -55,10 +55,10 @@ public class InstrumentationServer : IDisposable
         // Endpoint: SSE stream of events
         _app.MapGet("/events", async (HttpContext context) =>
         {
-            context.Response.Headers.Add("Content-Type", "text/event-stream");
-            context.Response.Headers.Add("Cache-Control", "no-cache");
-            context.Response.Headers.Add("Connection", "keep-alive");
-            context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+            context.Response.Headers["Content-Type"] = "text/event-stream";
+            context.Response.Headers["Cache-Control"] = "no-cache";
+            context.Response.Headers["Connection"] = "keep-alive";
+            context.Response.Headers["Access-Control-Allow-Origin"] = "*";
 
             var writer = new StreamWriter(context.Response.Body, Encoding.UTF8, leaveOpen: true);
             _activeStreams.Add(writer);
