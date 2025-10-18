@@ -207,8 +207,8 @@ public class InstrumentationServer : IDisposable
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
-            margin-bottom: 25px;
-            font-size: 32px;
+            margin-bottom: 20px;
+            font-size: 24px;
             font-weight: 800;
             letter-spacing: -0.5px;
         }
@@ -499,6 +499,130 @@ public class InstrumentationServer : IDisposable
         .system-prompt-section.expanded .system-prompt-content {
             display: block;
         }
+        .filter-section {
+            margin-bottom: 25px;
+            padding: 20px;
+            background: rgba(30, 30, 46, 0.7);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+        .filter-title {
+            background: linear-gradient(135deg, #00d4ff 0%, #7c3aed 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-weight: 700;
+            font-size: 13px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            margin-bottom: 12px;
+        }
+        .filter-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: center;
+        }
+        .filter-checkbox {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            user-select: none;
+        }
+        .filter-checkbox:hover {
+            background: rgba(0, 0, 0, 0.3);
+        }
+        .filter-checkbox input[type=""checkbox""] {
+            cursor: pointer;
+            width: 16px;
+            height: 16px;
+        }
+        .filter-checkbox label {
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .filter-checkbox.LlmRequest label { color: #ff6b35; }
+        .filter-checkbox.LlmResponse label { color: #00d4ff; }
+        .filter-checkbox.ToolCall label { color: #ffd60a; }
+        .filter-checkbox.ToolExecutionStart label { color: #ffb347; }
+        .filter-checkbox.ToolComplete label { color: #06ffa5; }
+        .filter-checkbox.ToolResultToLlm label { color: #ff9e00; }
+        .filter-checkbox.Diagnostic label { color: #a78bfa; }
+        .filter-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .filter-btn {
+            background: rgba(124, 58, 237, 0.3);
+            color: #e4e4e7;
+            border: 1px solid rgba(124, 58, 237, 0.5);
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-family: inherit;
+            font-weight: 600;
+            font-size: 11px;
+            transition: all 0.2s ease;
+        }
+        .filter-btn:hover {
+            background: rgba(124, 58, 237, 0.5);
+            border-color: rgba(124, 58, 237, 0.7);
+        }
+        .event-list.filtered .event {
+            max-width: 95%;
+            padding: 14px 18px;
+            font-size: 14px;
+        }
+        .event-list.filtered .event-detail {
+            font-size: 13px;
+        }
+        .event-list.filtered .event.LlmRequest .event-data,
+        .event-list.filtered .event.LlmResponse .event-data {
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .event-list.filtered .event.LlmRequest .event-detail,
+        .event-list.filtered .event.LlmResponse .event-detail {
+            font-size: 13px;
+        }
+        .event.LlmRequest .event-detail .event-value,
+        .event.LlmResponse .event-detail .event-value {
+            color: #fafafa;
+            font-weight: 500;
+        }
+        /* Enhanced LLM Request/Response message visibility */
+        .event.LlmRequest .user-message-display,
+        .event.LlmResponse .response-message-display {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 12px;
+            border-radius: 6px;
+            margin-top: 8px;
+            font-size: 14px;
+            line-height: 1.6;
+            color: #fafafa;
+            font-weight: 500;
+            border-left: 3px solid;
+        }
+        .event.LlmRequest .user-message-display {
+            border-left-color: #ff6b35;
+        }
+        .event.LlmResponse .response-message-display {
+            border-left-color: #00d4ff;
+        }
+        .event-list.filtered .event.LlmRequest .user-message-display,
+        .event-list.filtered .event.LlmResponse .response-message-display {
+            font-size: 15px;
+            padding: 16px;
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
@@ -511,6 +635,44 @@ public class InstrumentationServer : IDisposable
             <span class=""system-prompt-toggle"">▼</span>
         </div>
         <div class=""system-prompt-content"" id=""systemPromptContent"">Loading...</div>
+    </div>
+
+    <div class=""filter-section"">
+        <div class=""filter-title"">Event Filters</div>
+        <div class=""filter-controls"">
+            <div class=""filter-checkbox LlmRequest"">
+                <input type=""checkbox"" id=""filter-LlmRequest"" checked onchange=""updateFilters()"">
+                <label for=""filter-LlmRequest"">LLM Request</label>
+            </div>
+            <div class=""filter-checkbox LlmResponse"">
+                <input type=""checkbox"" id=""filter-LlmResponse"" checked onchange=""updateFilters()"">
+                <label for=""filter-LlmResponse"">LLM Response</label>
+            </div>
+            <div class=""filter-checkbox ToolCall"">
+                <input type=""checkbox"" id=""filter-ToolCall"" checked onchange=""updateFilters()"">
+                <label for=""filter-ToolCall"">Tool Call</label>
+            </div>
+            <div class=""filter-checkbox ToolExecutionStart"">
+                <input type=""checkbox"" id=""filter-ToolExecutionStart"" checked onchange=""updateFilters()"">
+                <label for=""filter-ToolExecutionStart"">Tool Execution Start</label>
+            </div>
+            <div class=""filter-checkbox ToolComplete"">
+                <input type=""checkbox"" id=""filter-ToolComplete"" checked onchange=""updateFilters()"">
+                <label for=""filter-ToolComplete"">Tool Complete</label>
+            </div>
+            <div class=""filter-checkbox ToolResultToLlm"">
+                <input type=""checkbox"" id=""filter-ToolResultToLlm"" checked onchange=""updateFilters()"">
+                <label for=""filter-ToolResultToLlm"">Tool Result to LLM</label>
+            </div>
+            <div class=""filter-checkbox Diagnostic"">
+                <input type=""checkbox"" id=""filter-Diagnostic"" checked onchange=""updateFilters()"">
+                <label for=""filter-Diagnostic"">Diagnostic</label>
+            </div>
+            <div class=""filter-actions"">
+                <button class=""filter-btn"" onclick=""selectAllFilters()"">Select All</button>
+                <button class=""filter-btn"" onclick=""deselectAllFilters()"">Deselect All</button>
+            </div>
+        </div>
     </div>
 
     <div class=""stats"">
@@ -545,6 +707,7 @@ public class InstrumentationServer : IDisposable
         let toolCallCount = 0;
         let responseTimes = [];
         let autoscroll = true;
+        let activeFilters = new Set(['LlmRequest', 'LlmResponse', 'ToolCall', 'ToolExecutionStart', 'ToolComplete', 'ToolResultToLlm', 'Diagnostic']);
 
         const eventSource = new EventSource('/events');
 
@@ -608,6 +771,12 @@ public class InstrumentationServer : IDisposable
             const eventList = document.getElementById('eventList');
             const eventDiv = document.createElement('div');
             eventDiv.className = `event ${event.eventType}`;
+            eventDiv.dataset.eventType = event.eventType;
+
+            // Check if event should be visible based on filters
+            if (!activeFilters.has(event.eventType)) {
+                eventDiv.style.display = 'none';
+            }
 
             const time = new Date(event.timestamp).toLocaleTimeString('en-US', {
                 hour12: false,
@@ -628,9 +797,10 @@ public class InstrumentationServer : IDisposable
                     <div class=""event-detail""><span class=""event-key"">Timestamp:</span> ${timestamp}</div>
                     <div class=""event-detail""><span class=""event-key"">Provider:</span> ${event.provider}</div>
                     <div class=""event-detail""><span class=""event-key"">Model:</span> ${event.model}</div>
-                    <div class=""event-detail""><span class=""event-key"">User Message:</span> ${escapeHtml(event.userMessage)}</div>
                     <div class=""event-detail""><span class=""event-key"">Conversation Turns:</span> ${event.conversationTurns}</div>
                     <div class=""event-detail""><span class=""event-key"">Input Tokens:</span> ${event.estimatedInputTokens}</div>
+                    <div class=""event-detail""><span class=""event-key"">User Message:</span></div>
+                    <div class=""user-message-display"">${escapeHtml(event.userMessage)}</div>
                 `;
             } else if (event.eventType === 'LlmResponse') {
                 const preview = event.response?.substring(0, 80) || '';
@@ -641,7 +811,8 @@ public class InstrumentationServer : IDisposable
                     <div class=""event-detail""><span class=""event-key"">Duration:</span> ${event.duration}</div>
                     <div class=""event-detail""><span class=""event-key"">Stop Reason:</span> ${event.stopReason || 'N/A'}</div>
                     <div class=""event-detail""><span class=""event-key"">Output Tokens:</span> ${event.estimatedOutputTokens}</div>
-                    <div class=""event-detail""><span class=""event-key"">Response:</span> ${escapeHtml(event.response || '')}</div>
+                    <div class=""event-detail""><span class=""event-key"">Response:</span></div>
+                    <div class=""response-message-display"">${escapeHtml(event.response || '')}</div>
                 `;
             } else if (event.eventType === 'ToolCall') {
                 const paramCount = event.parameters ? Object.keys(event.parameters).length : 0;
@@ -775,6 +946,53 @@ public class InstrumentationServer : IDisposable
 
         function toggleSystemPrompt() {
             document.getElementById('systemPromptSection').classList.toggle('expanded');
+        }
+
+        function updateFilters() {
+            const eventTypes = ['LlmRequest', 'LlmResponse', 'ToolCall', 'ToolExecutionStart', 'ToolComplete', 'ToolResultToLlm', 'Diagnostic'];
+            activeFilters.clear();
+
+            eventTypes.forEach(type => {
+                const checkbox = document.getElementById(`filter-${type}`);
+                if (checkbox.checked) {
+                    activeFilters.add(type);
+                }
+            });
+
+            // Update visibility of all events
+            const allEvents = document.querySelectorAll('.event');
+            allEvents.forEach(eventDiv => {
+                const eventType = eventDiv.dataset.eventType;
+                if (activeFilters.has(eventType)) {
+                    eventDiv.style.display = '';
+                } else {
+                    eventDiv.style.display = 'none';
+                }
+            });
+
+            // Add/remove filtered class to event-list for enhanced styling
+            const eventList = document.getElementById('eventList');
+            if (activeFilters.size < 7) {
+                eventList.classList.add('filtered');
+            } else {
+                eventList.classList.remove('filtered');
+            }
+        }
+
+        function selectAllFilters() {
+            const eventTypes = ['LlmRequest', 'LlmResponse', 'ToolCall', 'ToolExecutionStart', 'ToolComplete', 'ToolResultToLlm', 'Diagnostic'];
+            eventTypes.forEach(type => {
+                document.getElementById(`filter-${type}`).checked = true;
+            });
+            updateFilters();
+        }
+
+        function deselectAllFilters() {
+            const eventTypes = ['LlmRequest', 'LlmResponse', 'ToolCall', 'ToolExecutionStart', 'ToolComplete', 'ToolResultToLlm', 'Diagnostic'];
+            eventTypes.forEach(type => {
+                document.getElementById(`filter-${type}`).checked = false;
+            });
+            updateFilters();
         }
 
         // Fetch system prompt on page load
