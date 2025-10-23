@@ -9,6 +9,7 @@ using Andy.Cli.Instrumentation;
 using Andy.Cli.Widgets;
 using Andy.Cli.Commands;
 using Andy.Cli.Services;
+using Andy.Cli.Services.Prompts;
 using Andy.Cli.Tools;
 using Andy.Llm;
 using Andy.Llm.Extensions;
@@ -1462,23 +1463,23 @@ class Program
 
     private static string BuildSystemPrompt(IEnumerable<ToolRegistration> availableTools, string currentModel, string currentProvider)
     {
-        var prompt = new StringBuilder();
-        prompt.AppendLine("You are an AI assistant with access to the following tools:");
-        prompt.AppendLine();
-
-        foreach (var tool in availableTools)
+        // Convert tool registrations to ToolInfo format
+        var tools = availableTools.Select(t => new ToolInfo
         {
-            prompt.AppendLine($"- {tool.Metadata.Name}: {tool.Metadata.Description}");
-        }
+            Name = t.Metadata.Name,
+            Description = t.Metadata.Description,
+            Parameters = new List<ToolParameterInfo>() // Could be enhanced later to include actual parameters
+        }).ToList();
 
-        prompt.AppendLine();
-        prompt.AppendLine($"Current configuration:");
-        prompt.AppendLine($"- Model: {currentModel}");
-        prompt.AppendLine($"- Provider: {currentProvider}");
-        prompt.AppendLine();
-        prompt.AppendLine("Provide helpful, accurate responses. When using tools, explain what you're doing.");
+        // Build custom instructions with model/provider info
+        var customInstructions = new StringBuilder();
+        customInstructions.AppendLine("Current configuration:");
+        customInstructions.AppendLine($"- Model: {currentModel}");
+        customInstructions.AppendLine($"- Provider: {currentProvider}");
+        customInstructions.AppendLine();
+        customInstructions.AppendLine("Provide helpful, accurate responses. When using tools, explain what you're doing.");
 
-        return prompt.ToString();
+        return SystemPrompts.GetPromptWithTools(tools, customInstructions.ToString());
     }
 }
 

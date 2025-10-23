@@ -1,5 +1,6 @@
 using Andy.Cli.Instrumentation;
 using Andy.Cli.Services.ContentPipeline;
+using Andy.Cli.Services.Prompts;
 using Andy.Cli.Widgets;
 using Andy.Engine;
 using Andy.Model.Llm;
@@ -51,7 +52,7 @@ public class SimpleAssistantService : IDisposable
             toolNames.Count, string.Join(", ", toolNames));
 
         // Build system prompt using the new SystemPrompts helper
-        var systemPrompt = SystemPrompts.GetDefaultCliPrompt();
+        var systemPrompt = Andy.Cli.Services.Prompts.SystemPrompts.GetDefaultCliPrompt();
 
         // Store system prompt in instrumentation hub for dashboard display
         InstrumentationHub.Instance.SetSystemPrompt(systemPrompt);
