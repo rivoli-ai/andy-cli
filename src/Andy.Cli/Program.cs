@@ -1136,13 +1136,16 @@ class Program
                 }
                 var baseDl = b.Build();
                 var wb = new DL.DisplayListBuilder();
-                hints.Render(viewport, baseDl, wb);
-                toast.Tick(); // Advance toast TTL
-                toast.RenderAt(2, viewport.Height - 4, baseDl, wb);
 
                 // Render token counter on same line as hints
                 int tokenCounterWidth = tokenCounter.GetWidth();
                 int tokenCounterX = viewport.Width - tokenCounterWidth - 2;
+                int reservedRightWidth = tokenCounterWidth + 4; // Reserve space for token counter plus margin
+
+                hints.Render(viewport, baseDl, wb, reservedRightWidth);
+                toast.Tick(); // Advance toast TTL
+                toast.RenderAt(2, viewport.Height - 4, baseDl, wb);
+
                 if (tokenCounterX > 0)
                 {
                     tokenCounter.RenderAt(tokenCounterX, viewport.Height - 1, baseDl, wb);

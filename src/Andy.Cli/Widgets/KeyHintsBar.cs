@@ -22,7 +22,7 @@ namespace Andy.Cli.Widgets
         }
 
         /// <summary>Renders into the last row of the viewport.</summary>
-        public void Render((int Width, int Height) viewport, DL.DisplayList baseDl, DL.DisplayListBuilder b)
+        public void Render((int Width, int Height) viewport, DL.DisplayList baseDl, DL.DisplayListBuilder b, int reservedRightWidth = 0)
         {
             if (_hints.Count == 0) return;
             var theme = Theme.Current;
@@ -31,7 +31,8 @@ namespace Andy.Cli.Widgets
             b.PushClip(new DL.ClipPush(x, y, w, 1));
             b.DrawRect(new DL.Rect(x, y, w, 1, theme.KeyHintsBackground));
             int cx = x + 1;
-            for (int i = 0; i < _hints.Count && cx < x + w - 1; i++)
+            int maxX = x + w - reservedRightWidth - 1; // Reserve space on the right
+            for (int i = 0; i < _hints.Count && cx < maxX; i++)
             {
                 var (k, a) = _hints[i];
                 string ks = k ?? string.Empty;
@@ -40,7 +41,7 @@ namespace Andy.Cli.Widgets
                 // If key is empty, this is a plain text item (like a URL)
                 if (string.IsNullOrEmpty(ks))
                 {
-                    int txtRoom = x + w - 1 - cx;
+                    int txtRoom = maxX - cx;
                     string txtClipped = txt.Length > txtRoom ? txt.Substring(0, txtRoom) : txt;
 
                     // Check if the text contains a URL
@@ -54,18 +55,18 @@ namespace Andy.Cli.Widgets
                             var url = txt.Substring(urlStart);
 
                             // Render prefix normally
-                            if (prefix.Length > 0 && cx < x + w - 1)
+                            if (prefix.Length > 0 && cx < maxX)
                             {
-                                int prefixRoom = x + w - 1 - cx;
+                                int prefixRoom = maxX - cx;
                                 var clippedPrefix = prefix.Length > prefixRoom ? prefix.Substring(0, prefixRoom) : prefix;
                                 b.DrawText(new DL.TextRun(cx, y, clippedPrefix, theme.TextDim, theme.KeyHintsBackground, DL.CellAttrFlags.None));
                                 cx += clippedPrefix.Length;
                             }
 
                             // Render URL with hyperlink (OSC 8) and underline
-                            if (cx < x + w - 1)
+                            if (cx < maxX)
                             {
-                                int urlRoom = x + w - 1 - cx;
+                                int urlRoom = maxX - cx;
                                 var clippedUrl = url.Length > urlRoom ? url.Substring(0, urlRoom) : url;
 
                                 // OSC 8 hyperlink: \e]8;;URL\e\\TEXT\e]8;;\e\\
@@ -97,8 +98,8 @@ namespace Andy.Cli.Widgets
                 string bracket = "[" + ks + "] ";
                 b.DrawText(new DL.TextRun(cx, y, bracket, theme.KeyHighlight, theme.KeyHintsBackground, DL.CellAttrFlags.Bold));
                 cx += bracket.Length;
-                if (cx >= x + w - 1) break;
-                int room = x + w - 1 - cx;
+                if (cx >= maxX) break;
+                int room = maxX - cx;
                 string clipped = txt.Length > room ? txt.Substring(0, room) : txt;
                 b.DrawText(new DL.TextRun(cx, y, clipped, theme.TextDim, theme.KeyHintsBackground, DL.CellAttrFlags.None));
                 cx += clipped.Length + 3; // spacing
