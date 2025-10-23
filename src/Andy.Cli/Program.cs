@@ -1140,7 +1140,8 @@ class Program
                 // Render token counter on same line as hints
                 int tokenCounterWidth = tokenCounter.GetWidth();
                 int tokenCounterX = viewport.Width - tokenCounterWidth - 2;
-                int reservedRightWidth = tokenCounterWidth + 4; // Reserve space for token counter plus margin
+                // Reserve exactly the space used by token counter (width + 2 char margin)
+                int reservedRightWidth = tokenCounterWidth + 2;
 
                 hints.Render(viewport, baseDl, wb, reservedRightWidth);
                 toast.Tick(); // Advance toast TTL
