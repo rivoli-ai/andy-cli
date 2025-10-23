@@ -22,6 +22,8 @@ namespace Andy.Cli.Widgets
         private bool _showBorder = true;
         private bool _useTerminalCursor = true;
         private int _lastX, _lastY, _lastInnerW, _lastStart;
+        private DateTime _lastKeyTime = DateTime.MinValue;
+        private const int PasteDetectionThresholdMs = 50; // Keys within 50ms are considered a paste
 
         /// <summary>Provide a suggestion function for ghost text.</summary>
         public void SetSuggestionProvider(Func<string, string?>? provider) => _suggest = provider;
@@ -54,17 +56,35 @@ namespace Andy.Cli.Widgets
         /// <summary>Handle a key press. Ctrl+Enter inserts newline. Returns submitted line on Enter (no Ctrl); otherwise null.</summary>
         public string? OnKey(ConsoleKeyInfo k)
         {
+            // Detect paste operation by checking if keys are arriving rapidly
+            var now = DateTime.UtcNow;
+            var timeSinceLastKey = (now - _lastKeyTime).TotalMilliseconds;
+            var isPasting = timeSinceLastKey < PasteDetectionThresholdMs;
+            _lastKeyTime = now;
+
             // Ctrl+Enter inserts newline
             if (k.Key == ConsoleKey.Enter && (k.Modifiers & ConsoleModifiers.Control) != 0)
             {
                 _text = _text.Insert(_cursor, "\n"); _cursor++; return null;
             }
 
-            // Enter submits
+            // Enter submits ONLY if not pasting
+            // During paste, Enter inserts newline instead of submitting
             if (k.Key == ConsoleKey.Enter)
             {
-                var s = _text; if (!string.IsNullOrWhiteSpace(s)) { _history.Add(s); }
-                _historyIndex = -1; _text = string.Empty; _cursor = 0; return s;
+                if (isPasting)
+                {
+                    // Insert newline when pasting
+                    _text = _text.Insert(_cursor, "\n");
+                    _cursor++;
+                    return null;
+                }
+                else
+                {
+                    // Submit when user presses Enter
+                    var s = _text; if (!string.IsNullOrWhiteSpace(s)) { _history.Add(s); }
+                    _historyIndex = -1; _text = string.Empty; _cursor = 0; return s;
+                }
             }
 
             // Ctrl+A - Move to beginning of text (emacs-style)
