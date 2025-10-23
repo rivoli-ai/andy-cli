@@ -2,12 +2,11 @@ using System;
 using System.Collections.Generic;
 using Andy.Cli.Themes;
 using DL = Andy.Tui.DisplayList;
-using L = Andy.Tui.Layout;
 
 namespace Andy.Cli.Widgets
 {
     /// <summary>
-    /// Renders a single-line footer of key hints like "[F2] Toggle HUD".
+    /// Renders a footer of key hints like "[F2] Toggle HUD" with automatic wrapping.
     /// </summary>
     public sealed class KeyHintsBar
     {
@@ -21,129 +20,151 @@ namespace Andy.Cli.Widgets
             foreach (var h in hints) _hints.Add(h);
         }
 
-        /// <summary>Renders into the last row of the viewport.</summary>
+        /// <summary>Gets the height needed to render all hints with the given width.</summary>
+        public int GetRequiredHeight(int availableWidth)
+        {
+            if (_hints.Count == 0) return 0;
+            if (availableWidth <= 0) return 1; // Minimum height if no space
+
+            // Use the same manual wrapping logic as Render() to ensure consistency
+            const int leftMargin = 1;
+            int effectiveWidth = availableWidth - leftMargin;
+            if (effectiveWidth <= 0) return 1;
+
+            var lines = CalculateWrappedLines(effectiveWidth);
+            return Math.Max(1, lines.Count);
+        }
+
+        /// <summary>Calculates how hints will wrap into lines given available width.</summary>
+        private List<List<(string key, string action, int width)>> CalculateWrappedLines(int availableWidth)
+        {
+            const int itemGap = 3;
+            var lines = new List<List<(string key, string action, int width)>>();
+            var currentLine = new List<(string, string, int)>();
+            int currentWidth = 0;
+
+            foreach (var (key, action) in _hints)
+            {
+                int itemWidth = CalculateItemWidth(key, action);
+                int gap = currentLine.Count > 0 ? itemGap : 0;
+                int projectedWidth = currentWidth + gap + itemWidth;
+
+                // Wrap to next line if this item doesn't fit
+                if (currentLine.Count > 0 && projectedWidth > availableWidth)
+                {
+                    lines.Add(currentLine);
+                    currentLine = new List<(string, string, int)>();
+                    currentWidth = 0;
+                    gap = 0;
+                    projectedWidth = itemWidth;
+                }
+
+                currentLine.Add((key, action, itemWidth));
+                currentWidth = projectedWidth;
+            }
+
+            if (currentLine.Count > 0)
+            {
+                lines.Add(currentLine);
+            }
+
+            return lines;
+        }
+
+        /// <summary>Renders into the bottom rows of the viewport with automatic wrapping.</summary>
         public void Render((int Width, int Height) viewport, DL.DisplayList baseDl, DL.DisplayListBuilder b, int reservedRightWidth = 0)
         {
             if (_hints.Count == 0) return;
             var theme = Theme.Current;
-            int y = Math.Max(0, viewport.Height - 1);
-            int x = 0; int w = viewport.Width;
 
-            // Calculate available width for hints (excluding reserved area)
-            int availableWidth = w - reservedRightWidth;
-            int maxX = x + availableWidth - 1; // Reserve space on the right
+            // Calculate available width for hints (excluding reserved area and margins)
+            const int leftMargin = 1;
+            const int itemGap = 3;
+            int availableWidth = viewport.Width - reservedRightWidth - leftMargin;
+            if (availableWidth <= 0) return; // No space to render
 
-            // Only clip and draw background for the hints area (not the reserved area)
-            b.PushClip(new DL.ClipPush(x, y, availableWidth, 1));
-            b.DrawRect(new DL.Rect(x, y, availableWidth, 1, theme.KeyHintsBackground));
-            int cx = x + 1;
-            for (int i = 0; i < _hints.Count; i++)
+            // Use shared wrapping logic to ensure consistency with GetRequiredHeight()
+            var lines = CalculateWrappedLines(availableWidth);
+
+            // Calculate height (1 line per row)
+            int requiredHeight = Math.Max(1, lines.Count);
+            int startY = Math.Max(0, viewport.Height - requiredHeight);
+
+            // Draw background for all rows
+            b.PushClip(new DL.ClipPush(0, startY, viewport.Width - reservedRightWidth, requiredHeight));
+            b.DrawRect(new DL.Rect(0, startY, viewport.Width - reservedRightWidth, requiredHeight, theme.KeyHintsBackground));
+
+            // Render each line
+            for (int lineIndex = 0; lineIndex < lines.Count; lineIndex++)
             {
-                // Stop if we've run out of space
-                if (cx >= maxX) break;
+                var line = lines[lineIndex];
+                int x = leftMargin;
+                int y = startY + lineIndex;
 
-                var (k, a) = _hints[i];
-                string ks = k ?? string.Empty;
-                string txt = a ?? string.Empty;
-
-                // If key is empty, this is a plain text item (like a URL)
-                if (string.IsNullOrEmpty(ks))
+                for (int itemIndex = 0; itemIndex < line.Count; itemIndex++)
                 {
-                    if (cx >= maxX) break; // No room left
+                    var (key, action, _) = line[itemIndex];
 
-                    int txtRoom = maxX - cx;
-                    if (txtRoom <= 0) break;
-
-                    string txtClipped = txt.Length > txtRoom ? txt.Substring(0, txtRoom) : txt;
-
-                    // Check if the text contains a URL
-                    if (txt.Contains("http://") || txt.Contains("https://"))
+                    // Add gap before items (except first)
+                    if (itemIndex > 0)
                     {
-                        // Extract URL from text like "Instrumentation: http://localhost:5555"
-                        var urlStart = txt.IndexOf("http");
-                        if (urlStart >= 0)
-                        {
-                            var prefix = txt.Substring(0, urlStart);
-                            var url = txt.Substring(urlStart);
-
-                            // Render prefix normally
-                            if (prefix.Length > 0 && cx < maxX)
-                            {
-                                int prefixRoom = maxX - cx;
-                                var clippedPrefix = prefix.Length > prefixRoom ? prefix.Substring(0, prefixRoom) : prefix;
-                                if (clippedPrefix.Length > 0)
-                                {
-                                    b.DrawText(new DL.TextRun(cx, y, clippedPrefix, theme.TextDim, theme.KeyHintsBackground, DL.CellAttrFlags.None));
-                                    cx += clippedPrefix.Length;
-                                }
-                            }
-
-                            // Render URL with hyperlink (OSC 8) and underline
-                            if (cx < maxX)
-                            {
-                                int urlRoom = maxX - cx;
-                                var clippedUrl = url.Length > urlRoom ? url.Substring(0, urlRoom) : url;
-
-                                if (clippedUrl.Length > 0)
-                                {
-                                    // OSC 8 hyperlink: \e]8;;URL\e\\TEXT\e]8;;\e\\
-                                    var hyperlinkStart = $"\u001b]8;;{url}\u001b\\";
-                                    var hyperlinkEnd = "\u001b]8;;\u001b\\";
-                                    var hyperlinkText = hyperlinkStart + clippedUrl + hyperlinkEnd;
-
-                                    // Use cyan color and underline for the link
-                                    b.DrawText(new DL.TextRun(cx, y, hyperlinkText, new DL.Rgb24(100, 200, 255), theme.KeyHintsBackground, DL.CellAttrFlags.Underline));
-                                    cx += clippedUrl.Length;
-                                }
-                            }
-                        }
-                        else
-                        {
-                            if (txtClipped.Length > 0)
-                            {
-                                b.DrawText(new DL.TextRun(cx, y, txtClipped, theme.TextDim, theme.KeyHintsBackground, DL.CellAttrFlags.None));
-                                cx += txtClipped.Length;
-                            }
-                        }
-                    }
-                    else
-                    {
-                        if (txtClipped.Length > 0)
-                        {
-                            b.DrawText(new DL.TextRun(cx, y, txtClipped, theme.TextDim, theme.KeyHintsBackground, DL.CellAttrFlags.None));
-                            cx += txtClipped.Length;
-                        }
+                        x += itemGap;
                     }
 
-                    // Only add spacing if there's room AND we're not at the last item
-                    if (i < _hints.Count - 1 && cx + 3 < maxX)
-                    {
-                        cx += 3; // spacing
-                    }
-                    continue;
+                    RenderHintItem(b, x, y, key, action, theme);
+                    x += CalculateItemWidth(key, action);
                 }
+            }
 
-                // Render like: [F1] Help   [Q] Quit
+            b.Pop();
+        }
+
+        private void RenderHintItem(DL.DisplayListBuilder b, int x, int y, string key, string action, Theme theme)
+        {
+            string ks = key ?? string.Empty;
+            string txt = action ?? string.Empty;
+            int cx = x;
+
+            // If key is empty, this is a plain text item (like a URL)
+            if (string.IsNullOrEmpty(ks))
+            {
+                // Check if the text contains a URL - render with special color
+                if (txt.Contains("http://") || txt.Contains("https://"))
+                {
+                    // Use cyan color and underline for URLs
+                    b.DrawText(new DL.TextRun(cx, y, txt, new DL.Rgb24(100, 200, 255), theme.KeyHintsBackground, DL.CellAttrFlags.Underline));
+                }
+                else
+                {
+                    b.DrawText(new DL.TextRun(cx, y, txt, theme.TextDim, theme.KeyHintsBackground, DL.CellAttrFlags.None));
+                }
+            }
+            else
+            {
+                // Render like: [F1] Help
                 string bracket = "[" + ks + "] ";
                 b.DrawText(new DL.TextRun(cx, y, bracket, theme.KeyHighlight, theme.KeyHintsBackground, DL.CellAttrFlags.Bold));
                 cx += bracket.Length;
-                if (cx >= maxX) break;
 
-                int room = maxX - cx;
-                string clipped = txt.Length > room ? txt.Substring(0, room) : txt;
-                if (clipped.Length > 0)
-                {
-                    b.DrawText(new DL.TextRun(cx, y, clipped, theme.TextDim, theme.KeyHintsBackground, DL.CellAttrFlags.None));
-                    cx += clipped.Length;
-                }
-
-                // Only add spacing if there's room AND we're not at the last item
-                if (i < _hints.Count - 1 && cx + 3 < maxX)
-                {
-                    cx += 3; // spacing
-                }
+                b.DrawText(new DL.TextRun(cx, y, txt, theme.TextDim, theme.KeyHintsBackground, DL.CellAttrFlags.None));
             }
-            b.Pop();
+        }
+
+        private int CalculateItemWidth(string key, string action)
+        {
+            string ks = key ?? string.Empty;
+            string txt = action ?? string.Empty;
+
+            if (string.IsNullOrEmpty(ks))
+            {
+                // Plain text item (e.g., URL)
+                return txt.Length;
+            }
+            else
+            {
+                // Key hint item: "[KEY] Action"
+                return ks.Length + 3 + txt.Length; // [KEY] = key.Length + 3 characters
+            }
         }
     }
 }

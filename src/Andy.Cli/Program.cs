@@ -1137,25 +1137,20 @@ class Program
                 var baseDl = b.Build();
                 var wb = new DL.DisplayListBuilder();
 
-                // Render token counter on same line as hints
+                // Calculate heights for bottom UI elements
                 int tokenCounterWidth = tokenCounter.GetWidth();
-                int tokenCounterX = viewport.Width - tokenCounterWidth - 2;
-                // Reserve exactly the space used by token counter (width + 2 char margin)
                 int reservedRightWidth = tokenCounterWidth + 2;
 
-                hints.Render(viewport, baseDl, wb, reservedRightWidth);
-                toast.Tick(); // Advance toast TTL
-                toast.RenderAt(2, viewport.Height - 4, baseDl, wb);
+                // Get the actual height needed for hints bar (may be multi-line)
+                int hintsBarHeight = hints.GetRequiredHeight(viewport.Width - reservedRightWidth);
 
-                if (tokenCounterX > 0)
-                {
-                    tokenCounter.RenderAt(tokenCounterX, viewport.Height - 1, baseDl, wb);
-                }
+                // Bottom layout (from bottom up):
+                // - hintsBarHeight lines: hints bar + token counter
+                // - 1 line: status line (Idle, etc.)
+                // - 1 line: status message
+                // - 1 line: toast
+                int bottomReserved = hintsBarHeight + 3; // hints + status + message
 
-                // Render status message above "Idle" line
-                statusMessage.RenderAt(2, viewport.Height - 3, Math.Max(0, viewport.Width - 4), baseDl, wb);
-
-                status.Tick(); status.Render(viewport, baseDl, wb);
                 // Main output area and prompt at bottom
                 // Ensure we have enough space to render
                 if (viewport.Width > 10 && viewport.Height > 8)
@@ -1165,18 +1160,23 @@ class Program
                     int helpH = inlineCommandHelp.GetHeight();
 
                     int promptH = Math.Min(prompt.GetDesiredHeight(), Math.Max(3, viewport.Height / 2));
-                    int outputH = Math.Max(1, viewport.Height - 5 - 2);
-                    // allocate space for variable-height prompt and help widget
-                    outputH = Math.Max(1, viewport.Height - 5 - (promptH + helpH + 1));
+
+                    // Position prompt and help from the bottom up (leaving 1 line gap before toast)
+                    // Layout from bottom: hints(hintsBarHeight) + status(1) + message(1) + toast(1) + gap(1) + help + prompt
+                    int promptY = Math.Max(3, viewport.Height - bottomReserved - 1 - helpH - promptH);
+                    int helpY = promptY + promptH;
+
+                    // Feed fills the space from header to prompt
+                    int outputH = Math.Max(1, promptY - 3);
+
                     // main area: stacked feed with bottom-follow and animation
                     feed.Tick();
                     feed.Render(new L.Rect(2, 3, Math.Max(1, viewport.Width - 4), outputH), baseDl, wb);
-                    prompt.Render(new L.Rect(2, 3 + outputH + 1, Math.Max(1, viewport.Width - 4), promptH), baseDl, wb);
+                    prompt.Render(new L.Rect(2, promptY, Math.Max(1, viewport.Width - 4), promptH), baseDl, wb);
 
                     // Render inline command help below the prompt (if visible)
                     if (helpH > 0)
                     {
-                        int helpY = 3 + outputH + 1 + promptH;
                         inlineCommandHelp.Render(2, helpY, Math.Max(1, viewport.Width - 4), baseDl, wb);
                     }
                 }
@@ -1185,6 +1185,26 @@ class Program
                     // Window too small - show minimal message
                     b.DrawText(new DL.TextRun(2, 2, "Window too small", new DL.Rgb24(255, 100, 100), null, DL.CellAttrFlags.Bold));
                     b.DrawText(new DL.TextRun(2, 3, $"Min: {MIN_WIDTH}x{MIN_HEIGHT}", new DL.Rgb24(200, 200, 200), null, DL.CellAttrFlags.None));
+                }
+
+                // Render bottom UI elements (status, hints, token counter)
+                // These are positioned from the bottom up
+                int statusMessageY = viewport.Height - hintsBarHeight - 2;
+                statusMessage.RenderAt(2, statusMessageY, Math.Max(0, viewport.Width - 4), baseDl, wb);
+
+                status.Tick();
+                status.Render(viewport, baseDl, wb);
+
+                toast.Tick(); // Advance toast TTL
+                int toastY = viewport.Height - hintsBarHeight - 3;
+                toast.RenderAt(2, toastY, baseDl, wb);
+
+                hints.Render(viewport, baseDl, wb, reservedRightWidth);
+
+                int tokenCounterX = viewport.Width - tokenCounterWidth - 2;
+                if (tokenCounterX > 0)
+                {
+                    tokenCounter.RenderAt(tokenCounterX, viewport.Height - 1, baseDl, wb);
                 }
 
                 // Render command palette (if open)

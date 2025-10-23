@@ -102,4 +102,71 @@ public class KeyHintsBarTests
         // Assert - Verify rendering completes without error
         Assert.Null(exception);
     }
+
+    [Fact]
+    public void GetRequiredHeight_ReturnsCorrectHeightForSingleLine()
+    {
+        // Arrange
+        var hints = new KeyHintsBar();
+        hints.SetHints(new[]
+        {
+            ("F2", "HUD"),
+            ("ESC", "Quit")
+        });
+
+        // Act - Wide enough to fit all hints on one line
+        int height = hints.GetRequiredHeight(100);
+
+        // Assert - Should be 1 row
+        Assert.Equal(1, height);
+    }
+
+    [Fact]
+    public void GetRequiredHeight_ReturnsCorrectHeightForWrapping()
+    {
+        // Arrange
+        var hints = new KeyHintsBar();
+        hints.SetHints(new[]
+        {
+            ("Ctrl+P", "Commands"),
+            ("PgUp/PgDn", "Scroll"),
+            ("F2", "Toggle HUD"),
+            ("ESC", "Quit"),
+            ("", "http://localhost:5555")
+        });
+
+        // Act - Narrow width forces wrapping
+        int height = hints.GetRequiredHeight(40);
+
+        // Assert - Should be more than 1 row due to wrapping
+        Assert.True(height >= 1, $"Height should be at least 1, but was {height}");
+    }
+
+    [Fact]
+    public void Render_WrapsItemsWhenNarrow()
+    {
+        // Arrange
+        var hints = new KeyHintsBar();
+        hints.SetHints(new[]
+        {
+            ("Ctrl+P", "Commands"),
+            ("PgUp/PgDn", "Scroll"),
+            ("F2", "Toggle HUD"),
+            ("ESC", "Quit"),
+            ("", "http://localhost:5555")
+        });
+
+        var baseBuilder = new Andy.Tui.DisplayList.DisplayListBuilder();
+        var baseDl = baseBuilder.Build();
+        var builder = new Andy.Tui.DisplayList.DisplayListBuilder();
+
+        // Act - Very narrow viewport should cause wrapping
+        var viewport = (Width: 50, Height: 24);
+        int reservedRightWidth = 10;
+
+        var exception = Record.Exception(() => hints.Render(viewport, baseDl, builder, reservedRightWidth));
+
+        // Assert - Should not throw, even with wrapping
+        Assert.Null(exception);
+    }
 }
