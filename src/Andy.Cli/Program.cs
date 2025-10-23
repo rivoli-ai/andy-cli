@@ -123,7 +123,6 @@ class Program
             var toast = new Toast(); // Don't show initial toast as it interferes with prompt
             var tokenCounter = new TokenCounter();
             var statusMessage = new StatusMessage();
-            var status = new StatusLine(); status.Set("", spinner: false);
             var prompt = new PromptLine();
             bool isProcessingMessage = false; // Track if we're processing a message
             prompt.SetBorder(true);
@@ -1146,10 +1145,9 @@ class Program
 
                 // Bottom layout (from bottom up):
                 // - hintsBarHeight lines: hints bar + token counter
-                // - 1 line: status line (Idle, etc.)
                 // - 1 line: status message
-                // - 1 line: toast
-                int bottomReserved = hintsBarHeight + 3; // hints + status + message
+                // Toast overlaps with content area when visible
+                int bottomReserved = hintsBarHeight + 1; // hints + message
 
                 // Main output area and prompt at bottom
                 // Ensure we have enough space to render
@@ -1161,9 +1159,9 @@ class Program
 
                     int promptH = Math.Min(prompt.GetDesiredHeight(), Math.Max(3, viewport.Height / 2));
 
-                    // Position prompt and help from the bottom up (leaving 1 line gap before toast)
-                    // Layout from bottom: hints(hintsBarHeight) + status(1) + message(1) + toast(1) + gap(1) + help + prompt
-                    int promptY = Math.Max(3, viewport.Height - bottomReserved - 1 - helpH - promptH);
+                    // Position prompt and help from the bottom up (no gaps)
+                    // Layout from bottom: hints(hintsBarHeight) + status(1) + message(1) + help + prompt
+                    int promptY = Math.Max(3, viewport.Height - bottomReserved - helpH - promptH);
                     int helpY = promptY + promptH;
 
                     // Feed fills the space from header to prompt
@@ -1187,16 +1185,13 @@ class Program
                     b.DrawText(new DL.TextRun(2, 3, $"Min: {MIN_WIDTH}x{MIN_HEIGHT}", new DL.Rgb24(200, 200, 200), null, DL.CellAttrFlags.None));
                 }
 
-                // Render bottom UI elements (status, hints, token counter)
+                // Render bottom UI elements (hints, token counter, status message)
                 // These are positioned from the bottom up
-                int statusMessageY = viewport.Height - hintsBarHeight - 2;
+                int statusMessageY = viewport.Height - hintsBarHeight - 1;
                 statusMessage.RenderAt(2, statusMessageY, Math.Max(0, viewport.Width - 4), baseDl, wb);
 
-                status.Tick();
-                status.Render(viewport, baseDl, wb);
-
                 toast.Tick(); // Advance toast TTL
-                int toastY = viewport.Height - hintsBarHeight - 3;
+                int toastY = viewport.Height - hintsBarHeight - 2;
                 toast.RenderAt(2, toastY, baseDl, wb);
 
                 hints.Render(viewport, baseDl, wb, reservedRightWidth);
