@@ -123,10 +123,70 @@ namespace Andy.Cli.Widgets
             // Navigation keys
             if (k.Key == ConsoleKey.LeftArrow) { if (_cursor > 0) _cursor--; return null; }
             if (k.Key == ConsoleKey.RightArrow) { if (_cursor < _text.Length) _cursor++; return null; }
-            if (k.Key == ConsoleKey.Home) { _cursor = 0; return null; }
-            if (k.Key == ConsoleKey.End) { _cursor = _text.Length; return null; }
-            if (k.Key == ConsoleKey.UpArrow) { NavigateHistory(-1); return null; }
-            if (k.Key == ConsoleKey.DownArrow) { NavigateHistory(+1); return null; }
+
+            // Home/End - move to start/end of current line (or whole text if Ctrl is held)
+            if (k.Key == ConsoleKey.Home)
+            {
+                if ((k.Modifiers & ConsoleModifiers.Control) != 0)
+                {
+                    _cursor = 0; // Ctrl+Home: start of entire text
+                }
+                else
+                {
+                    // Move to start of current line
+                    while (_cursor > 0 && _text[_cursor - 1] != '\n')
+                    {
+                        _cursor--;
+                    }
+                }
+                return null;
+            }
+            if (k.Key == ConsoleKey.End)
+            {
+                if ((k.Modifiers & ConsoleModifiers.Control) != 0)
+                {
+                    _cursor = _text.Length; // Ctrl+End: end of entire text
+                }
+                else
+                {
+                    // Move to end of current line
+                    while (_cursor < _text.Length && _text[_cursor] != '\n')
+                    {
+                        _cursor++;
+                    }
+                }
+                return null;
+            }
+
+            // Up/Down arrows - navigate between lines in multi-line text, or history if single line
+            if (k.Key == ConsoleKey.UpArrow)
+            {
+                if ((k.Modifiers & ConsoleModifiers.Control) != 0)
+                {
+                    // Ctrl+Up: Navigate history
+                    NavigateHistory(-1);
+                }
+                else
+                {
+                    // Move cursor up one line
+                    MoveCursorVertically(-1);
+                }
+                return null;
+            }
+            if (k.Key == ConsoleKey.DownArrow)
+            {
+                if ((k.Modifiers & ConsoleModifiers.Control) != 0)
+                {
+                    // Ctrl+Down: Navigate history
+                    NavigateHistory(+1);
+                }
+                else
+                {
+                    // Move cursor down one line
+                    MoveCursorVertically(+1);
+                }
+                return null;
+            }
 
             // Editing keys
             if (k.Key == ConsoleKey.Backspace)
@@ -163,6 +223,35 @@ namespace Andy.Cli.Widgets
             _historyIndex = Math.Max(0, Math.Min(_history.Count, _historyIndex + delta));
             if (_historyIndex >= 0 && _historyIndex < _history.Count) { _text = _history[_historyIndex]; _cursor = _text.Length; }
             else { _historyIndex = -1; _text = string.Empty; _cursor = 0; }
+        }
+
+        private void MoveCursorVertically(int direction)
+        {
+            // direction: -1 for up, +1 for down
+            if (string.IsNullOrEmpty(_text)) return;
+
+            // Find current line and column
+            var (currentRow, currentCol) = GetCaretRowCol();
+            var lines = _text.Split('\n');
+
+            int targetRow = currentRow + direction;
+
+            // Boundary check
+            if (targetRow < 0 || targetRow >= lines.Length) return;
+
+            // Calculate new cursor position
+            // Move to the start of the target line
+            int newCursor = 0;
+            for (int i = 0; i < targetRow; i++)
+            {
+                newCursor += lines[i].Length + 1; // +1 for the newline character
+            }
+
+            // Try to maintain the same column position, or go to end of line if shorter
+            var targetLine = lines[targetRow];
+            newCursor += Math.Min(currentCol, targetLine.Length);
+
+            _cursor = Math.Clamp(newCursor, 0, _text.Length);
         }
 
         /// <summary>Render the prompt within the provided rectangle.</summary>

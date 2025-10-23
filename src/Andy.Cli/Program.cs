@@ -119,7 +119,7 @@ class Program
         {
             bool running = true;
             var hints = new KeyHintsBar();
-            hints.SetHints(new[] { ("Ctrl+P", "Commands"), ("F2", "Toggle HUD"), ("ESC", "Quit"), ("", "Instrumentation: http://localhost:5555") });
+            hints.SetHints(new[] { ("Ctrl+P", "Commands"), ("PgUp/PgDn", "Scroll"), ("F2", "Toggle HUD"), ("ESC", "Quit") });
             var toast = new Toast(); // Don't show initial toast as it interferes with prompt
             var tokenCounter = new TokenCounter();
             var statusMessage = new StatusMessage();
@@ -580,8 +580,10 @@ class Program
                             "- **Ctrl+D**: Quit application\n" +
                             "- **F2**: Toggle HUD (performance overlay)\n" +
                             "- **ESC**: Quit application\n" +
-                            "- **↑/↓**: Scroll chat history\n" +
-                            "- **Page Up/Down**: Fast scroll\n\n" +
+                            "- **Page Up/Down**: Scroll chat history\n" +
+                            "- **↑/↓**: Navigate multi-line text / History (Ctrl+↑/↓)\n" +
+                            "- **Ctrl+A/E**: Jump to start/end of text\n" +
+                            "- **Home/End**: Start/end of line (Ctrl: whole text)\n\n" +
                             "## Commands:\n" +
                             "### General Commands:\n" +
                             "- **/exit**, **/bye**, **/quit**: Exit the application\n" +
@@ -914,8 +916,10 @@ class Program
                                         "- **Ctrl+D**: Quit application\n" +
                                         "- **F2**: Toggle HUD (performance overlay)\n" +
                                         "- **ESC**: Quit application\n" +
-                                        "- **↑/↓**: Scroll chat history\n" +
-                                        "- **Page Up/Down**: Fast scroll\n\n" +
+                                        "- **Page Up/Down**: Scroll chat history\n" +
+                                        "- **↑/↓**: Navigate multi-line text / History (Ctrl+↑/↓)\n" +
+                                        "- **Ctrl+A/E**: Jump to start/end of text\n" +
+                                        "- **Home/End**: Start/end of line (Ctrl: whole text)\n\n" +
                                         "## Commands:\n" +
                                         "### General Commands:\n" +
                                         "- **/exit**, **/bye**, **/quit**: Exit the application\n" +
@@ -1020,8 +1024,8 @@ class Program
                         // The initialization error message above already informed them
                         return;
                     }
-                    if (k.Key == ConsoleKey.UpArrow) feed.ScrollLines(+2, Math.Max(1, viewport.Height - 5));
-                    if (k.Key == ConsoleKey.DownArrow) feed.ScrollLines(-2, Math.Max(1, viewport.Height - 5));
+                    // Up/Down arrows are now used for navigating multi-line prompt text
+                    // Use PageUp/PageDown for scrolling the feed instead
                     if (k.Key == ConsoleKey.Tab && (k.Modifiers & ConsoleModifiers.Control) != 0)
                     {
                         // Toggle focus between prompt and feed
