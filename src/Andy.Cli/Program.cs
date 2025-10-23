@@ -119,7 +119,7 @@ class Program
         {
             bool running = true;
             var hints = new KeyHintsBar();
-            hints.SetHints(new[] { ("Ctrl+P", "Commands"), ("PgUp/PgDn", "Scroll"), ("F2", "Toggle HUD"), ("ESC", "Quit") });
+            hints.SetHints(new[] { ("Ctrl+P", "Commands"), ("PgUp/PgDn", "Scroll"), ("F2", "Toggle HUD"), ("ESC", "Quit"), ("", "http://localhost:5555") });
             var toast = new Toast(); // Don't show initial toast as it interferes with prompt
             var tokenCounter = new TokenCounter();
             var statusMessage = new StatusMessage();
