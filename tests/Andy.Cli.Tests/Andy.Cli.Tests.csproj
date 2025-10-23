@@ -46,6 +46,8 @@
     <Compile Include="Widgets/MarkdownRenderingTests.cs" />
     <!-- Token counter tests -->
     <Compile Include="Widgets/TokenCounterTests.cs" />
+    <!-- KeyHintsBar tests -->
+    <Compile Include="Widgets/KeyHintsBarTests.cs" />
     <!-- Code indexing tests -->
     <Compile Include="Tools/CodeIndexToolTests.cs" />
     <!-- Parallel tool execution tests -->
