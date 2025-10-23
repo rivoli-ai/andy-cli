@@ -127,23 +127,47 @@ namespace Andy.Cli.Widgets
                 return null;
             }
 
-            // Ctrl+K - Kill line from cursor to end (emacs-style)
+            // Ctrl+K - Kill line from cursor to end of current line (emacs-style)
             if (k.Key == ConsoleKey.K && (k.Modifiers & ConsoleModifiers.Control) != 0)
             {
                 if (_cursor < _text.Length)
                 {
-                    _text = _text.Remove(_cursor);
+                    // Find the end of current line (next newline or end of text)
+                    int endOfLine = _cursor;
+                    while (endOfLine < _text.Length && _text[endOfLine] != '\n')
+                    {
+                        endOfLine++;
+                    }
+
+                    // Remove from cursor to end of line (but not the newline itself)
+                    int lengthToRemove = endOfLine - _cursor;
+                    if (lengthToRemove > 0)
+                    {
+                        _text = _text.Remove(_cursor, lengthToRemove);
+                    }
                 }
                 return null;
             }
 
-            // Ctrl+U - Kill line from beginning to cursor (emacs-style)
+            // Ctrl+U - Kill line from beginning of current line to cursor (emacs-style)
             if (k.Key == ConsoleKey.U && (k.Modifiers & ConsoleModifiers.Control) != 0)
             {
                 if (_cursor > 0)
                 {
-                    _text = _text.Substring(_cursor);
-                    _cursor = 0;
+                    // Find the start of current line (previous newline or start of text)
+                    int startOfLine = _cursor - 1;
+                    while (startOfLine > 0 && _text[startOfLine - 1] != '\n')
+                    {
+                        startOfLine--;
+                    }
+
+                    // Remove from start of line to cursor
+                    int lengthToRemove = _cursor - startOfLine;
+                    if (lengthToRemove > 0)
+                    {
+                        _text = _text.Remove(startOfLine, lengthToRemove);
+                        _cursor = startOfLine;
+                    }
                 }
                 return null;
             }
