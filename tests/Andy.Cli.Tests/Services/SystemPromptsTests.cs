@@ -13,7 +13,7 @@ public class SystemPromptsTests
 
         // Assert
         Assert.NotEmpty(prompt);
-        Assert.Contains("Core Mandates", prompt);
+        Assert.Contains("Core Principles", prompt);
         Assert.Contains("Workflow Guidelines", prompt);
         Assert.Contains("Environment Context", prompt);
         Assert.Contains("Platform:", prompt);
