@@ -582,8 +582,10 @@ class Program
                             "- **ESC**: Quit application\n" +
                             "- **Page Up/Down**: Scroll chat history\n" +
                             "- **↑/↓**: Navigate multi-line text / History (Ctrl+↑/↓)\n" +
-                            "- **Ctrl+A/E**: Jump to start/end of text\n" +
-                            "- **Home/End**: Start/end of line (Ctrl: whole text)\n\n" +
+                            "- **Ctrl+A/E**: Jump to start/end of current line\n" +
+                            "- **Home/End**: Start/end of line (Ctrl: whole text)\n" +
+                            "- **Ctrl+K**: Delete from cursor to end of line\n" +
+                            "- **Ctrl+U**: Delete from start of line to cursor\n\n" +
                             "## Commands:\n" +
                             "### General Commands:\n" +
                             "- **/exit**, **/bye**, **/quit**: Exit the application\n" +
@@ -918,8 +920,10 @@ class Program
                                         "- **ESC**: Quit application\n" +
                                         "- **Page Up/Down**: Scroll chat history\n" +
                                         "- **↑/↓**: Navigate multi-line text / History (Ctrl+↑/↓)\n" +
-                                        "- **Ctrl+A/E**: Jump to start/end of text\n" +
-                                        "- **Home/End**: Start/end of line (Ctrl: whole text)\n\n" +
+                                        "- **Ctrl+A/E**: Jump to start/end of current line\n" +
+                                        "- **Home/End**: Start/end of line (Ctrl: whole text)\n" +
+                                        "- **Ctrl+K**: Delete from cursor to end of line\n" +
+                                        "- **Ctrl+U**: Delete from start of line to cursor\n\n" +
                                         "## Commands:\n" +
                                         "### General Commands:\n" +
                                         "- **/exit**, **/bye**, **/quit**: Exit the application\n" +

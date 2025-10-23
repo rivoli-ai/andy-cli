@@ -105,16 +105,26 @@ namespace Andy.Cli.Widgets
                 }
             }
 
-            // Ctrl+A - Move to beginning of text (emacs-style)
+            // Ctrl+A - Move to beginning of current line (emacs-style)
             if (k.Key == ConsoleKey.A && (k.Modifiers & ConsoleModifiers.Control) != 0)
             {
-                _cursor = 0; return null;
+                // Move to start of current line
+                while (_cursor > 0 && _text[_cursor - 1] != '\n')
+                {
+                    _cursor--;
+                }
+                return null;
             }
 
-            // Ctrl+E - Move to end of text (emacs-style)
+            // Ctrl+E - Move to end of current line (emacs-style)
             if (k.Key == ConsoleKey.E && (k.Modifiers & ConsoleModifiers.Control) != 0)
             {
-                _cursor = _text.Length; return null;
+                // Move to end of current line
+                while (_cursor < _text.Length && _text[_cursor] != '\n')
+                {
+                    _cursor++;
+                }
+                return null;
             }
 
             // Ctrl+K - Kill line from cursor to end (emacs-style)
