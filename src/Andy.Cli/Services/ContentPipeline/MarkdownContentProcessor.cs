@@ -10,7 +10,7 @@ namespace Andy.Cli.Services.ContentPipeline;
 /// </summary>
 public class MarkdownContentProcessor : IContentProcessor
 {
-    private static readonly Regex CodeBlockPattern = new(@"```(\w*)\s*\n(.*?)\n```", RegexOptions.Singleline | RegexOptions.Compiled);
+    private static readonly Regex CodeBlockPattern = new(@"```(\w*)\s*[\r\n]+(.*?)[\r\n]+```", RegexOptions.Singleline | RegexOptions.Compiled);
     private static readonly Regex InlineCodePattern = new(@"`([^`\n]+)`", RegexOptions.Compiled);
 
     public IEnumerable<IContentBlock> Process(string rawContent, string blockIdPrefix = "")

@@ -576,11 +576,17 @@ public class InstrumentationServer : IDisposable
             overflow-x: auto;
             margin-bottom: 12px;
             border-left: 3px solid #7c3aed;
+            font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+            white-space: pre;
         }
         .system-prompt-content pre code {
             background: transparent;
             padding: 0;
             color: #e4e4e7;
+            font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+            font-size: 12px;
+            display: block;
+            line-height: 1.5;
         }
         .system-prompt-content blockquote {
             border-left: 4px solid #667eea;
@@ -1091,6 +1097,14 @@ public class InstrumentationServer : IDisposable
 
         // Store raw markdown for copying
         let rawSystemPrompt = '';
+
+        // Configure marked.js for proper rendering
+        marked.setOptions({
+            breaks: true,
+            gfm: true,
+            headerIds: false,
+            mangle: false
+        });
 
         // Fetch system prompt on page load
         fetch('/system-prompt')

@@ -35,6 +35,7 @@
     <Compile Include="Services/ProviderDetectionServiceTests.cs" />
     <Compile Include="Services/SystemPromptBuilderTests.cs" />
     <Compile Include="Services/SystemPromptsTests.cs" />
+    <Compile Include="Services/MarkdownContentProcessorTests.cs" />
     <Compile Include="ModelCommandProviderSwitchTests.cs" />
     <!-- Tool rendering tests -->
     <Compile Include="Widgets/ToolRenderingTestBase.cs" />
