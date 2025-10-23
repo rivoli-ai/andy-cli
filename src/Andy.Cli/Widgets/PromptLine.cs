@@ -23,7 +23,8 @@ namespace Andy.Cli.Widgets
         private bool _useTerminalCursor = true;
         private int _lastX, _lastY, _lastInnerW, _lastStart;
         private DateTime _lastKeyTime = DateTime.MinValue;
-        private const int PasteDetectionThresholdMs = 50; // Keys within 50ms are considered a paste
+        private const int PasteDetectionThresholdMs = 100; // Keys within 100ms are considered a paste
+        private int _rapidKeyCount = 0; // Count rapid keys to detect paste more reliably
 
         /// <summary>Provide a suggestion function for ghost text.</summary>
         public void SetSuggestionProvider(Func<string, string?>? provider) => _suggest = provider;
@@ -57,9 +58,21 @@ namespace Andy.Cli.Widgets
         public string? OnKey(ConsoleKeyInfo k)
         {
             // Detect paste operation by checking if keys are arriving rapidly
+            // A paste is detected when we get multiple keys in rapid succession
             var now = DateTime.UtcNow;
             var timeSinceLastKey = (now - _lastKeyTime).TotalMilliseconds;
-            var isPasting = timeSinceLastKey < PasteDetectionThresholdMs;
+
+            if (timeSinceLastKey < PasteDetectionThresholdMs)
+            {
+                _rapidKeyCount++;
+            }
+            else
+            {
+                _rapidKeyCount = 0; // Reset counter if there's a pause
+            }
+
+            // Consider it pasting if we've had 3+ rapid keys in a row
+            var isPasting = _rapidKeyCount >= 2;
             _lastKeyTime = now;
 
             // Ctrl+Enter inserts newline
@@ -209,11 +222,29 @@ namespace Andy.Cli.Widgets
                 {
                     ch = '\n';
                 }
-                _text = _text.Insert(_cursor, ch.ToString());
-                _cursor++;
+
+                // Filter out any escape sequences or control codes that might slip through
+                // but preserve actual newlines
+                if (ch >= 32 || ch == '\n' || ch == '\t')
+                {
+                    _text = _text.Insert(_cursor, ch.ToString());
+                    _cursor++;
+                }
                 return null;
             }
             return null;
+        }
+
+        /// <summary>Handle pasted text directly (used for bracketed paste mode support)</summary>
+        public void InsertText(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+
+            // Normalize line endings
+            text = text.Replace("\r\n", "\n").Replace('\r', '\n');
+
+            _text = _text.Insert(_cursor, text);
+            _cursor += text.Length;
         }
 
         private void NavigateHistory(int delta)
