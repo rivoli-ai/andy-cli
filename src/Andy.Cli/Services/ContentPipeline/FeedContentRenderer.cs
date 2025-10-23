@@ -1,6 +1,7 @@
 using System;
 using Andy.Cli.Widgets;
 using Microsoft.Extensions.Logging;
+using static Andy.Cli.Widgets.FeedView;
 
 namespace Andy.Cli.Services.ContentPipeline;
 
@@ -67,8 +68,15 @@ public class FeedContentRenderer : IContentRenderer
         if (string.IsNullOrWhiteSpace(block.Code))
             return;
 
+        // Add spacing before code block for visual separation
+        _feedView.AddItem(new SpacerItem(1));
+
         _feedView.AddCode(block.Code, block.Language);
-        _logger?.LogTrace("Rendered code block {BlockId} with language {Language} and {Length} characters", 
+
+        // Add spacing after code block for visual separation
+        _feedView.AddItem(new SpacerItem(1));
+
+        _logger?.LogTrace("Rendered code block {BlockId} with language {Language} and {Length} characters",
             block.Id, block.Language ?? "none", block.Code.Length);
     }
 
