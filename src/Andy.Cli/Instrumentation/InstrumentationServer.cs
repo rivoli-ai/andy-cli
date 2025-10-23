@@ -193,6 +193,7 @@ public class InstrumentationServer : IDisposable
     <meta charset=""UTF-8"">
     <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
     <title>Andy Engine Instrumentation</title>
+    <script src=""https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js""></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -445,13 +446,19 @@ public class InstrumentationServer : IDisposable
             display: flex;
             align-items: center;
             justify-content: space-between;
-            cursor: pointer;
-            user-select: none;
             background: rgba(124, 58, 237, 0.1);
             border-bottom: 1px solid rgba(255, 255, 255, 0.05);
         }
-        .system-prompt-header:hover {
-            background: rgba(124, 58, 237, 0.15);
+        .system-prompt-header-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            cursor: pointer;
+            user-select: none;
+            flex: 1;
+        }
+        .system-prompt-header-left:hover {
+            opacity: 0.8;
         }
         .system-prompt-title {
             background: linear-gradient(135deg, #00d4ff 0%, #7c3aed 100%);
@@ -471,16 +478,41 @@ public class InstrumentationServer : IDisposable
         .system-prompt-section.expanded .system-prompt-toggle {
             transform: rotate(180deg);
         }
+        .copy-btn {
+            background: linear-gradient(135deg, #06ffa5 0%, #00d4ff 100%);
+            color: #0f0f23;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-family: inherit;
+            font-weight: 600;
+            font-size: 11px;
+            transition: all 0.2s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            box-shadow: 0 2px 8px rgba(6, 255, 165, 0.3);
+        }
+        .copy-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(6, 255, 165, 0.4);
+        }
+        .copy-btn:active {
+            transform: translateY(0);
+        }
+        .copy-btn.copied {
+            background: linear-gradient(135deg, #7c3aed 0%, #667eea 100%);
+            color: white;
+        }
         .system-prompt-content {
             display: none;
             padding: 20px;
-            font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
-            font-size: 12px;
-            line-height: 1.6;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            font-size: 13px;
+            line-height: 1.7;
             color: #e4e4e7;
-            white-space: pre-wrap;
             background: rgba(0, 0, 0, 0.2);
-            max-height: 400px;
+            max-height: 500px;
             overflow-y: auto;
             scrollbar-width: thin;
             scrollbar-color: #667eea #1a1a2e;
@@ -498,6 +530,65 @@ public class InstrumentationServer : IDisposable
         }
         .system-prompt-section.expanded .system-prompt-content {
             display: block;
+        }
+        /* Markdown styling */
+        .system-prompt-content h1,
+        .system-prompt-content h2,
+        .system-prompt-content h3 {
+            background: linear-gradient(135deg, #00d4ff 0%, #7c3aed 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-top: 20px;
+            margin-bottom: 12px;
+            font-weight: 700;
+        }
+        .system-prompt-content h1 { font-size: 20px; }
+        .system-prompt-content h2 { font-size: 17px; }
+        .system-prompt-content h3 { font-size: 15px; }
+        .system-prompt-content p {
+            margin-bottom: 12px;
+        }
+        .system-prompt-content ul,
+        .system-prompt-content ol {
+            margin-left: 20px;
+            margin-bottom: 12px;
+        }
+        .system-prompt-content li {
+            margin-bottom: 6px;
+        }
+        .system-prompt-content strong {
+            color: #00d4ff;
+            font-weight: 700;
+        }
+        .system-prompt-content code {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+            font-size: 12px;
+            color: #ffd60a;
+        }
+        .system-prompt-content pre {
+            background: rgba(0, 0, 0, 0.4);
+            padding: 12px;
+            border-radius: 6px;
+            overflow-x: auto;
+            margin-bottom: 12px;
+            border-left: 3px solid #7c3aed;
+        }
+        .system-prompt-content pre code {
+            background: transparent;
+            padding: 0;
+            color: #e4e4e7;
+        }
+        .system-prompt-content blockquote {
+            border-left: 4px solid #667eea;
+            padding-left: 16px;
+            margin-left: 0;
+            margin-bottom: 12px;
+            color: #a1a1aa;
+            font-style: italic;
         }
         .filter-section {
             margin-bottom: 25px;
@@ -630,9 +721,12 @@ public class InstrumentationServer : IDisposable
     <h1>Andy Engine Instrumentation</h1>
 
     <div class=""system-prompt-section"" id=""systemPromptSection"">
-        <div class=""system-prompt-header"" onclick=""toggleSystemPrompt()"">
-            <span class=""system-prompt-title"">System Prompt</span>
-            <span class=""system-prompt-toggle"">▼</span>
+        <div class=""system-prompt-header"">
+            <div class=""system-prompt-header-left"" onclick=""toggleSystemPrompt()"">
+                <span class=""system-prompt-title"">System Prompt</span>
+                <span class=""system-prompt-toggle"">▼</span>
+            </div>
+            <button class=""copy-btn"" id=""copyPromptBtn"" onclick=""copySystemPrompt(event)"">Copy</button>
         </div>
         <div class=""system-prompt-content"" id=""systemPromptContent"">Loading...</div>
     </div>
@@ -995,13 +1089,18 @@ public class InstrumentationServer : IDisposable
             updateFilters();
         }
 
+        // Store raw markdown for copying
+        let rawSystemPrompt = '';
+
         // Fetch system prompt on page load
         fetch('/system-prompt')
             .then(response => response.json())
             .then(data => {
                 const content = document.getElementById('systemPromptContent');
                 if (data.systemPrompt && data.systemPrompt.length > 0) {
-                    content.textContent = data.systemPrompt;
+                    rawSystemPrompt = data.systemPrompt;
+                    // Render markdown to HTML
+                    content.innerHTML = marked.parse(data.systemPrompt);
                 } else {
                     content.textContent = 'No system prompt configured';
                     content.style.fontStyle = 'italic';
@@ -1012,6 +1111,30 @@ public class InstrumentationServer : IDisposable
                 console.error('Failed to fetch system prompt:', error);
                 document.getElementById('systemPromptContent').textContent = 'Failed to load system prompt';
             });
+
+        // Copy system prompt to clipboard
+        function copySystemPrompt(event) {
+            event.stopPropagation(); // Prevent toggling expand/collapse
+
+            if (!rawSystemPrompt) {
+                return;
+            }
+
+            navigator.clipboard.writeText(rawSystemPrompt).then(() => {
+                const btn = document.getElementById('copyPromptBtn');
+                const originalText = btn.textContent;
+                btn.textContent = 'Copied!';
+                btn.classList.add('copied');
+
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                    btn.classList.remove('copied');
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+                alert('Failed to copy to clipboard');
+            });
+        }
     </script>
 </body>
 </html>";
