@@ -23,8 +23,9 @@ namespace Andy.Cli.Widgets
         private bool _useTerminalCursor = true;
         private int _lastX, _lastY, _lastInnerW, _lastStart;
         private DateTime _lastKeyTime = DateTime.MinValue;
-        private const int PasteDetectionThresholdMs = 100; // Keys within 100ms are considered a paste
-        private int _rapidKeyCount = 0; // Count rapid keys to detect paste more reliably
+        private const int PasteDetectionThresholdMs = 30; // Keys within 30ms are considered a paste
+        private bool _inPasteMode = false;
+        private DateTime _pasteStartTime = DateTime.MinValue;
 
         /// <summary>Provide a suggestion function for ghost text.</summary>
         public void SetSuggestionProvider(Func<string, string?>? provider) => _suggest = provider;
@@ -57,22 +58,26 @@ namespace Andy.Cli.Widgets
         /// <summary>Handle a key press. Ctrl+Enter inserts newline. Returns submitted line on Enter (no Ctrl); otherwise null.</summary>
         public string? OnKey(ConsoleKeyInfo k)
         {
-            // Detect paste operation by checking if keys are arriving rapidly
-            // A paste is detected when we get multiple keys in rapid succession
             var now = DateTime.UtcNow;
             var timeSinceLastKey = (now - _lastKeyTime).TotalMilliseconds;
 
-            if (timeSinceLastKey < PasteDetectionThresholdMs)
+            // Enter paste mode if keys are arriving rapidly
+            if (timeSinceLastKey < PasteDetectionThresholdMs && timeSinceLastKey > 0)
             {
-                _rapidKeyCount++;
-            }
-            else
-            {
-                _rapidKeyCount = 0; // Reset counter if there's a pause
+                if (!_inPasteMode)
+                {
+                    _inPasteMode = true;
+                    _pasteStartTime = now;
+                }
             }
 
-            // Consider it pasting if we've had 3+ rapid keys in a row
-            var isPasting = _rapidKeyCount >= 2;
+            // Exit paste mode after 500ms of inactivity
+            if (_inPasteMode && timeSinceLastKey > 500)
+            {
+                _inPasteMode = false;
+            }
+
+            var isPasting = _inPasteMode;
             _lastKeyTime = now;
 
             // Ctrl+Enter inserts newline
@@ -217,15 +222,36 @@ namespace Andy.Cli.Widgets
             if (!char.IsControl(k.KeyChar) || k.KeyChar == '\n' || k.KeyChar == '\r')
             {
                 var ch = k.KeyChar;
-                // Normalize line endings: convert \r to \n
+
+                // When pasting, handle line endings specially to support CRLF
                 if (ch == '\r')
                 {
-                    ch = '\n';
+                    // Always insert newline for \r
+                    _text = _text.Insert(_cursor, "\n");
+                    _cursor++;
+                    return null;
+                }
+                else if (ch == '\n')
+                {
+                    // Check if the previous character was a newline (from \r in CRLF)
+                    // If so, skip this \n to avoid double newlines
+                    if (_cursor > 0 && _text[_cursor - 1] == '\n')
+                    {
+                        // Previous char was already a newline from \r, skip this \n
+                        return null;
+                    }
+                    else
+                    {
+                        // Standalone \n, insert it
+                        _text = _text.Insert(_cursor, "\n");
+                        _cursor++;
+                        return null;
+                    }
                 }
 
                 // Filter out any escape sequences or control codes that might slip through
-                // but preserve actual newlines
-                if (ch >= 32 || ch == '\n' || ch == '\t')
+                // but preserve printable characters and tabs
+                if (ch >= 32 || ch == '\t')
                 {
                     _text = _text.Insert(_cursor, ch.ToString());
                     _cursor++;
