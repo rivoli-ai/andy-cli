@@ -28,10 +28,15 @@ namespace Andy.Cli.Widgets
             var theme = Theme.Current;
             int y = Math.Max(0, viewport.Height - 1);
             int x = 0; int w = viewport.Width;
-            b.PushClip(new DL.ClipPush(x, y, w, 1));
-            b.DrawRect(new DL.Rect(x, y, w, 1, theme.KeyHintsBackground));
+
+            // Calculate available width for hints (excluding reserved area)
+            int availableWidth = w - reservedRightWidth;
+            int maxX = x + availableWidth - 1; // Reserve space on the right
+
+            // Only clip and draw background for the hints area (not the reserved area)
+            b.PushClip(new DL.ClipPush(x, y, availableWidth, 1));
+            b.DrawRect(new DL.Rect(x, y, availableWidth, 1, theme.KeyHintsBackground));
             int cx = x + 1;
-            int maxX = x + w - reservedRightWidth - 1; // Reserve space on the right
             for (int i = 0; i < _hints.Count && cx < maxX; i++)
             {
                 var (k, a) = _hints[i];
