@@ -436,10 +436,10 @@ public class SimpleAssistantService : IDisposable
                 result.Success, result.Response?.Length ?? 0, result.StopReason);
 
             // Add blank line after tools if they were executed
-            // Add it through the pipeline so it appears correctly before the response
+            // Use SpacerItem since both pipeline and AddMarkdownRich filter out empty content
             if (toolsWereExecuted)
             {
-                pipeline.AddRawContent("");
+                _feed.AddItem(new Andy.Cli.Widgets.SpacerItem(1));
             }
 
             // Add response to pipeline
