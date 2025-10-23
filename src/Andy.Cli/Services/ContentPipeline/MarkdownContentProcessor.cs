@@ -20,7 +20,7 @@ public class MarkdownContentProcessor : IContentProcessor
 
         var blocks = new List<IContentBlock>();
         var blockCounter = 0;
-        
+
         // Split content by code blocks first
         var parts = SplitByCodeBlocks(rawContent);
         
@@ -56,9 +56,9 @@ public class MarkdownContentProcessor : IContentProcessor
     {
         var parts = new List<ContentPart>();
         var lastIndex = 0;
-        
+
         var matches = CodeBlockPattern.Matches(content);
-        
+
         foreach (Match match in matches)
         {
             // Add text before code block
