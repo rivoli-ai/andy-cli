@@ -54,26 +54,81 @@ namespace Andy.Cli.Widgets
         /// <summary>Handle a key press. Ctrl+Enter inserts newline. Returns submitted line on Enter (no Ctrl); otherwise null.</summary>
         public string? OnKey(ConsoleKeyInfo k)
         {
+            // Ctrl+Enter inserts newline
             if (k.Key == ConsoleKey.Enter && (k.Modifiers & ConsoleModifiers.Control) != 0)
             {
                 _text = _text.Insert(_cursor, "\n"); _cursor++; return null;
             }
+
+            // Enter submits
             if (k.Key == ConsoleKey.Enter)
             {
                 var s = _text; if (!string.IsNullOrWhiteSpace(s)) { _history.Add(s); }
                 _historyIndex = -1; _text = string.Empty; _cursor = 0; return s;
             }
+
+            // Ctrl+A - Move to beginning of text (emacs-style)
+            if (k.Key == ConsoleKey.A && (k.Modifiers & ConsoleModifiers.Control) != 0)
+            {
+                _cursor = 0; return null;
+            }
+
+            // Ctrl+E - Move to end of text (emacs-style)
+            if (k.Key == ConsoleKey.E && (k.Modifiers & ConsoleModifiers.Control) != 0)
+            {
+                _cursor = _text.Length; return null;
+            }
+
+            // Ctrl+K - Kill line from cursor to end (emacs-style)
+            if (k.Key == ConsoleKey.K && (k.Modifiers & ConsoleModifiers.Control) != 0)
+            {
+                if (_cursor < _text.Length)
+                {
+                    _text = _text.Remove(_cursor);
+                }
+                return null;
+            }
+
+            // Ctrl+U - Kill line from beginning to cursor (emacs-style)
+            if (k.Key == ConsoleKey.U && (k.Modifiers & ConsoleModifiers.Control) != 0)
+            {
+                if (_cursor > 0)
+                {
+                    _text = _text.Substring(_cursor);
+                    _cursor = 0;
+                }
+                return null;
+            }
+
+            // Navigation keys
             if (k.Key == ConsoleKey.LeftArrow) { if (_cursor > 0) _cursor--; return null; }
             if (k.Key == ConsoleKey.RightArrow) { if (_cursor < _text.Length) _cursor++; return null; }
-            if (k.Key == ConsoleKey.Backspace) { if (_cursor > 0) { bool wasNewline = _text[_cursor - 1] == '\n'; _text = _text.Remove(_cursor - 1, 1); _cursor--; /* shrink happens via GetLineCount */ } return null; }
-            if (k.Key == ConsoleKey.Delete) { if (_cursor < _text.Length) { _text = _text.Remove(_cursor, 1); } return null; }
             if (k.Key == ConsoleKey.Home) { _cursor = 0; return null; }
             if (k.Key == ConsoleKey.End) { _cursor = _text.Length; return null; }
             if (k.Key == ConsoleKey.UpArrow) { NavigateHistory(-1); return null; }
             if (k.Key == ConsoleKey.DownArrow) { NavigateHistory(+1); return null; }
-            if (!char.IsControl(k.KeyChar))
+
+            // Editing keys
+            if (k.Key == ConsoleKey.Backspace)
+            {
+                if (_cursor > 0)
+                {
+                    _text = _text.Remove(_cursor - 1, 1);
+                    _cursor--;
+                }
+                return null;
+            }
+            if (k.Key == ConsoleKey.Delete) { if (_cursor < _text.Length) { _text = _text.Remove(_cursor, 1); } return null; }
+
+            // Insert regular characters (including pasted newlines)
+            if (!char.IsControl(k.KeyChar) || k.KeyChar == '\n' || k.KeyChar == '\r')
             {
                 var ch = k.KeyChar;
+                // Normalize line endings: convert \r to \n
+                if (ch == '\r')
+                {
+                    ch = '\n';
+                }
                 _text = _text.Insert(_cursor, ch.ToString());
                 _cursor++;
                 return null;
