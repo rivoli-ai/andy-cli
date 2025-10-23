@@ -37,8 +37,11 @@ namespace Andy.Cli.Widgets
             b.PushClip(new DL.ClipPush(x, y, availableWidth, 1));
             b.DrawRect(new DL.Rect(x, y, availableWidth, 1, theme.KeyHintsBackground));
             int cx = x + 1;
-            for (int i = 0; i < _hints.Count && cx < maxX; i++)
+            for (int i = 0; i < _hints.Count; i++)
             {
+                // Stop if we've run out of space
+                if (cx >= maxX) break;
+
                 var (k, a) = _hints[i];
                 string ks = k ?? string.Empty;
                 string txt = a ?? string.Empty;
@@ -46,7 +49,11 @@ namespace Andy.Cli.Widgets
                 // If key is empty, this is a plain text item (like a URL)
                 if (string.IsNullOrEmpty(ks))
                 {
+                    if (cx >= maxX) break; // No room left
+
                     int txtRoom = maxX - cx;
+                    if (txtRoom <= 0) break;
+
                     string txtClipped = txt.Length > txtRoom ? txt.Substring(0, txtRoom) : txt;
 
                     // Check if the text contains a URL
@@ -64,8 +71,11 @@ namespace Andy.Cli.Widgets
                             {
                                 int prefixRoom = maxX - cx;
                                 var clippedPrefix = prefix.Length > prefixRoom ? prefix.Substring(0, prefixRoom) : prefix;
-                                b.DrawText(new DL.TextRun(cx, y, clippedPrefix, theme.TextDim, theme.KeyHintsBackground, DL.CellAttrFlags.None));
-                                cx += clippedPrefix.Length;
+                                if (clippedPrefix.Length > 0)
+                                {
+                                    b.DrawText(new DL.TextRun(cx, y, clippedPrefix, theme.TextDim, theme.KeyHintsBackground, DL.CellAttrFlags.None));
+                                    cx += clippedPrefix.Length;
+                                }
                             }
 
                             // Render URL with hyperlink (OSC 8) and underline
@@ -74,28 +84,42 @@ namespace Andy.Cli.Widgets
                                 int urlRoom = maxX - cx;
                                 var clippedUrl = url.Length > urlRoom ? url.Substring(0, urlRoom) : url;
 
-                                // OSC 8 hyperlink: \e]8;;URL\e\\TEXT\e]8;;\e\\
-                                var hyperlinkStart = $"\u001b]8;;{url}\u001b\\";
-                                var hyperlinkEnd = "\u001b]8;;\u001b\\";
-                                var hyperlinkText = hyperlinkStart + clippedUrl + hyperlinkEnd;
+                                if (clippedUrl.Length > 0)
+                                {
+                                    // OSC 8 hyperlink: \e]8;;URL\e\\TEXT\e]8;;\e\\
+                                    var hyperlinkStart = $"\u001b]8;;{url}\u001b\\";
+                                    var hyperlinkEnd = "\u001b]8;;\u001b\\";
+                                    var hyperlinkText = hyperlinkStart + clippedUrl + hyperlinkEnd;
 
-                                // Use cyan color and underline for the link
-                                b.DrawText(new DL.TextRun(cx, y, hyperlinkText, new DL.Rgb24(100, 200, 255), theme.KeyHintsBackground, DL.CellAttrFlags.Underline));
-                                cx += clippedUrl.Length;
+                                    // Use cyan color and underline for the link
+                                    b.DrawText(new DL.TextRun(cx, y, hyperlinkText, new DL.Rgb24(100, 200, 255), theme.KeyHintsBackground, DL.CellAttrFlags.Underline));
+                                    cx += clippedUrl.Length;
+                                }
                             }
                         }
                         else
+                        {
+                            if (txtClipped.Length > 0)
+                            {
+                                b.DrawText(new DL.TextRun(cx, y, txtClipped, theme.TextDim, theme.KeyHintsBackground, DL.CellAttrFlags.None));
+                                cx += txtClipped.Length;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        if (txtClipped.Length > 0)
                         {
                             b.DrawText(new DL.TextRun(cx, y, txtClipped, theme.TextDim, theme.KeyHintsBackground, DL.CellAttrFlags.None));
                             cx += txtClipped.Length;
                         }
                     }
-                    else
+
+                    // Only add spacing if there's room AND we're not at the last item
+                    if (i < _hints.Count - 1 && cx + 3 < maxX)
                     {
-                        b.DrawText(new DL.TextRun(cx, y, txtClipped, theme.TextDim, theme.KeyHintsBackground, DL.CellAttrFlags.None));
-                        cx += txtClipped.Length;
+                        cx += 3; // spacing
                     }
-                    cx += 3; // spacing
                     continue;
                 }
 
@@ -104,10 +128,20 @@ namespace Andy.Cli.Widgets
                 b.DrawText(new DL.TextRun(cx, y, bracket, theme.KeyHighlight, theme.KeyHintsBackground, DL.CellAttrFlags.Bold));
                 cx += bracket.Length;
                 if (cx >= maxX) break;
+
                 int room = maxX - cx;
                 string clipped = txt.Length > room ? txt.Substring(0, room) : txt;
-                b.DrawText(new DL.TextRun(cx, y, clipped, theme.TextDim, theme.KeyHintsBackground, DL.CellAttrFlags.None));
-                cx += clipped.Length + 3; // spacing
+                if (clipped.Length > 0)
+                {
+                    b.DrawText(new DL.TextRun(cx, y, clipped, theme.TextDim, theme.KeyHintsBackground, DL.CellAttrFlags.None));
+                    cx += clipped.Length;
+                }
+
+                // Only add spacing if there's room AND we're not at the last item
+                if (i < _hints.Count - 1 && cx + 3 < maxX)
+                {
+                    cx += 3; // spacing
+                }
             }
             b.Pop();
         }
