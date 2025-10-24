@@ -872,7 +872,10 @@ namespace Andy.Cli.Widgets
             // Calculate actual line count considering word wrapping
             if (width <= 0) return 1;
 
-            var lines = _md.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+            // Apply the same paragraph spacing transformation that the renderer will apply
+            // to get an accurate line count
+            var markdown = SimulateParagraphSpacing(_md);
+            var lines = markdown.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
             int totalLines = 0;
 
             foreach (var line in lines)
@@ -892,6 +895,81 @@ namespace Andy.Cli.Widgets
             }
 
             return Math.Max(1, totalLines);
+        }
+
+        /// <summary>
+        /// Simulates the paragraph spacing that Andy.Tui.Widgets.MarkdownRenderer will apply.
+        /// This is needed for accurate line count measurement.
+        /// </summary>
+        private static string SimulateParagraphSpacing(string markdown)
+        {
+            if (string.IsNullOrWhiteSpace(markdown)) return markdown;
+
+            var lines = markdown.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n').ToList();
+            var result = new List<string>();
+
+            for (int i = 0; i < lines.Count; i++)
+            {
+                string current = lines[i];
+                string next = i < lines.Count - 1 ? lines[i + 1] : "";
+
+                result.Add(current);
+
+                // Don't add spacing if current or next line is already blank
+                if (string.IsNullOrWhiteSpace(current) || string.IsNullOrWhiteSpace(next))
+                    continue;
+
+                // Don't add spacing at the end
+                if (i == lines.Count - 1)
+                    continue;
+
+                var currentType = GetLineType(current);
+                var nextType = GetLineType(next);
+
+                // Add blank line when transitioning between different content types
+                bool needsSpacing = false;
+
+                // After a list item, before a heading or non-list text
+                if (currentType == LineType.List && nextType != LineType.List)
+                    needsSpacing = true;
+
+                // Before a heading (except after another heading or list)
+                if (nextType == LineType.Heading && currentType != LineType.Heading && currentType != LineType.List)
+                    needsSpacing = true;
+
+                if (needsSpacing)
+                    result.Add("");
+            }
+
+            // Trim trailing blank lines (matches what renderer does)
+            while (result.Count > 0 && string.IsNullOrWhiteSpace(result[^1]))
+            {
+                result.RemoveAt(result.Count - 1);
+            }
+
+            return string.Join("\n", result);
+        }
+
+        private enum LineType { Heading, List, Text }
+
+        private static LineType GetLineType(string line)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+                return LineType.Text;
+
+            var trimmed = line.TrimStart();
+
+            // Check for headings
+            if (trimmed.StartsWith("# ") || trimmed.StartsWith("## ") || trimmed.StartsWith("### "))
+                return LineType.Heading;
+
+            // Check for list items
+            if (trimmed.StartsWith("- ") || trimmed.StartsWith("* ") ||
+                trimmed.StartsWith("• ") || trimmed.StartsWith("★ ") ||
+                System.Text.RegularExpressions.Regex.IsMatch(trimmed, @"^\d+\.\s"))
+                return LineType.List;
+
+            return LineType.Text;
         }
         public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
