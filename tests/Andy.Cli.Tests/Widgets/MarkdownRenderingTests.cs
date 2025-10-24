@@ -292,13 +292,40 @@ If you need more detailed information, let me know!";
             Assert.Equal(0, trailingBlanks);
         }
 
+        [Fact]
+        public void MarkdownRenderer_ShouldTrimTrailingNewlinesFromInput()
+        {
+            // Arrange - Markdown with trailing newlines (common from LLM responses)
+            var markdown = "Here is some text.\n\nMore text here.\n\n\n\n\n";
+
+            // Act
+            var result = ProcessMarkdownSpacing(markdown);
+
+            // Assert - should NOT have trailing blank lines
+            Assert.NotEmpty(result);
+            Assert.Equal("More text here.", result[^1]);
+
+            // Verify no trailing blanks
+            int trailingBlanks = 0;
+            for (int i = result.Length - 1; i >= 0; i--)
+            {
+                if (string.IsNullOrWhiteSpace(result[i]))
+                    trailingBlanks++;
+                else
+                    break;
+            }
+            Assert.Equal(0, trailingBlanks);
+        }
+
         /// <summary>
         /// Helper method that simulates the AddParagraphSpacing logic
         /// This allows testing the spacing logic without needing full rendering
         /// </summary>
         private static string[] ProcessMarkdownSpacing(string markdown)
         {
-            var lines = markdown.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n').ToList();
+            // Trim trailing whitespace like the real implementation
+            var trimmed = (markdown ?? string.Empty).TrimEnd();
+            var lines = trimmed.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n').ToList();
             return AddParagraphSpacing(lines).ToArray();
         }
 

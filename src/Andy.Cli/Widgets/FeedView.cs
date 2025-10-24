@@ -855,7 +855,7 @@ namespace Andy.Cli.Widgets
         private readonly string _originalMd;
         public MarkdownRendererItem(string markdown)
         {
-            _originalMd = markdown ?? string.Empty;
+            _originalMd = (markdown ?? string.Empty).TrimEnd(); // Remove trailing whitespace/newlines
             // Preprocess markdown to prevent "You" from being highlighted
             // The Andy.Tui markdown renderer seems to treat "You" as a special keyword
             // We'll insert a zero-width non-joiner to break the word without affecting display
