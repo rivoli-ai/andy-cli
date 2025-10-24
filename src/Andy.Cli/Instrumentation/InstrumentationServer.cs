@@ -504,6 +504,35 @@ public class InstrumentationServer : IDisposable
             background: linear-gradient(135deg, #7c3aed 0%, #667eea 100%);
             color: white;
         }
+        .copy-response-btn {
+            background: rgba(6, 255, 165, 0.15);
+            color: #06ffa5;
+            border: 1px solid rgba(6, 255, 165, 0.3);
+            padding: 4px 6px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: inherit;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .copy-response-btn:hover {
+            background: rgba(6, 255, 165, 0.25);
+            border-color: rgba(6, 255, 165, 0.5);
+            transform: translateY(-1px);
+        }
+        .copy-response-btn:active {
+            transform: translateY(0);
+        }
+        .copy-response-btn.copied {
+            background: rgba(124, 58, 237, 0.25);
+            color: #7c3aed;
+            border-color: rgba(124, 58, 237, 0.5);
+        }
+        .copy-response-btn svg {
+            display: block;
+        }
         .system-prompt-content {
             display: none;
             padding: 20px;
@@ -905,14 +934,23 @@ public class InstrumentationServer : IDisposable
             } else if (event.eventType === 'LlmResponse') {
                 const preview = event.response?.substring(0, 80) || '';
                 dataText = `${event.duration} • ${event.estimatedOutputTokens} tokens • ${escapeHtml(preview)}${event.response?.length > 80 ? '...' : ''}`;
+                const responseId = `response-${event.sequenceNumber}`;
                 expandedHtml = `
                     <div class=""event-detail""><span class=""event-key"">Timestamp:</span> ${timestamp}</div>
                     <div class=""event-detail""><span class=""event-key"">Success:</span> ${event.success}</div>
                     <div class=""event-detail""><span class=""event-key"">Duration:</span> ${event.duration}</div>
                     <div class=""event-detail""><span class=""event-key"">Stop Reason:</span> ${event.stopReason || 'N/A'}</div>
                     <div class=""event-detail""><span class=""event-key"">Output Tokens:</span> ${event.estimatedOutputTokens}</div>
-                    <div class=""event-detail""><span class=""event-key"">Response:</span></div>
-                    <div class=""response-message-display"">${escapeHtml(event.response || '')}</div>
+                    <div class=""event-detail"" style=""display: flex; align-items: center; gap: 8px;"">
+                        <span class=""event-key"">Response:</span>
+                        <button class=""copy-response-btn"" onclick=""copyResponse(event, '${responseId}')"" title=""Copy response to clipboard"">
+                            <svg width=""14"" height=""14"" viewBox=""0 0 24 24"" fill=""none"" stroke=""currentColor"" stroke-width=""2"">
+                                <rect x=""9"" y=""9"" width=""13"" height=""13"" rx=""2"" ry=""2""></rect>
+                                <path d=""M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1""></path>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class=""response-message-display"" data-response-id=""${responseId}"">${escapeHtml(event.response || '')}</div>
                 `;
             } else if (event.eventType === 'ToolCall') {
                 const paramCount = event.parameters ? Object.keys(event.parameters).length : 0;
@@ -1145,6 +1183,34 @@ public class InstrumentationServer : IDisposable
                     btn.classList.remove('copied');
                 }, 2000);
             }).catch(err => {
+                console.error('Failed to copy:', err);
+                alert('Failed to copy to clipboard');
+            });
+        }
+
+        // Copy LLM response to clipboard
+        function copyResponse(event, responseId) {
+            event.stopPropagation(); // Prevent toggling expand/collapse
+
+            const responseElement = document.querySelector('[data-response-id=""' + responseId + '""]');
+            if (!responseElement) {
+                console.error('Response element not found:', responseId);
+                return;
+            }
+
+            const responseText = responseElement.textContent;
+            const btn = event.currentTarget;
+
+            navigator.clipboard.writeText(responseText).then(function() {
+                const originalHtml = btn.innerHTML;
+                btn.innerHTML = '<span style=""font-size: 10px;"">\u2713</span>';
+                btn.classList.add('copied');
+
+                setTimeout(function() {
+                    btn.innerHTML = originalHtml;
+                    btn.classList.remove('copied');
+                }, 2000);
+            }).catch(function(err) {
                 console.error('Failed to copy:', err);
                 alert('Failed to copy to clipboard');
             });
