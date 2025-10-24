@@ -52,6 +52,9 @@ public class InstrumentationServer : IDisposable
 
         _app = builder.Build();
 
+        // Enable routing for minimal APIs
+        _app.UseRouting();
+
         // Endpoint: SSE stream of events
         _app.MapGet("/events", async (HttpContext context) =>
         {
