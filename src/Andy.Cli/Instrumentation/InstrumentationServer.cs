@@ -840,10 +840,25 @@ public class InstrumentationServer : IDisposable
         let responseTimes = [];
         let autoscroll = true;
         let activeFilters = new Set(['LlmRequest', 'LlmResponse', 'ToolCall', 'ToolExecutionStart', 'ToolComplete', 'ToolResultToLlm', 'Diagnostic']);
+        let hasConnected = false;
+        let seenEventSequences = new Set();
 
         const eventSource = new EventSource('/events');
 
         eventSource.onopen = () => {
+            // If this is a reconnection, clear the event list to avoid duplicates
+            if (hasConnected) {
+                console.log('Reconnected - clearing event list');
+                document.getElementById('eventList').innerHTML = '';
+                eventCount = 0;
+                llmRequestCount = 0;
+                toolCallCount = 0;
+                responseTimes = [];
+                seenEventSequences.clear();
+                updateStats();
+            }
+            hasConnected = true;
+
             document.getElementById('status').className = 'connection-status connected';
             document.getElementById('status').textContent = 'Connected';
         };
@@ -862,6 +877,13 @@ public class InstrumentationServer : IDisposable
         eventSource.addEventListener('Diagnostic', (e) => handleEvent(JSON.parse(e.data)));
 
         function handleEvent(event) {
+            // Skip duplicate events (can happen during reconnection)
+            if (seenEventSequences.has(event.sequenceNumber)) {
+                console.log('Skipping duplicate event #' + event.sequenceNumber);
+                return;
+            }
+            seenEventSequences.add(event.sequenceNumber);
+
             eventCount++;
 
             if (event.eventType === 'LlmRequest') {
