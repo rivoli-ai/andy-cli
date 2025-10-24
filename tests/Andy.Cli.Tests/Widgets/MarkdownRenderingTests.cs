@@ -206,6 +206,55 @@ Next section";
             }
         }
 
+        [Fact]
+        public void MarkdownRenderer_ShouldHandleComplexREADMEContent()
+        {
+            // Arrange - Real-world README-style markdown with headings, code blocks, bullets, and bold text
+            var markdown = @"The `README.md` for the `andy-cli` project provides an overview of the application.
+### Overview
+- **andy-cli** is a command-line AI code assistant powered by .NET 8.
+- **Alpha Release Warning**: The software is in the alpha stage.
+### Installation
+Build and run the project using .NET commands:
+```bash
+dotnet build
+dotnet run --project src/Andy.Cli
+```
+### Configuration
+- Automatic provider detection prioritizes OpenAI, Cerebras, Ollama, and Azure OpenAI.
+- Environment variables are required for provider configuration.";
+
+            var expected = new[]
+            {
+                "The `README.md` for the `andy-cli` project provides an overview of the application.",
+                "",
+                "### Overview",
+                "- **andy-cli** is a command-line AI code assistant powered by .NET 8.",
+                "- **Alpha Release Warning**: The software is in the alpha stage.",
+                "",
+                "### Installation",
+                "Build and run the project using .NET commands:",
+                "```bash",
+                "dotnet build",
+                "dotnet run --project src/Andy.Cli",
+                "```",
+                "",
+                "### Configuration",
+                "- Automatic provider detection prioritizes OpenAI, Cerebras, Ollama, and Azure OpenAI.",
+                "- Environment variables are required for provider configuration."
+            };
+
+            // Act
+            var result = ProcessMarkdownSpacing(markdown);
+
+            // Assert
+            Assert.Equal(expected.Length, result.Length);
+            for (int i = 0; i < expected.Length; i++)
+            {
+                Assert.Equal(expected[i], result[i]);
+            }
+        }
+
         /// <summary>
         /// Helper method that simulates the AddParagraphSpacing logic
         /// This allows testing the spacing logic without needing full rendering
