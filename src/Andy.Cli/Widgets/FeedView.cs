@@ -60,11 +60,11 @@ namespace Andy.Cli.Widgets
         /// <summary>Convenience: append code block item.</summary>
         public void AddCode(string code, string? language = null) => AddItem(new CodeBlockItem(code, language));
         /// <summary>Append a user message bubble with a rounded frame and label.</summary>
-        public void AddUserMessage(string text)
+        public void AddUserMessage(string text, int messageNumber = 0)
         {
             // Add spacing before user messages for better readability
             AddItem(new SpacerItem(1));
-            AddItem(new UserBubbleItem(text));
+            AddItem(new UserBubbleItem(text, messageNumber));
             // Add spacing after user messages to separate from response
             AddItem(new SpacerItem(1));
         }
@@ -395,7 +395,12 @@ namespace Andy.Cli.Widgets
             if (total <= 0) return _scrollOffset;
             if (delta == int.MaxValue) delta = pageSize;
             if (delta == int.MinValue) delta = -pageSize;
-            _scrollOffset = Math.Max(0, _scrollOffset + delta);
+
+            // Calculate new scroll offset with bounds
+            int newOffset = _scrollOffset + delta;
+
+            // Clamp to valid range: 0 (bottom/following tail) to total (top of content)
+            _scrollOffset = Math.Clamp(newOffset, 0, Math.Max(0, total));
             _followTail = _scrollOffset == 0;
             return _scrollOffset;
         }
@@ -902,6 +907,12 @@ namespace Andy.Cli.Widgets
                     result.Add("");
             }
 
+            // Trim trailing blank lines
+            while (result.Count > 0 && string.IsNullOrWhiteSpace(result[^1]))
+            {
+                result.RemoveAt(result.Count - 1);
+            }
+
             return string.Join("\n", result);
         }
 
@@ -1281,7 +1292,12 @@ namespace Andy.Cli.Widgets
     public sealed class UserBubbleItem : IFeedItem
     {
         private readonly string[] _lines;
-        public UserBubbleItem(string text) { _lines = (text ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'); }
+        private readonly int _messageNumber;
+        public UserBubbleItem(string text, int messageNumber = 0)
+        {
+            _lines = (text ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+            _messageNumber = messageNumber;
+        }
         public int MeasureLineCount(int width) => Math.Max(1, _lines.Length + 2); // top and bottom border rows
         public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
@@ -1310,8 +1326,8 @@ namespace Andy.Cli.Widgets
                     string content = _lines[i - 1];
                     if (i == 1)
                     {
-                        // show label on first content row
-                        string label = "You:";
+                        // show label with message number on first content row
+                        string label = _messageNumber > 0 ? $"You (#{_messageNumber}):" : "You:";
                         b.DrawText(new DL.TextRun(x + 2, row, label + " ", labelColor, null, DL.CellAttrFlags.Bold));
                         int available = Math.Max(0, width - 4 - (label.Length + 1));
                         string t = available > 0 ? (content.Length > available ? content.Substring(0, available) : content) : string.Empty;

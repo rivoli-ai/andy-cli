@@ -39,6 +39,12 @@ namespace Andy.Cli.Widgets
         public void UseTerminalCursor(bool use) { _useTerminalCursor = use; }
         /// <summary>Current prompt text.</summary>
         public string Text => _text;
+        /// <summary>Set the prompt text and move cursor to end.</summary>
+        public void SetText(string text)
+        {
+            _text = text ?? string.Empty;
+            _cursor = _text.Length;
+        }
         /// <summary>Compute the terminal 1-based cursor column and row for the caret, if terminal cursor is enabled.</summary>
         public bool TryGetTerminalCursor(out int col1, out int row1)
         {

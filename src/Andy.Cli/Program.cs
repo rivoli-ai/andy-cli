@@ -28,6 +28,12 @@ using L = Andy.Tui.Layout;
 
 namespace Andy.Cli;
 
+enum ScrollMode
+{
+    Feed,           // Scrolling through conversation feed
+    PromptHistory   // Scrolling through prompt history
+}
+
 class Program
 {
     // Minimum terminal dimensions to prevent crashes
@@ -118,6 +124,12 @@ class Program
         try
         {
             bool running = true;
+
+            // Scroll mode state
+            ScrollMode scrollMode = ScrollMode.Feed;
+            var promptHistory = new List<string>(); // Store user prompts for history navigation
+            int historyIndex = -1; // -1 means not navigating history, showing current input
+
             var hints = new KeyHintsBar();
             hints.SetHints(new[] { ("Ctrl+P", "Commands"), ("PgUp/PgDn", "Scroll"), ("F2", "Toggle HUD"), ("ESC", "Quit"), ("", "http://localhost:5555") });
             var toast = new Toast(); // Don't show initial toast as it interferes with prompt
@@ -576,15 +588,19 @@ class Program
                         feed.AddMarkdownRich("# Andy CLI Help\n\n" +
                             "## Keyboard Shortcuts:\n" +
                             "- **Ctrl+P** (Cmd+P on Mac): Open command palette\n" +
+                            "- **Ctrl+]**: Toggle scroll mode (Feed ↔ Prompt History)\n" +
                             "- **Ctrl+D**: Quit application\n" +
                             "- **F2**: Toggle HUD (performance overlay)\n" +
                             "- **ESC**: Quit application\n" +
                             "- **Page Up/Down**: Scroll chat history\n" +
-                            "- **↑/↓**: Navigate multi-line text / History (Ctrl+↑/↓)\n" +
+                            "- **↑/↓**: Navigate multi-line text or prompt history (when in History mode)\n" +
                             "- **Ctrl+A/E**: Jump to start/end of current line\n" +
                             "- **Home/End**: Start/end of line (Ctrl: whole text)\n" +
                             "- **Ctrl+K**: Delete from cursor to end of line\n" +
                             "- **Ctrl+U**: Delete from start of line to cursor\n\n" +
+                            "## Scroll Modes:\n" +
+                            "- **Feed Mode** (default): Blue indicator on left. PageUp/PageDown scrolls conversation.\n" +
+                            "- **Prompt History Mode**: Orange indicator on left. ↑/↓ navigates previous messages. Shows message counter (e.g., 5/12).\n\n" +
                             "## Commands:\n" +
                             "### General Commands:\n" +
                             "- **/exit**, **/bye**, **/quit**: Exit the application\n" +
@@ -824,6 +840,49 @@ class Program
                         return;
                     }
 
+                    // Handle prompt history navigation when in PromptHistory scroll mode
+                    if (scrollMode == ScrollMode.PromptHistory && promptHistory.Count > 0)
+                    {
+                        if (k.Key == ConsoleKey.UpArrow && (k.Modifiers & ConsoleModifiers.Control) == 0)
+                        {
+                            // Navigate to previous message in history
+                            if (historyIndex == -1)
+                            {
+                                // First time pressing up - go to most recent
+                                historyIndex = promptHistory.Count - 1;
+                            }
+                            else if (historyIndex > 0)
+                            {
+                                historyIndex--;
+                            }
+
+                            if (historyIndex >= 0 && historyIndex < promptHistory.Count)
+                            {
+                                prompt.SetText(promptHistory[historyIndex]);
+                            }
+                            return;
+                        }
+                        else if (k.Key == ConsoleKey.DownArrow && (k.Modifiers & ConsoleModifiers.Control) == 0)
+                        {
+                            // Navigate to next message in history
+                            if (historyIndex >= 0)
+                            {
+                                historyIndex++;
+                                if (historyIndex >= promptHistory.Count)
+                                {
+                                    // Reached the end - clear prompt
+                                    historyIndex = -1;
+                                    prompt.SetText("");
+                                }
+                                else
+                                {
+                                    prompt.SetText(promptHistory[historyIndex]);
+                                }
+                            }
+                            return;
+                        }
+                    }
+
                     // Avoid mapping regular alphanumeric keys to actions
                     var submitted = prompt.OnKey(k);
                     if (submitted is string cmd && !string.IsNullOrWhiteSpace(cmd) && !isProcessingMessage)
@@ -914,15 +973,19 @@ class Program
                                     feed.AddMarkdownRich("# Andy CLI Help\n\n" +
                                         "## Keyboard Shortcuts:\n" +
                                         "- **Ctrl+P** (Cmd+P on Mac): Open command palette\n" +
+                                        "- **Ctrl+]**: Toggle scroll mode (Feed ↔ Prompt History)\n" +
                                         "- **Ctrl+D**: Quit application\n" +
                                         "- **F2**: Toggle HUD (performance overlay)\n" +
                                         "- **ESC**: Quit application\n" +
                                         "- **Page Up/Down**: Scroll chat history\n" +
-                                        "- **↑/↓**: Navigate multi-line text / History (Ctrl+↑/↓)\n" +
+                                        "- **↑/↓**: Navigate multi-line text or prompt history (when in History mode)\n" +
                                         "- **Ctrl+A/E**: Jump to start/end of current line\n" +
                                         "- **Home/End**: Start/end of line (Ctrl: whole text)\n" +
                                         "- **Ctrl+K**: Delete from cursor to end of line\n" +
                                         "- **Ctrl+U**: Delete from start of line to cursor\n\n" +
+                                        "## Scroll Modes:\n" +
+                                        "- **Feed Mode** (default): Blue indicator on left. PageUp/PageDown scrolls conversation.\n" +
+                                        "- **Prompt History Mode**: Orange indicator on left. ↑/↓ navigates previous messages. Shows message counter (e.g., 5/12).\n\n" +
                                         "## Commands:\n" +
                                         "### General Commands:\n" +
                                         "- **/exit**, **/bye**, **/quit**: Exit the application\n" +
@@ -992,7 +1055,12 @@ class Program
                         }
 
                         // Regular chat message
-                        feed.AddUserMessage(cmd);
+                        // Store in prompt history first to get the message number
+                        promptHistory.Add(cmd);
+                        int messageNumber = promptHistory.Count;
+                        feed.AddUserMessage(cmd, messageNumber);
+                        historyIndex = -1; // Reset to showing current input
+
                         if (aiService != null)
                         {
                             // Run the assistant processing on a background task so UI can update
@@ -1027,17 +1095,26 @@ class Program
                         // The initialization error message above already informed them
                         return;
                     }
-                    // Up/Down arrows are now used for navigating multi-line prompt text
-                    // Use PageUp/PageDown for scrolling the feed instead
-                    if (k.Key == ConsoleKey.Tab && (k.Modifiers & ConsoleModifiers.Control) != 0)
+                    // Ctrl+] toggles scroll mode (checking both key code and character)
+                    if (((k.Key == ConsoleKey.Oem6 || k.KeyChar == ']' || k.KeyChar == '\u001d') && (k.Modifiers & ConsoleModifiers.Control) != 0))
                     {
-                        // Toggle focus between prompt and feed
-                        bool promptIsFocusedNow = true; // we set prompt initially focused
-                        promptIsFocusedNow = !promptIsFocusedNow;
-                        prompt.SetFocused(promptIsFocusedNow);
-                        feed.SetFocused(!promptIsFocusedNow);
+                        scrollMode = scrollMode == ScrollMode.Feed ? ScrollMode.PromptHistory : ScrollMode.Feed;
+
+                        // Update hints to show current mode
+                        if (scrollMode == ScrollMode.PromptHistory)
+                        {
+                            toast.Show($"Scroll mode: Prompt History ({promptHistory.Count} messages)", 90);
+                            hints.SetHints(new[] { ("Ctrl+]", "Feed Mode"), ("↑/↓", "Navigate"), ("PgUp/PgDn", "Scroll"), ("ESC", "Quit") });
+                        }
+                        else
+                        {
+                            toast.Show("Scroll mode: Feed", 90);
+                            hints.SetHints(new[] { ("Ctrl+]", "History Mode"), ("Ctrl+P", "Commands"), ("PgUp/PgDn", "Scroll"), ("ESC", "Quit"), ("", "http://localhost:5555") });
+                        }
                         return;
                     }
+
+                    // PageUp/PageDown always scrolls the feed
                     if (k.Key == ConsoleKey.PageUp) feed.ScrollLines(+2 * Math.Max(1, viewport.Height - 5), Math.Max(1, viewport.Height - 5));
                     if (k.Key == ConsoleKey.PageDown) feed.ScrollLines(-2 * Math.Max(1, viewport.Height - 5), Math.Max(1, viewport.Height - 5));
                 }
@@ -1176,6 +1253,46 @@ class Program
                     if (helpH > 0)
                     {
                         inlineCommandHelp.Render(2, helpY, Math.Max(1, viewport.Width - 4), baseDl, wb);
+                    }
+
+                    // Draw scroll mode indicators in left margin
+                    if (scrollMode == ScrollMode.Feed)
+                    {
+                        // Draw a prominent vertical line along the feed area
+                        var feedColor = new DL.Rgb24(100, 150, 255); // Blue indicator
+                        for (int y = 3; y < 3 + outputH && y < viewport.Height; y++)
+                        {
+                            wb.DrawText(new DL.TextRun(0, y, "│", feedColor, null, DL.CellAttrFlags.Bold));
+                        }
+
+                        // Add scroll position indicator if not at bottom
+                        int feedScrollOffset = feed.ScrollLines(0, 0); // Get current offset without changing it
+                        if (feedScrollOffset > 0)
+                        {
+                            // Calculate scroll percentage
+                            int totalLines = feed.ScrollLines(0, 0); // This returns current offset, not total
+                            string scrollIndicator = $" ▲ {feedScrollOffset} ";
+                            int indicatorX = Math.Max(0, viewport.Width - scrollIndicator.Length - 2);
+                            int indicatorY = 3;
+                            wb.DrawText(new DL.TextRun(indicatorX, indicatorY, scrollIndicator, new DL.Rgb24(100, 150, 255), new DL.Rgb24(30, 30, 40), DL.CellAttrFlags.Bold));
+                        }
+                    }
+                    else if (scrollMode == ScrollMode.PromptHistory)
+                    {
+                        // Draw indicator along prompt area
+                        var historyColor = new DL.Rgb24(255, 200, 100); // Orange indicator
+                        for (int y = promptY; y < promptY + promptH && y < viewport.Height; y++)
+                        {
+                            wb.DrawText(new DL.TextRun(0, y, "│", historyColor, null, DL.CellAttrFlags.Bold));
+                        }
+
+                        // Draw history counter if navigating history
+                        if (historyIndex >= 0 && promptHistory.Count > 0)
+                        {
+                            string counter = $" {historyIndex + 1}/{promptHistory.Count} ";
+                            int counterX = Math.Max(0, viewport.Width - counter.Length - 2);
+                            wb.DrawText(new DL.TextRun(counterX, promptY, counter, new DL.Rgb24(255, 200, 100), new DL.Rgb24(40, 40, 50), DL.CellAttrFlags.Bold));
+                        }
                     }
                 }
                 else

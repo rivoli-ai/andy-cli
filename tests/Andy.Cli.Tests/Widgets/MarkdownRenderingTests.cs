@@ -255,6 +255,43 @@ dotnet run --project src/Andy.Cli
             }
         }
 
+        [Fact]
+        public void MarkdownRenderer_ShouldNotAddTrailingBlankLines()
+        {
+            // Arrange - Real-world case with multiple list sections ending with regular text
+            var markdown = @"### README_COMMANDS.md
+This document outlines the features:
+- **Model Management Commands**: Commands for listing models.
+- **Command Palette**: Quick access to commands.
+- **Usage Examples**: Demonstrates how to use slash commands.
+
+### REFACTORING_PLAN.md
+This document details the refactoring strategy:
+- **Completed**: Centralized theme system.
+- **In Progress**: Refactoring of FeedView.
+- **Planned**: Integration of theme usage.
+
+If you need more detailed information, let me know!";
+
+            // Act
+            var result = ProcessMarkdownSpacing(markdown);
+
+            // Assert - should NOT end with blank lines
+            Assert.NotEmpty(result);
+            Assert.Equal("If you need more detailed information, let me know!", result[^1]);
+
+            // Count trailing blank lines (should be 0)
+            int trailingBlanks = 0;
+            for (int i = result.Length - 1; i >= 0; i--)
+            {
+                if (string.IsNullOrWhiteSpace(result[i]))
+                    trailingBlanks++;
+                else
+                    break;
+            }
+            Assert.Equal(0, trailingBlanks);
+        }
+
         /// <summary>
         /// Helper method that simulates the AddParagraphSpacing logic
         /// This allows testing the spacing logic without needing full rendering
@@ -306,6 +343,12 @@ dotnet run --project src/Andy.Cli
 
                 if (needsSpacing)
                     result.Add("");
+            }
+
+            // Trim trailing blank lines
+            while (result.Count > 0 && string.IsNullOrWhiteSpace(result[^1]))
+            {
+                result.RemoveAt(result.Count - 1);
             }
 
             return result;
