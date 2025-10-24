@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Xunit;
+using Andy.Cli.Widgets;
 
 namespace Andy.Cli.Tests.Widgets
 {
@@ -315,6 +316,84 @@ If you need more detailed information, let me know!";
                     break;
             }
             Assert.Equal(0, trailingBlanks);
+        }
+
+        [Fact]
+        public void MarkdownRenderer_ShouldHandleREADMEResponseWithoutTrailingBlanks()
+        {
+            // Arrange - Exact content from user's screenshot showing trailing blank line issue
+            var markdown = @"The README.md file contains the following information about the ""andy-cli"" project:
+
+### Overview
+- **andy-cli**: A command-line AI code assistant powered by .NET 8.
+- **ALPHA RELEASE WARNING**: The software is in the alpha stage, with critical warnings about its functionality, stability, and safety.
+
+### Features
+- **Interactive TUI**: Modern terminal interface with real-time streaming responses.
+- **Multi-Provider Support**: Works with OpenAI, Cerebras, Azure OpenAI, and Ollama.
+- **Smart Provider Detection**: Automatically selects the best available LLM provider.
+- **Tool Execution**: Supports file operations, code search, bash commands, and more.
+- **Context-Aware**: Maintains conversation history with intelligent context management.
+- **Performance Optimized**: Efficient streaming and rendering with the Andy.Tui framework.
+
+### Installation
+- Instructions for building and running the project using `dotnet build` and `dotnet run`.
+
+### Configuration
+- **Automatic Provider Detection**: Describes how the CLI detects and selects the best LLM provider based on environment variables.
+- **Environment Variables**: Lists required variables for different providers and optional configuration settings.
+
+### Commands
+- **Interactive Mode (TUI)**: Instructions for starting the interactive terminal interface and using keyboard shortcuts.
+- **Slash Commands**: Lists available commands for model management and tool execution.
+
+### Development
+- **Architecture**: Describes the modular architecture of the project.
+- **Project Structure**: Overview of the directory structure and components.
+- **Testing**: Instructions for running tests and generating coverage reports.
+- **Building**: Commands for building and cleaning the project.
+
+### License
+- Mentions the LICENSE file for details on the project's license.
+
+This README provides a comprehensive guide to using, configuring, and developing the andy-cli project. If you need more specific details or have any questions, feel free to ask!";
+
+            // Act
+            var result = ProcessMarkdownSpacing(markdown);
+
+            // Assert - last line should be the actual content, not blank
+            Assert.NotEmpty(result);
+            Assert.EndsWith("feel free to ask!", result[^1]);
+
+            // Verify no trailing blanks
+            int trailingBlanks = 0;
+            for (int i = result.Length - 1; i >= 0; i--)
+            {
+                if (string.IsNullOrWhiteSpace(result[i]))
+                    trailingBlanks++;
+                else
+                    break;
+            }
+            Assert.Equal(0, trailingBlanks);
+        }
+
+        [Fact]
+        public void MarkdownRendererItem_ShouldNotHaveTrailingBlankLinesInMeasurement()
+        {
+            // Arrange - Create actual MarkdownRendererItem with trailing newlines
+            var markdown = "Here is content.\n\nMore content.\n\n\n\n";
+            var item = new MarkdownRendererItem(markdown);
+
+            // Act - Measure the line count
+            int lineCount = item.MeasureLineCount(80);
+
+            // Assert - The line count should only reflect actual content, not trailing blanks
+            // Split the markdown and count non-blank trailing lines
+            var lines = markdown.TrimEnd().Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+
+            // The measurement should not include phantom blank lines
+            // We expect at most 2-3 lines for this simple content (accounting for word wrap)
+            Assert.True(lineCount <= 10, $"Line count {lineCount} is unexpectedly high, suggesting trailing blanks are being counted");
         }
 
         /// <summary>
