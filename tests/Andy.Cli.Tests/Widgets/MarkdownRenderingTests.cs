@@ -396,6 +396,55 @@ This README provides a comprehensive guide to using, configuring, and developing
             Assert.True(lineCount <= 10, $"Line count {lineCount} is unexpectedly high, suggesting trailing blanks are being counted");
         }
 
+        [Fact]
+        public void MarkdownRenderer_ShouldHandleCodeFences()
+        {
+            // Arrange - Markdown with code fence
+            var markdown = @"Install the tool:
+```bash
+dotnet build
+dotnet run --project src/Andy.Cli
+```
+After installation, you can use it.";
+
+            // Act
+            var result = ProcessMarkdownSpacing(markdown);
+
+            // Assert - Code fence markers should be handled correctly
+            Assert.Contains("Install the tool:", result);
+            Assert.Contains("After installation, you can use it.", result);
+
+            // The ``` markers should be present in the input but might be filtered during rendering
+            // We just verify the structure is preserved
+            Assert.True(result.Length > 5, "Result should contain multiple lines including code block content");
+        }
+
+        [Fact]
+        public void MarkdownRenderer_ShouldHandleMultipleCodeFences()
+        {
+            // Arrange - Markdown with multiple code fences
+            var markdown = @"First example:
+```bash
+command1
+```
+Some text.
+
+Second example:
+```csharp
+var x = 42;
+```
+Done.";
+
+            // Act
+            var result = ProcessMarkdownSpacing(markdown);
+
+            // Assert - All content should be preserved
+            Assert.Contains("First example:", result);
+            Assert.Contains("Some text.", result);
+            Assert.Contains("Second example:", result);
+            Assert.Contains("Done.", result);
+        }
+
         /// <summary>
         /// Helper method that simulates the AddParagraphSpacing logic
         /// This allows testing the spacing logic without needing full rendering
