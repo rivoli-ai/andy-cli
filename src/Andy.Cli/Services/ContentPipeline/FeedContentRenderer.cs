@@ -10,10 +10,10 @@ namespace Andy.Cli.Services.ContentPipeline;
 /// </summary>
 public class FeedContentRenderer : IContentRenderer
 {
-    private readonly FeedView _feedView;
+    private readonly EnhancedFeedView _feedView;
     private readonly ILogger<FeedContentRenderer>? _logger;
 
-    public FeedContentRenderer(FeedView feedView, ILogger<FeedContentRenderer>? logger = null)
+    public FeedContentRenderer(EnhancedFeedView feedView, ILogger<FeedContentRenderer>? logger = null)
     {
         _feedView = feedView ?? throw new ArgumentNullException(nameof(feedView));
         _logger = logger;

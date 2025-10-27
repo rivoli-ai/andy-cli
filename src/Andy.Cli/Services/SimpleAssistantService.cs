@@ -15,7 +15,7 @@ namespace Andy.Cli.Services;
 public class SimpleAssistantService : IDisposable
 {
     private readonly SimpleAgent _agent;
-    private readonly FeedView _feed;
+    private readonly EnhancedFeedView _feed;
     private readonly TokenCounter? _tokenCounter;
     private readonly ILogger<SimpleAssistantService>? _logger;
     private readonly string _modelName;
@@ -29,7 +29,7 @@ public class SimpleAssistantService : IDisposable
         ILlmProvider llmProvider,
         IToolRegistry toolRegistry,
         IToolExecutor toolExecutor,
-        FeedView feed,
+        EnhancedFeedView feed,
         string modelName,
         string providerName,
         TokenCounter? tokenCounter = null,

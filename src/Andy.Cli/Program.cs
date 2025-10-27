@@ -10,6 +10,7 @@ using Andy.Cli.Widgets;
 using Andy.Cli.Commands;
 using Andy.Cli.Services;
 using Andy.Cli.Services.Prompts;
+using Andy.Cli.Services.TextWrapping;
 using Andy.Cli.Tools;
 using Andy.Llm;
 using Andy.Llm.Extensions;
@@ -140,7 +141,12 @@ class Program
             prompt.SetBorder(true);
             prompt.SetShowCaret(true);
             prompt.SetFocused(true);
-            var feed = new FeedView();
+            // Use enhanced feed view with proper text wrapping
+            var textWrapper = new KnuthPlassTextWrapper(new SimpleHyphenationService());
+            var wrappingOptions = new TextWrappingOptions()
+                .WithHyphenation()
+                .WithHyphenationLengths(3, 15); // Allow longer fragments for better wrapping
+            var feed = new EnhancedFeedView(textWrapper, wrappingOptions);
             feed.SetFocused(false);
             feed.SetAnimationSpeed(8); // faster scroll-in
 
@@ -263,6 +269,14 @@ class Program
             // Register code indexing service
             services.AddSingleton<CodeIndexingService>();
             services.AddHostedService<CodeIndexingService>(provider => provider.GetRequiredService<CodeIndexingService>());
+
+            // Register text wrapping services
+            services.AddSingleton<IHyphenationService, SimpleHyphenationService>();
+            services.AddSingleton<ITextWrapper>(provider =>
+            {
+                var hyphenationService = provider.GetRequiredService<IHyphenationService>();
+                return new KnuthPlassTextWrapper(hyphenationService);
+            });
 
             var serviceProvider = services.BuildServiceProvider();
 
