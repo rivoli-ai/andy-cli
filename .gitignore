@@ -88,4 +88,4 @@ release-artifacts/
 publish/
 *.tar.gz
 *.zip
-*.sha256
+*.sha256.vs/
