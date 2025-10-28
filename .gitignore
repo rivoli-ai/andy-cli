@@ -89,3 +89,4 @@ publish/
 *.tar.gz
 *.zip
 *.sha256.vs/
+.vs/
