@@ -1,5 +1,3 @@
-using System.Collections.Generic;
-
 namespace Andy.Cli.Services;
 
 /// <summary>

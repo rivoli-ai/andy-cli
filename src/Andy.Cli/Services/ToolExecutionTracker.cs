@@ -16,13 +16,13 @@ public class ToolExecutionTracker
     private readonly Dictionary<string, string> _correlationIdToUiIdMap = new(); // Map correlation IDs to UI IDs
     private readonly Dictionary<string, Queue<string>> _pendingToolExecutions = new(); // Queue of UI IDs per tool name
     private readonly object _pendingToolsLock = new();
-    private FeedView? _feedView;
+    private EnhancedFeedView? _feedView;
     private string? _lastActiveToolId; // Track the last tool started from UI
     private int _parameterUpdateCounter = 0;
 
     public static ToolExecutionTracker Instance => _instance ??= new ToolExecutionTracker();
 
-    public void SetFeedView(FeedView feedView)
+    public void SetFeedView(EnhancedFeedView feedView)
     {
         _feedView = feedView;
     }
@@ -94,7 +94,7 @@ public class ToolExecutionTracker
         }
     }
 
-    public FeedView? GetFeedView()
+    public EnhancedFeedView? GetFeedView()
     {
         return _feedView;
     }

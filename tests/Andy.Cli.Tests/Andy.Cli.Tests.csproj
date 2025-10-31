@@ -52,6 +52,8 @@
     <Compile Include="Tools/CodeIndexToolTests.cs" />
     <!-- Parallel tool execution tests -->
     <Compile Include="Services/ParallelToolExecutionTests.cs" />
+    <!-- Text wrapping tests -->
+    <Compile Include="Services/TextWrappingTests.cs" />
   </ItemGroup>
 
 </Project>

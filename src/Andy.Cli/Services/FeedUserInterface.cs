@@ -6,15 +6,15 @@ namespace Andy.Cli.Services;
 
 /// <summary>
 /// User interface implementation that integrates andy-engine's InteractiveAgent
-/// with andy-cli's FeedView widget
+/// with andy-cli's EnhancedFeedView widget
 /// </summary>
 public class FeedUserInterface : IUserInterface
 {
-    private readonly FeedView _feed;
+    private readonly EnhancedFeedView _feed;
     private readonly ILogger<FeedUserInterface>? _logger;
     private readonly Dictionary<string, DateTime> _toolStartTimes = new();
 
-    public FeedUserInterface(FeedView feed, ILogger<FeedUserInterface>? logger = null)
+    public FeedUserInterface(EnhancedFeedView feed, ILogger<FeedUserInterface>? logger = null)
     {
         _feed = feed ?? throw new ArgumentNullException(nameof(feed));
         _logger = logger;
