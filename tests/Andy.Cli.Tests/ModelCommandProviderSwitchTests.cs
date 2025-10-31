@@ -1,12 +1,6 @@
-using System;
-using System.IO;
-using System.Linq;
-using System.Threading.Tasks;
 using Andy.Cli.Commands;
-using Andy.Llm;
 using Andy.Llm.Extensions;
 using Microsoft.Extensions.DependencyInjection;
-using Xunit;
 
 namespace Andy.Cli.Tests;
 

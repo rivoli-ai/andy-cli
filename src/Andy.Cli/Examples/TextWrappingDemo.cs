@@ -61,25 +61,13 @@ namespace Andy.Cli.Examples
             Console.WriteLine("└" + new string('─', narrowWidth) + "┘");
             Console.WriteLine($"Has hyphenation: {hyphenatedResult.HasHyphenation}\n");
 
-            // Example 3: Algorithm comparison
-            var simpleWrapper = new SimpleTextWrapper(hyphenationService);
+            // Example 3: Knuth-Plass wrapper demonstration
             var comparisonText = "The quick brown fox jumps over the lazy dog. This sentence contains every letter of the alphabet and demonstrates different wrapping strategies.";
             var comparisonWidth = 30;
 
-            Console.WriteLine($"Example 3 - Algorithm comparison:");
+            Console.WriteLine($"Example 3 - Knuth-Plass Algorithm:");
             Console.WriteLine($"Text: '{comparisonText}'");
             Console.WriteLine($"Width: {comparisonWidth} characters\n");
-
-            // Simple wrapper
-            var simpleResult = simpleWrapper.WrapText(comparisonText, comparisonWidth);
-            Console.WriteLine("Simple Greedy Algorithm:");
-            Console.WriteLine("┌" + new string('─', comparisonWidth) + "┐");
-            foreach (var line in simpleResult.Lines)
-            {
-                Console.WriteLine($"│{line.PadRight(comparisonWidth)}│");
-            }
-            Console.WriteLine("└" + new string('─', comparisonWidth) + "┘");
-            Console.WriteLine($"Lines: {simpleResult.LineCount}\n");
 
             // Knuth-Plass wrapper
             var knuthResult = textWrapper.WrapText(comparisonText, comparisonWidth);
