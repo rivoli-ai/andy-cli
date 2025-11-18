@@ -13,6 +13,7 @@ using Andy.Cli.Services.Prompts;
 using Andy.Cli.Tools;
 using Andy.Llm;
 using Andy.Llm.Extensions;
+using Andy.Model.Llm;
 using Andy.Model.Model;
 using Andy.Tools;
 using Andy.Tools.Core;
@@ -97,6 +98,13 @@ class Program
             );
             Directory.CreateDirectory(Path.GetDirectoryName(debugCheckFile)!);
             File.WriteAllText(debugCheckFile, $"Program.Main() at {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC\nANDY_DEBUG_RAW = '{debugRawEnv}'\nArgs: {string.Join(", ", args)}\n");
+        }
+
+        // Check for --acp flag to run in ACP server mode
+        if (args.Length > 0 && args[0] == "--acp")
+        {
+            await RunAcpServerModeAsync();
+            return;
         }
 
         // Check if we have command-line arguments for non-TUI commands
@@ -1480,6 +1488,124 @@ class Program
             "ollama" => Environment.GetEnvironmentVariable("OLLAMA_API_BASE") ?? "http://localhost:11434",
             _ => "unknown"
         };
+    }
+
+    private static async Task RunAcpServerModeAsync()
+    {
+        // Configure logging with stderr output (to avoid polluting stdout used for ACP protocol)
+        var services = new ServiceCollection();
+        services.AddLogging(builder =>
+        {
+            builder.AddConsole(options =>
+            {
+                options.LogToStandardErrorThreshold = LogLevel.Information;
+            })
+            .SetMinimumLevel(LogLevel.Information);
+        });
+
+        // Configure LLM services
+        services.ConfigureLlmFromEnvironment();
+        services.AddLlmServices(options =>
+        {
+            // Auto-detect the default provider based on environment variables
+            var detectionService = new ProviderDetectionService();
+            var detectedProvider = detectionService.DetectDefaultProvider();
+            options.DefaultProvider = detectedProvider ?? "cerebras";
+        });
+
+        // Add the provider factory
+        services.AddSingleton<Andy.Llm.Providers.ILlmProviderFactory, Andy.Llm.Providers.LlmProviderFactory>();
+
+        // Configure Tool services
+        services.AddSingleton<Andy.Tools.Validation.IToolValidator, Andy.Tools.Validation.ToolValidator>();
+        services.AddSingleton<IToolRegistry, Andy.Tools.Registry.ToolRegistry>();
+        services.AddSingleton<Andy.Tools.Discovery.IToolDiscovery, Andy.Tools.Discovery.ToolDiscoveryService>();
+        services.AddSingleton<Andy.Tools.Execution.ISecurityManager, Andy.Tools.Execution.SecurityManager>();
+        services.AddSingleton<Andy.Tools.Execution.IResourceMonitor, Andy.Tools.Execution.ResourceMonitor>();
+        services.AddSingleton<Andy.Tools.Core.OutputLimiting.IToolOutputLimiter, Andy.Tools.Core.OutputLimiting.ToolOutputLimiter>();
+        services.AddSingleton<IToolExecutor, ToolExecutor>();
+        services.AddSingleton<Andy.Tools.Core.IPermissionProfileService, Andy.Tools.Core.PermissionProfileService>();
+        services.AddSingleton<Andy.Tools.Framework.IToolLifecycleManager, Andy.Tools.Framework.ToolLifecycleManager>();
+
+        // Framework options
+        services.AddSingleton(new Andy.Tools.Framework.ToolFrameworkOptions
+        {
+            RegisterBuiltInTools = false,
+            EnableObservability = false,
+            AutoDiscoverTools = false
+        });
+
+        // Register all tools
+        ToolCatalog.RegisterAllTools(services);
+
+        var serviceProvider = services.BuildServiceProvider();
+        var loggerFactory = serviceProvider.GetRequiredService<ILoggerFactory>();
+        var logger = loggerFactory.CreateLogger<Program>();
+
+        logger.LogInformation("Starting Andy CLI in ACP server mode");
+
+        try
+        {
+            // Initialize tool registry
+            var toolRegistry = serviceProvider.GetRequiredService<IToolRegistry>();
+            var toolRegistrations = serviceProvider.GetServices<ToolRegistrationInfo>();
+            foreach (var registration in toolRegistrations)
+            {
+                toolRegistry.RegisterTool(registration.ToolType, registration.Configuration);
+            }
+
+            logger.LogInformation("Registered {ToolCount} tools", toolRegistry.GetTools().Count());
+
+            // Get required services for the agent
+            var providerFactory = serviceProvider.GetRequiredService<Andy.Llm.Providers.ILlmProviderFactory>();
+
+            // Detect current provider
+            var detectionService = new ProviderDetectionService();
+            var currentProvider = detectionService.DetectDefaultProvider() ?? "cerebras";
+            logger.LogInformation("Using LLM provider: {Provider}", currentProvider);
+
+            // Create LLM provider instance
+            var llmProvider = providerFactory.CreateProvider(currentProvider);
+            if (llmProvider == null)
+            {
+                throw new InvalidOperationException($"Failed to create LLM provider for: {currentProvider}");
+            }
+
+            var toolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
+
+            // Create the Andy agent provider
+            var agentProvider = new Andy.Cli.ACP.AndyAgentProvider(
+                llmProvider,
+                toolRegistry,
+                toolExecutor,
+                loggerFactory.CreateLogger<Andy.Cli.ACP.AndyAgentProvider>());
+
+            logger.LogInformation("Andy agent provider initialized");
+
+            // Create server info
+            var serverInfo = new Andy.Acp.Core.Protocol.ServerInfo
+            {
+                Name = "Andy.CLI",
+                Version = "1.0.0",
+                Description = "Andy CLI - AI-powered command line assistant"
+            };
+
+            // Create and run the ACP server
+            var acpServer = new Andy.Acp.Core.Server.AcpServer(
+                agentProvider,
+                fileSystemProvider: null,
+                terminalProvider: null,
+                serverInfo: serverInfo,
+                loggerFactory: loggerFactory);
+
+            await acpServer.RunAsync();
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "ACP server terminated with error");
+            Console.Error.WriteLine($"ACP server error: {ex.Message}");
+            Environment.Exit(1);
+        }
     }
 
     private static async Task HandleCommandLineArgs(string[] args)
