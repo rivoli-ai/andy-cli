@@ -52,6 +52,8 @@
     <Compile Include="Tools/CodeIndexToolTests.cs" />
     <!-- Parallel tool execution tests -->
     <Compile Include="Services/ParallelToolExecutionTests.cs" />
+    <!-- ACP integration tests -->
+    <Compile Include="ACP/AndyAgentProviderTests.cs" />
   </ItemGroup>
 
 </Project>
