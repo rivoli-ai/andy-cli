@@ -18,6 +18,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Andy.Acp.Core" Version="2025.11.18-rc.3" />
     <PackageReference Include="Andy.Context" Version="2025.9.23-rc.4" />
     <PackageReference Include="Andy.Engine" Version="2025.10.16-rc.14" />
     <PackageReference Include="Andy.Llm" Version="2025.10.5-rc.16" />
