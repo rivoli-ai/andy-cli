@@ -190,51 +190,29 @@ class Program
                 }
             }); // Conditional logging based on environment variable
 
-            // Configure LLM services - first from appsettings, then from environment
+            // Configure LLM services from appsettings.json Llm section and environment
+            services.AddLlmServices(configuration);
             services.ConfigureLlmFromEnvironment();
 
-            // Add provider configurations from appsettings.json
+            // Expand ${...} environment variable placeholders in provider API keys
+            // and auto-detect the default provider
             services.Configure<Andy.Llm.Configuration.LlmOptions>(options =>
             {
-                var providers = configuration.GetSection("Providers");
-                if (providers.Exists())
+                foreach (var config in options.Providers.Values)
                 {
-                    foreach (var provider in providers.GetChildren())
+                    if (!string.IsNullOrEmpty(config.ApiKey) && config.ApiKey.StartsWith("${") && config.ApiKey.EndsWith("}"))
                     {
-                        var providerName = provider.Key.ToLowerInvariant();
-                        var apiKey = provider["ApiKey"];
-
-                        // Expand environment variables in API keys
-                        if (!string.IsNullOrEmpty(apiKey) && apiKey.StartsWith("${") && apiKey.EndsWith("}"))
-                        {
-                            var envVar = apiKey.Substring(2, apiKey.Length - 3);
-                            apiKey = Environment.GetEnvironmentVariable(envVar) ?? "";
-                        }
-
-                        if (!string.IsNullOrEmpty(apiKey))
-                        {
-                            options.Providers[providerName] = new Andy.Llm.Configuration.ProviderConfig
-                            {
-                                ApiKey = apiKey,
-                                ApiBase = provider["BaseUrl"],
-                                Model = provider["DefaultModel"],
-                                Enabled = true
-                            };
-                        }
+                        var envVar = config.ApiKey.Substring(2, config.ApiKey.Length - 3);
+                        config.ApiKey = Environment.GetEnvironmentVariable(envVar) ?? "";
                     }
                 }
-            });
 
-            services.AddLlmServices(options =>
-            {
                 // Auto-detect the default provider based on environment variables
                 var detectionService = new ProviderDetectionService();
                 var detectedProvider = detectionService.DetectDefaultProvider();
-                options.DefaultProvider = detectedProvider ?? "openai"; // Default to OpenAI instead of forcing Cerebras
+                if (!string.IsNullOrEmpty(detectedProvider))
+                    options.DefaultProvider = detectedProvider;
             });
-
-            // Add the provider factory if not already added
-            services.AddSingleton<Andy.Llm.Providers.ILlmProviderFactory, Andy.Llm.Providers.LlmProviderFactory>();
 
             // JSON repair still available if needed elsewhere
             services.AddSingleton<IJsonRepairService, JsonRepairService>();
