@@ -19,10 +19,9 @@
 
   <ItemGroup>
     <PackageReference Include="Andy.Acp.Core" Version="2025.11.18-rc.3" />
-    <PackageReference Include="Andy.Context" Version="2025.9.23-rc.4" />
-    <PackageReference Include="Andy.Engine" Version="2025.10.16-rc.14" />
-    <PackageReference Include="Andy.Llm" Version="2025.10.5-rc.16" />
-    <PackageReference Include="Andy.Model" Version="2025.9.20-rc.4" />
+    <PackageReference Include="Andy.Engine" Version="2026.2.10-rc.27" />
+    <PackageReference Include="Andy.Llm" Version="2025.11.19-rc.24" />
+    <PackageReference Include="Andy.Model" Version="2025.10.29-rc.5" />
     <PackageReference Include="Andy.Tools" Version="2025.10.16-rc.16" />
     <PackageReference Include="Andy.Tui" Version="2025.10.24-rc.39" />
     <PackageReference Include="JsonRepairSharp" Version="1.2.3" />
@@ -48,7 +47,6 @@
     <TrimmerRootAssembly Include="Andy.Engine" />
     <TrimmerRootAssembly Include="Andy.Model" />
     <TrimmerRootAssembly Include="Andy.Tui" />
-    <TrimmerRootAssembly Include="Andy.Context" />
   </ItemGroup>
 
 </Project>
