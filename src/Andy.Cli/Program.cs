@@ -207,11 +207,15 @@ class Program
                     }
                 }
 
-                // Auto-detect the default provider based on environment variables
-                var detectionService = new ProviderDetectionService();
-                var detectedProvider = detectionService.DetectDefaultProvider();
-                if (!string.IsNullOrEmpty(detectedProvider))
-                    options.DefaultProvider = detectedProvider;
+                // Only auto-detect if no DefaultProvider was explicitly configured in appsettings
+                var configuredDefault = configuration.GetSection("Llm:DefaultProvider").Value;
+                if (string.IsNullOrEmpty(configuredDefault))
+                {
+                    var detectionService = new ProviderDetectionService();
+                    var detectedProvider = detectionService.DetectDefaultProvider();
+                    if (!string.IsNullOrEmpty(detectedProvider))
+                        options.DefaultProvider = detectedProvider;
+                }
             });
 
             // JSON repair still available if needed elsewhere
