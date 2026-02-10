@@ -190,9 +190,10 @@ class Program
                 }
             }); // Conditional logging based on environment variable
 
-            // Configure LLM services from appsettings.json Llm section and environment
-            services.AddLlmServices(configuration);
+            // Configure LLM services: env vars first (as fallback defaults), then
+            // appsettings.json Llm section (takes precedence, overwrites env var defaults)
             services.ConfigureLlmFromEnvironment();
+            services.AddLlmServices(configuration);
 
             // Expand ${...} environment variable placeholders in provider API keys
             // and auto-detect the default provider
