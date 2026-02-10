@@ -19,7 +19,7 @@
 
   <ItemGroup>
     <PackageReference Include="Andy.Acp.Core" Version="2025.11.18-rc.3" />
-    <PackageReference Include="Andy.Engine" Version="2026.2.10-rc.27" />
+    <PackageReference Include="Andy.Engine" Version="2026.2.10-rc.28" />
     <PackageReference Include="Andy.Llm" Version="2025.11.19-rc.24" />
     <PackageReference Include="Andy.Model" Version="2025.10.29-rc.5" />
     <PackageReference Include="Andy.Tools" Version="2025.10.16-rc.16" />

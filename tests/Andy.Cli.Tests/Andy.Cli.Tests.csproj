@@ -53,6 +53,8 @@
     <Compile Include="Services/ParallelToolExecutionTests.cs" />
     <!-- ACP integration tests -->
     <Compile Include="ACP/AndyAgentProviderTests.cs" />
+    <!-- Multi-turn conversation context tests -->
+    <Compile Include="Integration/MultiTurnToolCallContextTests.cs" />
   </ItemGroup>
 
 </Project>
