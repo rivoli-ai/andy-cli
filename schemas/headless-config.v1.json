@@ -1,0 +1,204 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rivoli-ai.com/schemas/andy-cli/headless-config.v1.json",
+  "title": "Andy CLI headless run config v1",
+  "description": "Schema for the config file consumed by `andy-cli run --headless --config <path>`. See Epic AQ (rivoli-ai/andy-cli#44) and docs/headless-runtime.md for the full semantics.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run_id",
+    "agent",
+    "model",
+    "tools",
+    "workspace",
+    "output",
+    "limits"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "description": "Schema version. Bump to 2 introduces a new schema file (v2.json) and a separate compatibility layer; do not overload v1."
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Correlates stdout events and artifacts with the andy-containers Run entity (rivoli-ai/andy-containers#103)."
+    },
+    "agent": {
+      "type": "object",
+      "required": ["slug", "instructions"],
+      "additionalProperties": false,
+      "properties": {
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{1,63}$",
+          "description": "Agent identifier from andy-agents (Epic W W5 seed). Lowercase ASCII, dash-separated, 2-64 chars."
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optional pin to a specific agent revision. Null/absent = head."
+        },
+        "instructions": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100000,
+          "description": "Resolved system prompt: agent.instructions concatenated with delegation_contract.objective."
+        },
+        "output_format": {
+          "type": "string",
+          "description": "Optional hint for the agent's final output: a free-form label like 'plain' or a schema reference like 'json-triage-output-v1'."
+        }
+      }
+    },
+    "model": {
+      "type": "object",
+      "required": ["provider", "id"],
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "enum": ["anthropic", "openai", "google", "cerebras", "local"],
+          "description": "LLM provider. Pluggable via Andy.Llm adapter registry."
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Model identifier as recognised by the provider (e.g. 'claude-sonnet-4-6', 'gpt-5-medium')."
+        },
+        "api_key_ref": {
+          "type": "string",
+          "description": "How to resolve the API key. Supported prefixes: 'env:NAME' (read env var), 'secret-store:NAME' (future). Never the bare key value."
+        }
+      }
+    },
+    "tools": {
+      "type": "array",
+      "description": "Concrete tool bindings this run is allowed to call, resolved from the agent's skills × allowed_tools.",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "title": "MCP tool binding",
+            "required": ["name", "transport", "endpoint"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]*$",
+                "description": "Tool identifier as seen by the agent."
+              },
+              "transport": { "const": "mcp" },
+              "endpoint": {
+                "type": "string",
+                "format": "uri",
+                "description": "mcp-gateway URL for this tool (usually $ANDY_MCP_URL/<tool-name>)."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CLI tool binding",
+            "required": ["name", "transport", "binary"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]*$"
+              },
+              "transport": { "const": "cli" },
+              "binary": {
+                "type": "string",
+                "description": "Executable name resolved via $PATH (e.g. 'andy-tasks-cli')."
+              },
+              "command": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Default argv the agent prepends. The agent appends its own args."
+              }
+            }
+          }
+        ]
+      }
+    },
+    "workspace": {
+      "type": "object",
+      "required": ["root"],
+      "additionalProperties": false,
+      "properties": {
+        "root": {
+          "type": "string",
+          "description": "Absolute path inside the container to the mounted workspace (typically /workspace)."
+        },
+        "branch": {
+          "type": "string",
+          "description": "Git branch the run operates on."
+        }
+      }
+    },
+    "env_vars": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Additional env vars injected into the agent process. Reserved: ANDY_PROXY_URL, ANDY_TOKEN, ANDY_MCP_URL are always set by the container runtime (Epic Y5)."
+    },
+    "output": {
+      "type": "object",
+      "required": ["file", "stream"],
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "Path to write the final structured output. Atomic write (tmp + rename). Absent on failure before output stage."
+        },
+        "stream": {
+          "enum": ["stdout", "fifo"],
+          "description": "Where the structured event stream goes. 'stdout' is the default; 'fifo' names a separate path (set via event_sink.path)."
+        }
+      }
+    },
+    "event_sink": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "nats_subject": {
+          "type": "string",
+          "pattern": "^andy\\.containers\\.events\\.run\\.[0-9a-f-]+\\.[a-z_]+$",
+          "description": "NATS subject the container runtime (Epic AP6) will fan events to. Agent does not publish directly."
+        },
+        "path": {
+          "type": "string",
+          "description": "Absolute path to a named FIFO when output.stream == 'fifo'."
+        }
+      }
+    },
+    "policy_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Resolved policy UUID from andy-rbac (Epic V). Null-ish until V lands platform-wide."
+    },
+    "boundaries": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Policy-derived boundary tags (e.g. 'read-only', 'no-prod', 'draft-only'). Runtime uses these as guard-rails; the authoritative evaluation happens server-side at each tool call."
+    },
+    "limits": {
+      "type": "object",
+      "required": ["max_iterations", "timeout_seconds"],
+      "additionalProperties": false,
+      "properties": {
+        "max_iterations": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000,
+          "description": "Hard cap on agent loop iterations. Exceeded = exit code 4 (timeout)."
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400,
+          "description": "Wall-clock timeout. Exceeded = exit code 4 (timeout)."
+        }
+      }
+    }
+  }
+}

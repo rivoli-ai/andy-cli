@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "run_id": "00000000-0000-0000-0000-000000000002",
+  "agent": {
+    "slug": "planning-agent",
+    "instructions": "You are the planning agent. Given a triaged issue and the matching WorkflowTemplate, decompose it into TaskNodes with skill + agent + env assignments. Write the result as plan.md via docs.put.",
+    "output_format": "json-plan-v1"
+  },
+  "model": {
+    "provider": "anthropic",
+    "id": "claude-opus-4-7",
+    "api_key_ref": "env:ANDY_MODEL_KEY"
+  },
+  "tools": [
+    {
+      "name": "docs.search",
+      "transport": "mcp",
+      "endpoint": "https://mcp.internal/tools/docs.search"
+    },
+    {
+      "name": "docs.put",
+      "transport": "mcp",
+      "endpoint": "https://mcp.internal/tools/docs.put"
+    },
+    {
+      "name": "tasks.templates.get",
+      "transport": "cli",
+      "binary": "andy-tasks-cli",
+      "command": ["andy-tasks-cli", "templates", "get"]
+    }
+  ],
+  "workspace": {
+    "root": "/workspace",
+    "branch": "main"
+  },
+  "output": {
+    "file": "/workspace/.andy-run/output.json",
+    "stream": "stdout"
+  },
+  "boundaries": ["draft-only"],
+  "limits": {
+    "max_iterations": 120,
+    "timeout_seconds": 900
+  }
+}

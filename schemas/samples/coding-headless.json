@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "run_id": "00000000-0000-0000-0000-000000000003",
+  "agent": {
+    "slug": "coding-agent",
+    "instructions": "You are the coding agent. Implement the assigned TaskNode against the delegation contract. Write tests and run them before declaring done.",
+    "output_format": "plain"
+  },
+  "model": {
+    "provider": "anthropic",
+    "id": "claude-sonnet-4-6",
+    "api_key_ref": "env:ANDY_MODEL_KEY"
+  },
+  "tools": [
+    {
+      "name": "fs.patch",
+      "transport": "mcp",
+      "endpoint": "https://mcp.internal/tools/fs.patch"
+    },
+    {
+      "name": "git.branch",
+      "transport": "cli",
+      "binary": "git",
+      "command": ["git"]
+    },
+    {
+      "name": "container.exec",
+      "transport": "mcp",
+      "endpoint": "https://mcp.internal/tools/container.exec"
+    },
+    {
+      "name": "test.run",
+      "transport": "cli",
+      "binary": "andy-containers-cli",
+      "command": ["andy-containers-cli", "exec", "--"]
+    }
+  ],
+  "workspace": {
+    "root": "/workspace",
+    "branch": "feature/auto-coding-run"
+  },
+  "env_vars": {
+    "DOTNET_NOLOGO": "1",
+    "DOTNET_CLI_TELEMETRY_OPTOUT": "1"
+  },
+  "output": {
+    "file": "/workspace/.andy-run/output.json",
+    "stream": "stdout"
+  },
+  "boundaries": ["write-branch", "sandboxed"],
+  "limits": {
+    "max_iterations": 400,
+    "timeout_seconds": 3600
+  }
+}

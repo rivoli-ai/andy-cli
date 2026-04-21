@@ -12,6 +12,7 @@
     <PackageReference Include="Andy.Tools" Version="2025.10.16-rc.16" />
     <PackageReference Include="Andy.Model" Version="2025.10.29-rc.5" />
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="JsonSchema.Net" Version="9.2.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.0" />
     <PackageReference Include="Moq" Version="4.20.72" />
     <PackageReference Include="xunit" Version="2.9.3" />
@@ -55,6 +56,18 @@
     <Compile Include="ACP/AndyAgentProviderTests.cs" />
     <!-- Multi-turn conversation context tests -->
     <Compile Include="Integration/MultiTurnToolCallContextTests.cs" />
+    <!-- AQ1 headless config schema tests (rivoli-ai/andy-cli#46) -->
+    <Compile Include="HeadlessConfig/HeadlessConfigSchemaTests.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- AQ1 schema + fixtures — needed at test runtime to validate fixtures. -->
+    <None Include="..\..\schemas\headless-config.v1.json" Link="schemas\headless-config.v1.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="..\..\schemas\samples\*.json" Link="schemas\samples\%(Filename).json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
 </Project>
