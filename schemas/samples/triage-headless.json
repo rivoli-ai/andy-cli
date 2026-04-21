@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "run_id": "00000000-0000-0000-0000-000000000001",
+  "agent": {
+    "slug": "triage-agent",
+    "revision": 3,
+    "instructions": "You are the triage agent. Classify incoming issues against the Rivoli template set (bug-fix, feature, incident-response, upgrade) and return a structured JSON result matching json-triage-output-v1.",
+    "output_format": "json-triage-output-v1"
+  },
+  "model": {
+    "provider": "anthropic",
+    "id": "claude-sonnet-4-6",
+    "api_key_ref": "env:ANDY_MODEL_KEY"
+  },
+  "tools": [
+    {
+      "name": "issues.get",
+      "transport": "mcp",
+      "endpoint": "https://mcp.internal/tools/issues.get"
+    },
+    {
+      "name": "repo.search",
+      "transport": "cli",
+      "binary": "andy-issues-cli",
+      "command": ["andy-issues-cli", "search"]
+    }
+  ],
+  "workspace": {
+    "root": "/workspace",
+    "branch": "main"
+  },
+  "env_vars": {
+    "RIVOLI_TENANT_ID": "tenant-acme"
+  },
+  "output": {
+    "file": "/workspace/.andy-run/output.json",
+    "stream": "stdout"
+  },
+  "event_sink": {
+    "nats_subject": "andy.containers.events.run.00000000-0000-0000-0000-000000000001.progress"
+  },
+  "policy_id": "11111111-2222-3333-4444-555555555555",
+  "boundaries": ["read-only"],
+  "limits": {
+    "max_iterations": 50,
+    "timeout_seconds": 300
+  }
+}
