@@ -107,6 +107,16 @@ class Program
             return;
         }
 
+        // AQ2: `andy-cli run --headless --config <path>` — non-interactive.
+        // Handled here (not via HandleCommandLineArgs) because it needs the
+        // structured exit-code contract from rivoli-ai/andy-cli#47, which
+        // doesn't fit the ICommand Success/Fail → exit 0|1 scheme.
+        if (args.Length > 0 && args[0] == "run")
+        {
+            var exitCode = await Andy.Cli.HeadlessConfig.HeadlessRunner.RunAsync(args);
+            Environment.Exit((int)exitCode);
+        }
+
         // Check if we have command-line arguments for non-TUI commands
         if (args.Length > 0 && !args[0].StartsWith("-"))
         {
