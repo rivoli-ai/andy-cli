@@ -25,6 +25,7 @@
     <PackageReference Include="Andy.Tools" Version="2025.10.16-rc.16" />
     <PackageReference Include="Andy.Tui" Version="2025.10.24-rc.39" />
     <PackageReference Include="JsonRepairSharp" Version="1.2.3" />
+    <PackageReference Include="JsonSchema.Net" Version="9.2.0" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.8.0" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="9.0.9" />
@@ -34,6 +35,18 @@
     <None Update="appsettings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+  </ItemGroup>
+
+  <!--
+    Embed the AQ1 headless-config schema so andy-cli run (headless mode)
+    can validate without depending on the schemas/ directory at runtime.
+    LogicalName is load-bearing: HeadlessConfigLoader looks it up by this
+    exact string.
+  -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\schemas\headless-config.v1.json">
+      <LogicalName>Andy.Cli.schemas.headless-config.v1.json</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <ItemGroup>

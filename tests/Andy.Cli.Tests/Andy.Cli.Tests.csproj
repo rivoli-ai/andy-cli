@@ -58,6 +58,8 @@
     <Compile Include="Integration/MultiTurnToolCallContextTests.cs" />
     <!-- AQ1 headless config schema tests (rivoli-ai/andy-cli#46) -->
     <Compile Include="HeadlessConfig/HeadlessConfigSchemaTests.cs" />
+    <!-- AQ2 headless runner tests (rivoli-ai/andy-cli#47) -->
+    <Compile Include="HeadlessConfig/HeadlessRunnerTests.cs" />
   </ItemGroup>
 
   <ItemGroup>
