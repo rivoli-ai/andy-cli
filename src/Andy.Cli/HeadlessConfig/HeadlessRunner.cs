@@ -1,26 +1,30 @@
 using System.IO;
+using Andy.Cli.Headless;
+using Microsoft.Extensions.Logging;
 
 namespace Andy.Cli.HeadlessConfig;
 
-// Entry point for `andy-cli run --headless --config <path>` (AQ2,
-// rivoli-ai/andy-cli#47). Returns a HeadlessExitCode so the caller (wired
-// in Program.Main) can hand it straight to Environment.Exit.
+// Entry point for `andy-cli run --headless --config <path>`.
 //
-// AQ2's job is the *scaffolding* — argument parsing, config loading, exit
-// semantics. The actual agent loop (AQ3+) is not implemented yet; a valid
-// config today is acknowledged with a diagnostic and Success, which lets
-// the Epic AP configurator exercise the full path end-to-end before AQ3
-// lands.
+// AQ2 (rivoli-ai/andy-cli#47) introduced this as scaffolding — arg parsing,
+// config loading, exit semantics — and stubbed the agent loop with an
+// exit-0 diagnostic. AQ3 (rivoli-ai/andy-cli#44) replaces that stub with a
+// real loop in Andy.Cli.Headless.HeadlessAgentRunner; this file remains
+// the surface every error path funnels through to keep the
+// HeadlessExitCode contract in one place.
 public static class HeadlessRunner
 {
     public static async Task<HeadlessExitCode> RunAsync(
         string[] args,
         TextWriter? stdout = null,
         TextWriter? stderr = null,
+        ILoggerFactory? loggerFactory = null,
         CancellationToken ct = default)
     {
         stdout ??= Console.Out;
         stderr ??= Console.Error;
+        loggerFactory ??= LoggerFactory.Create(builder => builder.AddConsole(o =>
+            o.LogToStandardErrorThreshold = LogLevel.Information));
 
         try
         {
@@ -40,16 +44,13 @@ public static class HeadlessRunner
                 return HeadlessExitCode.ConfigError;
             }
 
-            // AQ3+ wires the real agent loop here. Until it lands, acknowledge the
-            // load so AP's configurator can smoke the full path.
-            var config = load.Config!;
-            stdout.WriteLine(
-                $"andy-cli run --headless: loaded config for run {config.RunId} "
-                    + $"(agent={config.Agent.Slug}, model={config.Model.Provider}:{config.Model.Id}, "
-                    + $"tools={config.Tools.Count}, limits.max_iterations={config.Limits.MaxIterations}, "
-                    + $"limits.timeout_seconds={config.Limits.TimeoutSeconds}). "
-                    + "Agent loop not yet implemented (AQ3); exiting 0.");
-            return HeadlessExitCode.Success;
+            return await HeadlessAgentRunner.ExecuteAsync(
+                load.Config!,
+                eventStream: stdout,
+                stderr: stderr,
+                loggerFactory: loggerFactory,
+                llmProviderOverride: null,
+                ct: ct);
         }
         catch (OperationCanceledException)
         {

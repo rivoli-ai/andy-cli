@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rivoli-ai.com/schemas/andy-cli/headless-events.v1.json",
+  "title": "andy-cli headless event stream (v1)",
+  "description": "NDJSON envelope emitted by `andy-cli run --headless --config <path>`. One JSON object per line on stdout (or the FIFO named in event_sink.path). Consumed by andy-containers' AP6 fan-out to `andy.containers.events.run.{run_id}.progress`. Schema is additive: consumers MUST tolerate unknown `kind` values and unknown `data` fields.",
+  "type": "object",
+  "required": ["schema_version", "ts", "kind", "data"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version pin. v2 will ship a new file."
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 / ISO 8601 timestamp with offset, e.g. 2026-04-25T22:31:14.123+00:00. Always wall-clock UTC from the agent process."
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "started",
+        "llm_chunk",
+        "tool_call_started",
+        "tool_call_finished",
+        "output_written",
+        "error",
+        "finished"
+      ]
+    },
+    "data": {
+      "type": "object",
+      "description": "Per-kind payload. See $defs for the closed shape per kind. Producers MAY emit additional fields; consumers MUST tolerate them."
+    }
+  },
+  "$defs": {
+    "started": {
+      "type": "object",
+      "required": ["run_id", "agent_slug", "model_provider", "model_id", "tool_count"],
+      "properties": {
+        "run_id":         { "type": "string", "format": "uuid" },
+        "agent_slug":     { "type": "string" },
+        "model_provider": { "type": "string" },
+        "model_id":       { "type": "string" },
+        "tool_count":     { "type": "integer", "minimum": 0 }
+      }
+    },
+    "llm_chunk": {
+      "type": "object",
+      "required": ["text"],
+      "properties": {
+        "text":  { "type": "string" },
+        "turn":  { "type": "integer", "minimum": 0 }
+      }
+    },
+    "tool_call_started": {
+      "type": "object",
+      "required": ["call_id", "tool_name"],
+      "properties": {
+        "call_id":   { "type": "string", "description": "Producer-assigned id, unique within this run; pairs with the matching tool_call_finished." },
+        "tool_name": { "type": "string" },
+        "args_digest": { "type": "string", "description": "SHA-256 hex of the canonical-JSON-serialized arg object. Args themselves are not emitted to keep the event stream cheap and to avoid leaking secrets." }
+      }
+    },
+    "tool_call_finished": {
+      "type": "object",
+      "required": ["call_id", "tool_name", "ok", "duration_ms"],
+      "properties": {
+        "call_id":     { "type": "string" },
+        "tool_name":   { "type": "string" },
+        "ok":          { "type": "boolean" },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "result_digest": { "type": "string", "description": "SHA-256 hex of the canonical-JSON-serialized result. Optional; producers MAY omit on error." },
+        "error":       { "type": "string", "description": "Short error string when ok=false. Producers SHOULD redact or truncate; consumers MUST NOT key on its content." }
+      }
+    },
+    "output_written": {
+      "type": "object",
+      "required": ["path", "bytes"],
+      "properties": {
+        "path":  { "type": "string", "description": "Absolute path to the file written by AQ4's atomic write." },
+        "bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "error": {
+      "type": "object",
+      "required": ["message"],
+      "properties": {
+        "message": { "type": "string" },
+        "fatal":   { "type": "boolean", "description": "true ⇒ terminal error; the next event will be `finished` and the process will exit non-zero." }
+      }
+    },
+    "finished": {
+      "type": "object",
+      "required": ["exit_code", "duration_ms"],
+      "properties": {
+        "exit_code":    { "type": "integer", "minimum": 0, "maximum": 5, "description": "Mirrors the process exit code (HeadlessExitCode in src/Andy.Cli/HeadlessConfig)." },
+        "duration_ms":  { "type": "integer", "minimum": 0 },
+        "iterations":   { "type": "integer", "minimum": 0, "description": "Number of LLM/tool turns executed before terminating." }
+      }
+    }
+  }
+}
