@@ -33,11 +33,17 @@ public class HeadlessRunnerTests
         return dir.FullName;
     }
 
+    // AQ3 contract: even when the agent loop can't run (e.g. fixtures
+    // reference MCP endpoints that don't exist on the test host), the run
+    // MUST produce a structured event stream — at minimum a fatal error
+    // event followed by a finished event with the matching exit code. The
+    // AQ2 stub-test that asserted Success on these fixtures is gone with
+    // the stub itself.
     [Theory]
     [InlineData("triage-headless.json")]
     [InlineData("planning-headless.json")]
     [InlineData("coding-headless.json")]
-    public async Task Run_ValidFixture_ReturnsSuccess(string fixtureName)
+    public async Task Run_FixtureWithUnreachableTools_EmitsErrorAndFinished(string fixtureName)
     {
         var path = Path.Combine(SamplesDir, fixtureName);
         var (stdout, stderr) = NewIoCapture();
@@ -45,10 +51,11 @@ public class HeadlessRunnerTests
         var code = await HeadlessRunner.RunAsync(
             ["run", "--headless", "--config", path], stdout, stderr);
 
-        Assert.True(code == HeadlessExitCode.Success,
-            $"Expected Success, got {code}. stderr: {stderr}. stdout: {stdout}");
-        Assert.Contains("loaded config for run", stdout.ToString());
-        Assert.True(stderr.ToString().Length == 0, $"stderr should be empty but was: {stderr}");
+        Assert.Equal(HeadlessExitCode.AgentFailure, code);
+        var lines = stdout.ToString()
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.Contains(lines, l => l.Contains("\"kind\":\"error\"") && l.Contains("\"fatal\":true"));
+        Assert.Contains(lines, l => l.Contains("\"kind\":\"finished\"") && l.Contains("\"exit_code\":1"));
     }
 
     [Fact]

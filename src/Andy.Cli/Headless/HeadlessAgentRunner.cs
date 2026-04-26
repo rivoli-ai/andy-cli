@@ -46,6 +46,7 @@ public static class HeadlessAgentRunner
         TextWriter eventStream,
         TextWriter stderr,
         ILoggerFactory loggerFactory,
+        ILlmProvider? llmProviderOverride = null,
         CancellationToken ct = default)
     {
         var emitter = new HeadlessEventEmitter(eventStream);
@@ -66,17 +67,20 @@ public static class HeadlessAgentRunner
             return HeadlessExitCode.AgentFailure;
         }
 
-        ILlmProvider? llmProvider;
-        try
+        ILlmProvider? llmProvider = llmProviderOverride;
+        if (llmProvider is null)
         {
-            llmProvider = ResolveLlmProvider(services, config);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Failed to resolve LLM provider {Provider}", config.Model.Provider);
-            emitter.EmitError($"Failed to resolve LLM provider '{config.Model.Provider}': {ex.Message}", fatal: true);
-            EmitFinished(emitter, stopwatch, iterations, HeadlessExitCode.AgentFailure);
-            return HeadlessExitCode.AgentFailure;
+            try
+            {
+                llmProvider = ResolveLlmProvider(services, config);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to resolve LLM provider {Provider}", config.Model.Provider);
+                emitter.EmitError($"Failed to resolve LLM provider '{config.Model.Provider}': {ex.Message}", fatal: true);
+                EmitFinished(emitter, stopwatch, iterations, HeadlessExitCode.AgentFailure);
+                return HeadlessExitCode.AgentFailure;
+            }
         }
 
         var toolExecutor = services.GetRequiredService<IToolExecutor>();

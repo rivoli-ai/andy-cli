@@ -49,6 +49,7 @@ public static class HeadlessRunner
                 eventStream: stdout,
                 stderr: stderr,
                 loggerFactory: loggerFactory,
+                llmProviderOverride: null,
                 ct: ct);
         }
         catch (OperationCanceledException)
