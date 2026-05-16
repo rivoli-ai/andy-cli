@@ -41,8 +41,8 @@ Andy CLI automatically detects and selects the best available LLM provider based
 2. **Cerebras** - Requires `CEREBRAS_API_KEY` (fast inference)
 3. **Ollama** (local) - Detected if running on localhost:11434 (no API key required)
 4. **Azure OpenAI** - Requires `AZURE_OPENAI_API_KEY` and `AZURE_OPENAI_ENDPOINT`
-
-Note: Anthropic and Google Gemini providers are recognized but require Andy.Llm package updates for full support.
+5. **Anthropic** - Requires `ANTHROPIC_API_KEY`
+6. **Google Gemini** - Requires `GOOGLE_API_KEY`
 
 ### Environment Variables
 
@@ -54,6 +54,8 @@ See Andy.Llm library documentation.
 - `AZURE_OPENAI_API_KEY` - Azure OpenAI API key
 - `AZURE_OPENAI_ENDPOINT` - Azure OpenAI endpoint URL
 - `CEREBRAS_API_KEY` - Cerebras API key
+- `ANTHROPIC_API_KEY` - Anthropic (Claude) API key
+- `GOOGLE_API_KEY` - Google Gemini API key
 - `OLLAMA_API_BASE` - Custom Ollama endpoint (default: http://localhost:11434)
 
 #### Provider Control
@@ -73,8 +75,8 @@ See Andy.Llm library documentation.
 # Use OpenAI (if OPENAI_API_KEY is set)
 ANDY_SKIP_OLLAMA=1 dotnet run --project src/Andy.Cli
 
-# Force specific provider
-dotnet run --project src/Andy.Cli -- model switch openai
+# Force a specific provider
+dotnet run --project src/Andy.Cli -- model provider openai
 
 # Check provider detection
 dotnet run --project src/Andy.Cli -- model detect
@@ -106,10 +108,13 @@ dotnet run --project src/Andy.Cli
 #### Slash Commands
 
 - `/model list` - Show available models
-- `/model switch <provider>` - Change provider
+- `/model switch <model>` - Switch to a different model (same provider)
+- `/model provider <name>` - Switch to a different provider
+- `/model refresh` - Refresh model lists from the provider API
 - `/model info` - Show current model details
 - `/model detect` - Show provider detection diagnostics
 - `/tools list` - List available tools
+- `/tools info <tool_name>` - Show details for a tool
 - `/clear` - Clear conversation history
 - `/help` - Show help information
 
@@ -118,7 +123,7 @@ dotnet run --project src/Andy.Cli
 ```bash
 # Model management
 dotnet run --project src/Andy.Cli -- model list
-dotnet run --project src/Andy.Cli -- model switch openai
+dotnet run --project src/Andy.Cli -- model provider openai
 dotnet run --project src/Andy.Cli -- model detect
 
 # Tool management
