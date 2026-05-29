@@ -147,6 +147,7 @@ class Program
 
             // Scroll mode state
             ScrollMode scrollMode = ScrollMode.Feed;
+            int lastReflowSig = int.MinValue; // forces a full clear+repaint on the first frame
             var promptHistory = new List<string>(); // Store user prompts for history navigation
             int historyIndex = -1; // -1 means not navigating history, showing current input
 
@@ -1339,6 +1340,23 @@ class Program
                 foreach (var op in wb.Build().Ops) Append(op, builder);
                 foreach (var op in overlayB.Build().Ops) AppendOpaque(op, builder);
                 foreach (var op in overlay.Build().Ops) AppendOpaque(op, builder);
+
+                // The renderer only repaints cells it draws, so with transparent
+                // backgrounds the unmanaged left margin / gap rows can reveal stale
+                // "prior output" left in the terminal. Whenever feed content reflows
+                // (items added/removed, line count or scroll change), force the next
+                // frame to be a full clear + repaint (ESC[2J) so that residue is wiped.
+                // (Scroll offset is intentionally excluded: scrolling only changes the
+                // diff-managed feed area, not the margin, so it needs no full repaint.)
+                int reflowSig = HashCode.Combine(feed.ItemCount, feed.RenderedLineCount, (int)scrollMode);
+                if (reflowSig != lastReflowSig)
+                {
+                    lastReflowSig = reflowSig;
+                    // FrameScheduler has no "reset" hook; a fresh instance has no previous
+                    // grid, so its next render emits a full clear + complete repaint.
+                    scheduler = new Andy.Tui.Core.FrameScheduler(targetFps: 30);
+                    scheduler.SetMetricsSink(hud);
+                }
                 await scheduler.RenderOnceAsync(builder.Build(), viewport, caps, pty, CancellationToken.None);
                 // Position terminal cursor as a block inside the prompt (only when not processing)
                 // NOTE: We're using direct Console.Write here instead of going through the TUI library (PTY).

@@ -411,6 +411,12 @@ namespace Andy.Cli.Widgets
             if (_animRemaining > 0) _animRemaining = Math.Max(0, _animRemaining - _animSpeed);
         }
 
+        /// <summary>Number of feed items. Changes when content is added/removed/cleared.</summary>
+        public int ItemCount { get { lock (_itemsLock) { return _items.Count; } } }
+
+        /// <summary>Total wrapped line count from the last <see cref="Render"/> (content reflow signal).</summary>
+        public int RenderedLineCount => _totalLinesCache;
+
         private int _totalLinesCache;
 
         /// <summary>Render feed items inside rect, stacking vertically with bottom alignment when following tail.</summary>
