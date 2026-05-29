@@ -135,8 +135,10 @@ class Program
         var pty = new LocalStdoutPty();
         Console.Write("\u001b[?1049h\u001b[?25l\u001b[?7l");
 
-        // Set console background to black after entering alternate screen
-        Console.BackgroundColor = ConsoleColor.Black;
+        // Use the terminal's own background (do not force black) so a transparent
+        // or themed terminal shows through the UI. ESC[49m resets to the default bg.
+        Console.ResetColor();
+        Console.Write("[49m");
         Console.Clear();
 
         try
@@ -641,7 +643,7 @@ class Program
                     var confirmB = new DL.DisplayListBuilder();
                     confirmB.PushClip(new DL.ClipPush(0, 0, viewport.Width, viewport.Height));
 
-                    // Semi-transparent backdrop
+                    // Opaque backdrop: occlude the content behind the modal dialog.
                     confirmB.DrawRect(new DL.Rect(0, 0, viewport.Width, viewport.Height, new DL.Rgb24(0, 0, 0)));
 
                     // Dialog box
@@ -1320,17 +1322,23 @@ class Program
                     tokenCounter.RenderAt(tokenCounterX, viewport.Height - 1, baseDl, wb);
                 }
 
-                // Render command palette (if open)
-                commandPalette.Render(new L.Rect(0, 0, viewport.Width, viewport.Height), baseDl, wb);
+                // Render command palette (if open) into a SEPARATE builder. Overlays
+                // must occlude the content behind them, so they keep their own
+                // (opaque) background instead of being made transparent like the
+                // main surface — otherwise the feed bleeds through the palette.
+                var overlayB = new DL.DisplayListBuilder();
+                commandPalette.Render(new L.Rect(0, 0, viewport.Width, viewport.Height), baseDl, overlayB);
 
                 var overlay = new DL.DisplayListBuilder();
                 hud.ViewportCols = viewport.Width; hud.ViewportRows = viewport.Height;
                 hud.Contribute(baseDl, overlay);
-                // Simple combine logic
+                // Combine: main surface is rendered transparent (Append strips
+                // backgrounds); overlays are rendered opaque (AppendOpaque keeps them).
                 var builder = new DL.DisplayListBuilder();
                 foreach (var op in baseDl.Ops) Append(op, builder);
                 foreach (var op in wb.Build().Ops) Append(op, builder);
-                foreach (var op in overlay.Build().Ops) Append(op, builder);
+                foreach (var op in overlayB.Build().Ops) AppendOpaque(op, builder);
+                foreach (var op in overlay.Build().Ops) AppendOpaque(op, builder);
                 await scheduler.RenderOnceAsync(builder.Build(), viewport, caps, pty, CancellationToken.None);
                 // Position terminal cursor as a block inside the prompt (only when not processing)
                 // NOTE: We're using direct Console.Write here instead of going through the TUI library (PTY).
@@ -1358,7 +1366,25 @@ class Program
                     }
                 }
 
+                // Main surface: transparent. Drop any fill/bg a widget hardcoded so the
+                // terminal background shows through the UI (e.g. message blocks that bake
+                // in a black background).
                 static void Append(object op, DL.DisplayListBuilder b)
+                {
+                    switch (op)
+                    {
+                        case DL.Rect r: b.DrawRect(r with { Fill = null }); break;
+                        case DL.Border br: b.DrawBorder(br); break;
+                        case DL.TextRun tr: b.DrawText(tr with { Bg = null }); break;
+                        case DL.ClipPush cp: b.PushClip(cp); break;
+                        case DL.LayerPush lp: b.PushLayer(lp); break;
+                        case DL.Pop: b.Pop(); break;
+                    }
+                }
+
+                // Overlays (command palette, menus): keep their own opaque background so
+                // they occlude the content behind them and stay readable.
+                static void AppendOpaque(object op, DL.DisplayListBuilder b)
                 {
                     switch (op)
                     {
