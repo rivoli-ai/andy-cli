@@ -7,12 +7,15 @@ namespace Andy.Cli.Themes
     /// </summary>
     public sealed class Theme
     {
-        // Background colors
-        public DL.Rgb24 Background { get; set; } = new DL.Rgb24(0, 0, 0);
-        public DL.Rgb24 HeaderBackground { get; set; } = new DL.Rgb24(30, 35, 50);
-        public DL.Rgb24 DialogBackground { get; set; } = new DL.Rgb24(30, 30, 40);
+        // Background colors.
+        // null = transparent: the terminal's own background (including transparency)
+        // shows through. Main surface, header, prompt and dialog backgrounds are
+        // transparent; the remaining chrome keeps a subtle shade for legibility.
+        public DL.Rgb24? Background { get; set; } = null;
+        public DL.Rgb24? HeaderBackground { get; set; } = null;
+        public DL.Rgb24? DialogBackground { get; set; } = null;
         public DL.Rgb24 CodeBlockBackground { get; set; } = new DL.Rgb24(20, 20, 30);
-        public DL.Rgb24 PromptBackground { get; set; } = new DL.Rgb24(0, 0, 0);
+        public DL.Rgb24? PromptBackground { get; set; } = null;
         public DL.Rgb24 ToastBackground { get; set; } = new DL.Rgb24(60, 60, 20);
         public DL.Rgb24 StatusLineBackground { get; set; } = new DL.Rgb24(10, 10, 10);
         public DL.Rgb24 KeyHintsBackground { get; set; } = new DL.Rgb24(15, 15, 15);
