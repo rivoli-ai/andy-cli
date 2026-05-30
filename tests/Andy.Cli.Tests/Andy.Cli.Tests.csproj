@@ -62,6 +62,8 @@
     <Compile Include="HeadlessConfig/HeadlessConfigSchemaTests.cs" />
     <!-- AQ2 headless runner tests (rivoli-ai/andy-cli#47) -->
     <Compile Include="HeadlessConfig/HeadlessRunnerTests.cs" />
+    <!-- Headless provider/model resolution (OpenRouter) -->
+    <Compile Include="HeadlessConfig/HeadlessProviderModelTests.cs" />
   </ItemGroup>
 
   <ItemGroup>
