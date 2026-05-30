@@ -85,11 +85,10 @@ public class HeadlessAgentRunnerStabilityTests
         using var ws = new TempDir();
         // Register a real, no-op cli tool so the scripted tool call resolves to
         // an actual adapter and SimpleAgent fires its ToolCalled event.
-        var noop = CrossPlatform.NoOpCliTool("noop");
-        var config = NewConfig(ws) with { Tools = new[] { noop } };
+        var config = NewConfig(ws) with { Tools = new[] { CrossPlatform.NoOpCliTool("noop") } };
 
         var provider = new FakeLlmProvider(
-            FakeLlmProvider.ToolCallResponse("noop", new { args = System.Array.Empty<string>() }),
+            FakeLlmProvider.ToolCallResponse("noop", "call-1"),
             FakeLlmProvider.TextResponse("done"));
 
         var (events, code) = await RunAsync(config, provider);
@@ -124,7 +123,7 @@ public class HeadlessAgentRunnerStabilityTests
         var config = NewConfig(ws) with { Tools = new[] { echo } };
 
         var provider = new FakeLlmProvider(
-            FakeLlmProvider.ToolCallResponse("echo_marker", new { args = System.Array.Empty<string>() }),
+            FakeLlmProvider.ToolCallResponse("echo_marker", "call-echo"),
             FakeLlmProvider.TextResponse("subprocess invoked"));
 
         var (events, code) = await RunAsync(config, provider);
@@ -289,12 +288,28 @@ public class HeadlessAgentRunnerStabilityTests
     // Minimal parsed view of one NDJSON event line.
     private sealed record Evt(int SchemaVersion, string Kind, JsonElement Data);
 
+    private sealed class TempDir : IDisposable
+    {
+        public string Path { get; }
+        public TempDir()
+        {
+            Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"aq7-{Guid.NewGuid():N}");
+            Directory.CreateDirectory(Path);
+        }
+        public void Dispose()
+        {
+            try { if (Directory.Exists(Path)) Directory.Delete(Path, recursive: true); }
+            catch { /* best-effort */ }
+        }
+    }
+
     // ---- fakes -------------------------------------------------------------
 
     // Deterministic in-memory provider. HeadlessAgentRunner wraps it in a
-    // SimpleAgent and drives it with a single kickoff message; each queued
-    // turn is returned once, in order, so the resulting event stream is fully
-    // reproducible. A turn may throw to drive the failure path.
+    // SimpleAgent and drives it with a single kickoff message; each queued turn
+    // is returned once, in order, so the resulting event stream is fully
+    // reproducible. A turn may throw to drive the failure path. Mirrors the
+    // Message/ToolCall idiom SimpleAgent expects (see the AQ3 StubLlmProvider).
     private sealed class FakeLlmProvider : ILlmProvider
     {
         private readonly Queue<Func<LlmResponse>> _turns;
@@ -334,44 +349,56 @@ public class HeadlessAgentRunnerStabilityTests
             LlmRequest request,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
+            // SimpleAgent's headless loop uses CompleteAsync; implement streaming
+            // as a single terminal chunk for completeness.
             var response = await CompleteAsync(request, cancellationToken);
             yield return new LlmStreamResponse
             {
-                TextDelta = response.AssistantMessage?.Content ?? string.Empty,
+                Delta = response.AssistantMessage,
                 IsComplete = true,
+                FinishReason = response.FinishReason,
             };
         }
-
-        public Task<IEnumerable<ModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult<IEnumerable<ModelInfo>>(Array.Empty<ModelInfo>());
 
         public Task<bool> IsAvailableAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(true);
 
+        public Task<IEnumerable<ModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(Enumerable.Empty<ModelInfo>());
+
+        // A final assistant message with no tool calls and FinishReason="stop"
+        // terminates SimpleAgent's loop after one turn.
         public static LlmResponse TextResponse(string text) => new()
         {
             AssistantMessage = new Message
             {
                 Role = Role.Assistant,
-                Parts = { new TextPart { Text = text } },
+                Content = text,
+                ToolCalls = new List<ToolCall>(),
             },
+            FinishReason = "stop",
+            Model = "scripted-model",
         };
 
-        public static LlmResponse ToolCallResponse(string toolName, object args) => new()
+        // An assistant message carrying a single tool call drives one tool turn.
+        public static LlmResponse ToolCallResponse(string toolName, string callId) => new()
         {
             AssistantMessage = new Message
             {
                 Role = Role.Assistant,
-                Parts =
+                Content = string.Empty,
+                ToolCalls = new List<ToolCall>
                 {
-                    new ToolCallPart
+                    new()
                     {
-                        ToolName = toolName,
-                        CallId = Guid.NewGuid().ToString("N")[..8],
-                        Arguments = args,
+                        Id = callId,
+                        Name = toolName,
+                        ArgumentsJson = "{\"args\":[]}",
                     },
                 },
             },
+            FinishReason = "tool_calls",
+            Model = "scripted-model",
         };
     }
 
@@ -381,11 +408,11 @@ public class HeadlessAgentRunnerStabilityTests
     {
         private static bool IsWindows => RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
 
-        // A cli tool that exits 0 and needs no input. On POSIX /bin/echo, on
-        // Windows cmd /c echo. CliSubprocessTool treats a zero exit as success.
+        // A cli tool that exits 0 and needs no input. CliSubprocessTool treats a
+        // zero exit as success regardless of stdout.
         public static HeadlessTool NoOpCliTool(string name) => IsWindows
-            ? new HeadlessTool { Name = name, Transport = "cli", Binary = "cmd.exe", Command = new[] { "cmd.exe", "/c", "echo" } }
-            : new HeadlessTool { Name = name, Transport = "cli", Binary = "/bin/echo", Command = new[] { "/bin/echo" } };
+            ? new HeadlessTool { Name = name, Transport = "cli", Binary = "cmd", Command = new[] { "cmd", "/c", "echo" } }
+            : new HeadlessTool { Name = name, Transport = "cli", Binary = "echo", Command = new[] { "echo" } };
 
         // Writes a tiny script into <dir> that echoes <marker> and exits 0,
         // returning a HeadlessTool named "echo_marker" that invokes it.
@@ -399,8 +426,8 @@ public class HeadlessAgentRunnerStabilityTests
                 {
                     Name = "echo_marker",
                     Transport = "cli",
-                    Binary = "cmd.exe",
-                    Command = new[] { "cmd.exe", "/c", bat },
+                    Binary = "cmd",
+                    Command = new[] { "cmd", "/c", bat },
                 };
             }
 
@@ -410,8 +437,8 @@ public class HeadlessAgentRunnerStabilityTests
             {
                 Name = "echo_marker",
                 Transport = "cli",
-                Binary = "/bin/sh",
-                Command = new[] { "/bin/sh", sh },
+                Binary = "sh",
+                Command = new[] { "sh", sh },
             };
         }
     }
