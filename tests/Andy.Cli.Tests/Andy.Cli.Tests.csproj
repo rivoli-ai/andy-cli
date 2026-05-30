@@ -64,6 +64,8 @@
     <Compile Include="HeadlessConfig/HeadlessRunnerTests.cs" />
     <!-- Headless provider/model resolution (OpenRouter) -->
     <Compile Include="HeadlessConfig/HeadlessProviderModelTests.cs" />
+    <!-- AQ5 headless cancel/timeout protocol tests (rivoli-ai/andy-cli#50) -->
+    <Compile Include="Headless/HeadlessAgentRunnerCancelTests.cs" />
   </ItemGroup>
 
   <ItemGroup>

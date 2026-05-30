@@ -84,6 +84,38 @@ class Program
         return (_gitBranch, _gitCommit);
     }
 
+    // AQ5 (rivoli-ai/andy-cli#50): cancel protocol for headless runs. When
+    // andy-containers sends SIGTERM (or SIGINT for Ctrl+C), cancel a CTS so
+    // HeadlessRunner.RunAsync follows its graceful shutdown path (flush events,
+    // exit code 3, no partial output) instead of being killed abruptly. The
+    // wall-clock timeout is handled separately inside HeadlessAgentRunner.
+    private static async Task<Andy.Cli.HeadlessConfig.HeadlessExitCode> RunHeadlessAsync(string[] args)
+    {
+        using var cts = new CancellationTokenSource();
+
+        void HandleSignal(System.Runtime.InteropServices.PosixSignalContext context)
+        {
+            // Suppress the runtime's default abrupt termination so our graceful
+            // shutdown path runs; cancellation flows through HeadlessRunner.
+            context.Cancel = true;
+            try
+            {
+                cts.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Run already completed and disposed the CTS; nothing to cancel.
+            }
+        }
+
+        using var sigterm = System.Runtime.InteropServices.PosixSignalRegistration.Create(
+            System.Runtime.InteropServices.PosixSignal.SIGTERM, HandleSignal);
+        using var sigint = System.Runtime.InteropServices.PosixSignalRegistration.Create(
+            System.Runtime.InteropServices.PosixSignal.SIGINT, HandleSignal);
+
+        return await Andy.Cli.HeadlessConfig.HeadlessRunner.RunAsync(args, ct: cts.Token);
+    }
+
     static async Task Main(string[] args)
     {
         // Debug: Check if ANDY_DEBUG_RAW is set
@@ -113,7 +145,7 @@ class Program
         // doesn't fit the ICommand Success/Fail → exit 0|1 scheme.
         if (args.Length > 0 && args[0] == "run")
         {
-            var exitCode = await Andy.Cli.HeadlessConfig.HeadlessRunner.RunAsync(args);
+            var exitCode = await RunHeadlessAsync(args);
             Environment.Exit((int)exitCode);
         }
 
