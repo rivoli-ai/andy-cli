@@ -144,6 +144,31 @@ public static class HeadlessAgentRunner
             return HeadlessExitCode.AgentFailure;
         }
 
+        // SimpleAgent may swallow the OperationCanceledException internally and
+        // return a failed result instead of throwing, so the catch above does
+        // not always see the cancel. Check the tokens directly: an outer ct
+        // cancel (SIGTERM) maps to Cancelled (3); the wall-clock timeout maps
+        // to Timeout (4). Either way we stop here without writing output, so no
+        // partial output is produced.
+        if (linkedCts.IsCancellationRequested)
+        {
+            iterations = result?.TurnCount ?? agent.GetHistory().Count / 2;
+            if (timeoutCts.IsCancellationRequested && !ct.IsCancellationRequested)
+            {
+                emitter.EmitError(
+                    $"Agent loop exceeded timeout_seconds={timeoutSeconds}.",
+                    fatal: true);
+                exitCode = HeadlessExitCode.Timeout;
+            }
+            else
+            {
+                emitter.EmitError("Agent loop cancelled.", fatal: true);
+                exitCode = HeadlessExitCode.Cancelled;
+            }
+            EmitFinished(emitter, stopwatch, iterations, exitCode);
+            return exitCode;
+        }
+
         // SimpleAgent reports loop-level success; max_turns hits land here as
         // Success=false with StopReason="max_turns". Treat that as Timeout
         // to match the headless contract (max_iterations → exit 4).

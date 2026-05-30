@@ -1,115 +1,274 @@
-# Andy CLI headless runtime
+# Headless runtime
 
-`andy-cli` has two modes:
+## Concept: andy-cli's dual role
 
-- **Interactive** (existing): `andy-cli` — TTY-driven, user-facing. The standalone assistant.
-- **Headless** (introduced by Epic AQ, rivoli-ai/andy-cli#44): `andy-cli run --headless --config <path>` — non-interactive, spawned by rivoli-ai/andy-containers' run configurator (Epic AP). Emits a structured event stream, writes an output file, exits with a typed status code.
+andy-cli has two roles that share a single binary:
 
-This document covers the headless contract: the config schema (AQ1), the event stream (AQ3), the output contract (AQ4), and the exit semantics (AQ2/AQ5).
+1. **Interactive assistant.** The terminal UI a developer drives directly.
+2. **Headless agent runtime.** A non-interactive execution mode driven entirely
+   by a config file. This is the mode that
+   [andy-containers](https://github.com/rivoli-ai/andy-containers) spawns for the
+   conductor platform.
 
-## Config schema — v1
+The second role was established by the 2026-04-21 architectural decision recorded
+in [Epic AQ (rivoli-ai/andy-cli#44)](https://github.com/rivoli-ai/andy-cli/issues/44)
+and is documented in
+[docs/adr/0001-headless-agent-runtime.md](adr/0001-headless-agent-runtime.md).
+Rather than build a second agent host, the conductor platform reuses the same
+andy-cli binary it already ships, invoked in headless mode. The container runtime
+hands andy-cli a fully resolved config (agent prompt, model, tools, limits) and
+consumes a structured NDJSON event stream from stdout. The numeric process exit
+code is the run's terminal status.
 
-**Canonical spec:** [`schemas/headless-config.v1.json`](../schemas/headless-config.v1.json) (JSON Schema draft 2020-12, `$id = https://rivoli-ai.com/schemas/andy-cli/headless-config.v1.json`).
+The two roles, the config contract, and the event contract are versioned so that
+andy-cli and andy-containers can roll independently. See the
+[ADR](adr/0001-headless-agent-runtime.md) for the versioning rationale.
 
-**Samples:** [`schemas/samples/*.json`](../schemas/samples/) — three fixtures covering the `triage-agent`, `planning-agent`, and `coding-agent` shapes. Each validates against the schema via [`HeadlessConfigSchemaTests`](../tests/Andy.Cli.Tests/HeadlessConfig/HeadlessConfigSchemaTests.cs).
+## The command
 
-### Shape
+```
+andy-cli run --headless --config <path>
+```
 
-```jsonc
+Argument parsing lives in
+`src/Andy.Cli/HeadlessConfig/HeadlessRunner.cs` (`ParseArgs`). The dispatcher
+passes `run` as `args[0]`; the runner parses the remainder:
+
+| Flag | Required | Meaning |
+| --- | --- | --- |
+| `--headless` | Yes | Selects non-interactive execution. If omitted, the run fails with a config error: interactive `andy-cli run` without `--headless` is not supported. |
+| `--config <path>` | Yes | Path to a `headless-config.v1` JSON file. `--config` with no following token is an error. |
+
+Any unrecognized token is rejected (`Unknown argument: <token>`). All argument
+errors, a missing `--headless`, and a missing `--config` produce exit code
+`2` (ConfigError) and print usage to stderr.
+
+After parsing, `HeadlessRunner.RunAsync` loads and validates the config via
+`HeadlessConfigLoader.TryLoadAsync`. A load/validation failure also returns exit
+code `2`. On success it delegates to `HeadlessAgentRunner.ExecuteAsync`, which
+runs the agent loop and emits the [event stream](event-stream.md).
+
+## Config schema walkthrough
+
+The authoritative contract is
+[`schemas/headless-config.v1.json`](../schemas/headless-config.v1.json); the
+strongly-typed view is `HeadlessRunConfig` in
+`src/Andy.Cli/HeadlessConfig/HeadlessRunConfig.cs`. The object is closed
+(`additionalProperties: false`) at every level.
+
+### Top-level fields
+
+| Field | Required | Type | Notes |
+| --- | --- | --- | --- |
+| `schema_version` | Yes | const `1` | Schema version pin. A future bump to `2` introduces a new schema file (`v2.json`); v1 is never overloaded. |
+| `run_id` | Yes | string (uuid) | Correlates stdout events and artifacts with the andy-containers Run entity. |
+| `agent` | Yes | object | Agent identity and resolved system prompt. See below. |
+| `model` | Yes | object | LLM provider and model selection. See below. |
+| `tools` | Yes | array | Concrete tool bindings the run may call. May be empty. See [Tool transports](#tool-transports). |
+| `workspace` | Yes | object | Mounted workspace root and optional branch. |
+| `env_vars` | No | object (string to string) | Extra env vars injected into the agent process. Reserved names (below) must not be shadowed. |
+| `output` | Yes | object | Where the final output file goes and where the event stream goes. |
+| `event_sink` | No | object | NATS subject and/or FIFO path metadata. |
+| `policy_id` | No | string (uuid) | Resolved policy UUID from andy-rbac. |
+| `boundaries` | No | array of strings | Policy-derived guard-rail tags (e.g. `read-only`, `no-prod`). Authoritative evaluation happens server-side at each tool call. |
+| `limits` | Yes | object | Iteration and wall-clock caps. |
+
+### `agent`
+
+Required: `slug`, `instructions`.
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `slug` | Yes | Agent identifier. Lowercase ASCII, dash-separated, 2-64 chars (`^[a-z][a-z0-9-]{1,63}$`). |
+| `revision` | No | Integer >= 1; pins a specific agent revision. Absent = head. |
+| `instructions` | Yes | The resolved system prompt (agent instructions + delegation objective), 1-100000 chars. Used verbatim as the `SimpleAgent` system prompt. |
+| `output_format` | No | Free-form hint for the agent's final output, e.g. `plain` or `json-triage-output-v1`. |
+
+### `model`
+
+Required: `provider`, `id`.
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `provider` | Yes | One of `anthropic`, `openai`, `openrouter`, `google`, `cerebras`, `groq`, `local`. |
+| `id` | Yes | Model identifier as recognized by the provider (e.g. `claude-sonnet-4-6`). Non-empty. |
+| `api_key_ref` | No | How to resolve the API key. Supported prefix today: `env:NAME` (read an env var). `secret-store:NAME` is reserved for the future. Never the bare key. |
+
+Key resolution note: the headless runner resolves providers through Andy.Llm's
+factory, which reads provider API keys from environment variables
+(`ConfigureLlmFromEnvironment`). In practice the env var referenced by
+`api_key_ref` must be present in the process environment. Resolution schemes
+beyond `env:` are not yet implemented (see `ResolveLlmProvider` in
+`HeadlessAgentRunner.cs`).
+
+Model threading note: `ConfigureLlmFromEnvironment` only populates each
+provider's model from env vars (e.g. `OPENROUTER_MODEL`). Some providers,
+OpenRouter among them, require a model at construction time. The headless runner
+therefore threads `model.id` into the provider config the factory will resolve
+for the run (`HeadlessAgentRunner.ApplyConfiguredModel`), so the config's model
+selection always wins.
+
+### `workspace`
+
+Required: `root`.
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `root` | Yes | Absolute path inside the container to the mounted workspace (typically `/workspace`). |
+| `branch` | No | Git branch the run operates on. |
+
+### `output`
+
+Required: `file`, `stream`.
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `file` | Yes | Path to write the final output. Written atomically (temp file + rename) only after a successful run; absent on failure before the output stage. |
+| `stream` | Yes | `stdout` (default) or `fifo`. With `fifo`, the path is named in `event_sink.path`. |
+
+### `event_sink`
+
+Optional, closed object.
+
+| Field | Notes |
+| --- | --- |
+| `nats_subject` | NATS subject the container runtime fans events to (`^andy\.containers\.events\.run\.<run_id>\.<name>$`). The agent does not publish directly. |
+| `path` | Absolute path to a named FIFO when `output.stream == "fifo"`. |
+
+### `limits`
+
+Required: `max_iterations`, `timeout_seconds`.
+
+| Field | Required | Range | Notes |
+| --- | --- | --- | --- |
+| `max_iterations` | Yes | 1-10000 | Hard cap on agent loop turns. Exhausting it maps to exit code `4` (Timeout). |
+| `timeout_seconds` | Yes | 1-86400 | Wall-clock timeout. Exceeding it maps to exit code `4` (Timeout). |
+
+## Worked example: OpenRouter + Mimo
+
+A complete, valid v1 config using OpenRouter with the Mimo model. OpenRouter
+requires a model at construction time; the runner threads `model.id` into the
+provider config, so `model.id` is what is used.
+
+```json
 {
-  "schema_version": 1,                    // const; v2 ships a new file
-  "run_id": "uuid",                       // correlates with andy-containers Run (#103)
+  "schema_version": 1,
+  "run_id": "f6c2b0d4-2c1e-4a3f-9b21-2f7e0c5d8a90",
   "agent": {
-    "slug": "triage-agent",               // from andy-agents Epic W
-    "revision": 3,                        // optional version pin
-    "instructions": "...",                // system prompt (agent base + delegation contract.objective)
-    "output_format": "json-triage-v1"     // optional label or schema ref
+    "slug": "code-reviewer",
+    "instructions": "You are a code reviewer. Review the changes on the working branch and produce a concise findings report. Objective: review the open diff and report correctness issues.",
+    "output_format": "plain"
   },
   "model": {
-    "provider": "anthropic",              // enum: anthropic|openai|google|cerebras|local
-    "id": "claude-sonnet-4-6",
-    "api_key_ref": "env:ANDY_MODEL_KEY"   // resolve from env / secret-store
+    "provider": "openrouter",
+    "id": "xiaomi/mimo-v2.5",
+    "api_key_ref": "env:OPENROUTER_API_KEY"
   },
-  "tools": [                              // resolved from agent.skills × allowed_tools
-    { "name": "issues.get", "transport": "mcp", "endpoint": "https://mcp/issues.get" },
-    { "name": "repo.search", "transport": "cli", "binary": "andy-issues-cli", "command": ["andy-issues-cli", "search"] }
+  "tools": [
+    {
+      "name": "read_file",
+      "transport": "mcp",
+      "endpoint": "http://127.0.0.1:8080/mcp/read_file"
+    },
+    {
+      "name": "andy-tasks-cli",
+      "transport": "cli",
+      "binary": "andy-tasks-cli",
+      "command": ["--json"]
+    }
   ],
-  "workspace": { "root": "/workspace", "branch": "main" },
-  "env_vars": { "RIVOLI_TENANT_ID": "..." },
-  "output":   { "file": "/workspace/.andy-run/output.json", "stream": "stdout" },
-  "event_sink": {
-    "nats_subject": "andy.containers.events.run.{run_id}.progress"
+  "workspace": {
+    "root": "/workspace",
+    "branch": "feature/review"
   },
-  "policy_id": "uuid",                    // andy-rbac Epic V
-  "boundaries": ["read-only"],
-  "limits": { "max_iterations": 50, "timeout_seconds": 300 }
+  "output": {
+    "file": "/workspace/.andy/output.txt",
+    "stream": "stdout"
+  },
+  "limits": {
+    "max_iterations": 40,
+    "timeout_seconds": 1800
+  }
 }
 ```
 
-### Field notes
+Run it with:
 
-- **`schema_version`** — bumping to v2 introduces a new schema file (`v2.json`) and a compatibility layer in the loader. Do not overload v1.
-- **`agent.slug`** — lowercase slugs matching `^[a-z][a-z0-9-]{1,63}$`. Enforced by schema.
-- **`tools[].transport`** — only `mcp` and `cli` are supported. MCP calls go through mcp-gateway (Epic Y); CLI transports exec the named binary as a subprocess.
-- **`output.stream`** — `stdout` (default) or `fifo`. When `fifo`, the path is in `event_sink.path`; andy-containers creates the FIFO before spawning the agent.
-- **`event_sink.nats_subject`** — **informational**. The agent does not publish to NATS directly. andy-containers (Epic AP6) fans agent stdout → NATS subject.
-- **`boundaries`** — tags derived from the bound policy; runtime guard-rails, not authoritative. Real policy evaluation happens server-side at each tool call (per Epic V).
-- **`limits.max_iterations`** — hard cap on agent loop iterations. Exceeded → exit code 4.
-- **`limits.timeout_seconds`** — wall-clock timeout. Exceeded → exit code 4.
-
-### Reserved env vars (injected by container runtime, Epic Y5)
-
-- `ANDY_PROXY_URL` — unified proxy base URL.
-- `ANDY_TOKEN` — run-scoped auth token (Epic Y6 lifecycle).
-- `ANDY_MCP_URL` — mcp-gateway base URL.
-
-These are guaranteed present by the container image; the config's `env_vars` object MUST NOT shadow them.
-
-## Invocation
-
-```sh
-andy-cli run --headless --config /workspace/.andy-run/config.json
+```
+OPENROUTER_API_KEY=sk-or-... andy-cli run --headless --config /workspace/.andy/run.json
 ```
 
-Exit codes (pinned by AQ2):
+See [`schemas/samples/`](../schemas/samples) for additional ready-to-read
+example configs (coding, planning, triage).
 
-| Code | Meaning |
-|---|---|
-| 0 | Success — output file written, event stream complete |
-| 1 | Agent-level failure (LLM refused, tool-call chain failed, output validation failed) |
-| 2 | Config error (schema violation, missing required files, unresolvable api_key_ref) |
-| 3 | Cancelled (SIGTERM or `andy-cli cancel --run-id`) |
-| 4 | Timeout (`max_iterations` or `timeout_seconds` exceeded) |
-| 5 | Internal error (bug) |
+## Exit codes
 
-## Event stream (AQ3)
+The contract is `HeadlessExitCode` in
+`src/Andy.Cli/HeadlessConfig/HeadlessExitCode.cs`. It is shared with
+andy-containers, which keys off these values for retry/cancel/report semantics,
+so the numeric values are load-bearing and must not be reordered.
 
-Each agent step emits one NDJSON line: `{ts, kind, data}`. Kinds (to be pinned in AQ3):
+| Code | Name | Meaning |
+| --- | --- | --- |
+| 0 | Success | Run completed; output file written. |
+| 1 | AgentFailure | The agent loop ran but did not converge (non-timeout LLM/tool failure); also covers tool-wiring, provider-resolution, and output-write failures. |
+| 2 | ConfigError | Config missing, unparseable, or invalid, or bad CLI args. |
+| 3 | Cancelled | Cooperative cancellation (e.g. SIGTERM) before completion. |
+| 4 | Timeout | Wall-clock `timeout_seconds` or `max_iterations` exceeded. |
+| 5 | InternalError | Unexpected internal error (bug); should be rare. |
 
-- `started` — run starting; payload carries resolved model / tool list.
-- `tool_call_started` / `tool_call_finished` — tool invocations with args/result digests.
-- `llm_chunk` — streaming LLM output (if `output_format: plain` or streaming is enabled).
-- `output_written` — final output file written and fsynced.
-- `error` — recoverable or terminal error.
-- `finished` — run complete (always emitted before exit, even on failure).
+The same code is mirrored in the final `finished` event's `exit_code` field on
+the [event stream](event-stream.md).
 
-Full event schema lands with AQ3 (`schemas/headless-events.v1.json`).
+## Tool transports
 
-## Output file (AQ4)
+`tools[]` is a list of concrete bindings the run is allowed to call.
+`HeadlessToolHost` (`src/Andy.Cli/Headless/HeadlessToolHost.cs`) turns each entry
+into an `ITool` adapter and registers it; no built-in tools are registered, so
+the agent's tool surface is exactly what the config lists. Two transports are
+supported.
 
-- Written to `output.file` path from config.
-- Atomic write (tmp + rename).
-- Free-form text OR structured JSON matching the `output_format` schema hint.
-- On non-zero exit the file MAY be absent (no partial writes for structured outputs).
+### `cli`
 
-## Cross-repo links
+Required: `name`, `transport: "cli"`, `binary`.
 
-| What | Where |
-|---|---|
-| Epic AQ (this epic) | rivoli-ai/andy-cli#44 |
-| AQ1 — config schema | rivoli-ai/andy-cli#46 |
-| Run entity (the thing correlated by `run_id`) | rivoli-ai/andy-containers#103 |
-| Epic AP — configurator + headless runner | rivoli-ai/andy-containers#101 |
-| Epic Y5 — container env injection | rivoli-ai/andy-mcp-gateway#8 |
-| Epic Y6 — run-scoped token lifecycle | rivoli-ai/andy-mcp-gateway#9 |
-| Agent spec source of truth | rivoli-ai/andy-agents Epic W |
+| Field | Notes |
+| --- | --- |
+| `name` | Tool identifier as seen by the agent (`^[a-z][a-z0-9_.-]*$`). |
+| `binary` | Executable name resolved via `$PATH` (e.g. `andy-tasks-cli`). |
+| `command` | Optional default argv the agent prepends; the agent appends its own args. |
+
+Each `cli` binding becomes a `CliSubprocessTool`.
+
+### `mcp`
+
+Required: `name`, `transport: "mcp"`, `endpoint`.
+
+| Field | Notes |
+| --- | --- |
+| `name` | Tool identifier; must match a tool advertised by the endpoint, or the run fails. |
+| `endpoint` | mcp-gateway URL for this tool (usually `$ANDY_MCP_URL/<tool-name>`). Must be a valid URI. |
+
+`HeadlessToolHost` opens one `McpClient` per distinct endpoint URL (adapters that
+share an endpoint reuse a single connection), lists the remote tools, and binds
+each `mcp` entry to the matching remote tool via `McpRemoteTool`. If the endpoint
+does not advertise a tool with the configured `name`, the run fails fast with a
+clear error rather than letting the LLM silently never call it.
+
+### Reserved environment variables
+
+The container runtime always sets these; `env_vars` in the config must not
+shadow them:
+
+| Variable | Purpose |
+| --- | --- |
+| `ANDY_MCP_URL` | Base URL of the mcp-gateway. MCP tool endpoints are typically `$ANDY_MCP_URL/<tool-name>`. |
+| `ANDY_TOKEN` | Run-scoped bearer token. When set, `HeadlessToolHost` attaches it as `Authorization: Bearer <token>` on every MCP request. The config cannot override it. |
+| `ANDY_PROXY_URL` | Egress proxy URL injected by the container runtime. |
+
+## See also
+
+- [Event stream](event-stream.md) — the NDJSON event contract.
+- [ADR 0001: headless agent runtime](adr/0001-headless-agent-runtime.md) — why one binary hosts both modes, and the versioning strategy.
+- [`schemas/headless-config.v1.json`](../schemas/headless-config.v1.json) — the config schema.
+- [`schemas/samples/`](../schemas/samples) — example configs.
