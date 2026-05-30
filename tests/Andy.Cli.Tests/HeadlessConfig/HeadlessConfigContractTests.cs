@@ -5,7 +5,9 @@ using Xunit;
 namespace Andy.Cli.Tests.HeadlessConfig;
 
 /// <summary>
-/// Verifies the public contract-validation surface used by external generators.
+/// Verifies the public contract-validation surface used by external generators
+/// (andy-containers, conductor) to check their produced headless config against
+/// the canonical schema. Field names mirror schemas/headless-config.v1.json.
 /// </summary>
 public class HeadlessConfigContractTests
 {
@@ -20,6 +22,26 @@ public class HeadlessConfigContractTests
         }
         return dir ?? throw new InvalidOperationException("Could not locate repository root.");
     }
+
+    // A configuration that satisfies headless-config.v1.json in full.
+    private const string ValidConfigJson = """
+    {
+      "schema_version": 1,
+      "run_id": "00000000-0000-0000-0000-0000000000ff",
+      "agent": {
+        "slug": "triage-agent",
+        "instructions": "Classify issues."
+      },
+      "model": {
+        "provider": "anthropic",
+        "id": "claude-sonnet-4-6"
+      },
+      "tools": [],
+      "workspace": { "root": "/workspace" },
+      "output": { "file": "/tmp/out.json", "stream": "stdout" },
+      "limits": { "max_iterations": 50, "timeout_seconds": 300 }
+    }
+    """;
 
     [Fact]
     public void SchemaVersion_Is_One()
@@ -40,6 +62,15 @@ public class HeadlessConfigContractTests
     }
 
     [Fact]
+    public void ValidateConfig_InlineValidConfig_Passes()
+    {
+        var result = HeadlessConfigContract.ValidateConfig(ValidConfigJson);
+
+        Assert.True(result.IsValid, string.Join("; ", result.Errors));
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
     public void ValidateConfig_JsonElementOverload_Passes()
     {
         var samplePath = Path.Combine(RepoRoot, "schemas", "samples", "planning-headless.json");
@@ -53,14 +84,8 @@ public class HeadlessConfigContractTests
     [Fact]
     public void ValidateConfig_UnknownProvider_Fails()
     {
-        const string json = """
-        {
-          "version": 1,
-          "agent": { "name": "planner" },
-          "provider": { "name": "cohere" },
-          "task": { "prompt": "hello" }
-        }
-        """;
+        // model.provider enum is closed; "cohere" is not a member.
+        var json = ValidConfigJson.Replace("\"provider\": \"anthropic\"", "\"provider\": \"cohere\"");
 
         var result = HeadlessConfigContract.ValidateConfig(json);
 
@@ -71,12 +96,16 @@ public class HeadlessConfigContractTests
     [Fact]
     public void ValidateConfig_MissingRequiredField_Fails()
     {
-        // Missing the required "task" object.
+        // Drop the required top-level "limits" object.
         const string json = """
         {
-          "version": 1,
-          "agent": { "name": "planner" },
-          "provider": { "name": "openai" }
+          "schema_version": 1,
+          "run_id": "00000000-0000-0000-0000-0000000000ff",
+          "agent": { "slug": "triage-agent", "instructions": "Classify issues." },
+          "model": { "provider": "anthropic", "id": "claude-sonnet-4-6" },
+          "tools": [],
+          "workspace": { "root": "/workspace" },
+          "output": { "file": "/tmp/out.json", "stream": "stdout" }
         }
         """;
 
@@ -89,14 +118,8 @@ public class HeadlessConfigContractTests
     [Fact]
     public void ValidateConfig_WrongVersionConstant_Fails()
     {
-        const string json = """
-        {
-          "version": 2,
-          "agent": { "name": "planner" },
-          "provider": { "name": "openai" },
-          "task": { "prompt": "hello" }
-        }
-        """;
+        // schema_version is a const: 1.
+        var json = ValidConfigJson.Replace("\"schema_version\": 1", "\"schema_version\": 2");
 
         var result = HeadlessConfigContract.ValidateConfig(json);
 
@@ -122,11 +145,19 @@ public class HeadlessConfigContractTests
     [Fact]
     public void ValidateEvent_ValidRecord_Passes()
     {
+        // Envelope per headless-events.v1.json: schema_version, ts, kind, data.
         const string json = """
         {
-          "type": "run.started",
-          "seq": 0,
-          "ts": "2026-05-29T12:00:00Z"
+          "schema_version": 1,
+          "ts": "2026-05-29T12:00:00+00:00",
+          "kind": "started",
+          "data": {
+            "run_id": "00000000-0000-0000-0000-0000000000ff",
+            "agent_slug": "triage-agent",
+            "model_provider": "anthropic",
+            "model_id": "claude-sonnet-4-6",
+            "tool_count": 0
+          }
         }
         """;
 
@@ -136,13 +167,15 @@ public class HeadlessConfigContractTests
     }
 
     [Fact]
-    public void ValidateEvent_UnknownType_Fails()
+    public void ValidateEvent_UnknownKind_Fails()
     {
+        // kind enum is closed; "exploded" is not a member.
         const string json = """
         {
-          "type": "run.exploded",
-          "seq": 0,
-          "ts": "2026-05-29T12:00:00Z"
+          "schema_version": 1,
+          "ts": "2026-05-29T12:00:00+00:00",
+          "kind": "exploded",
+          "data": {}
         }
         """;
 
@@ -158,7 +191,7 @@ public class HeadlessConfigContractTests
         var text = HeadlessConfigContract.GetConfigSchemaText();
 
         Assert.Contains("headless-config.v1.json", text);
-        Assert.Contains("\"version\"", text);
+        Assert.Contains("schema_version", text);
     }
 
     [Fact]
