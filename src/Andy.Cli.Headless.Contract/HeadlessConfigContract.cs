@@ -29,8 +29,12 @@ public static class HeadlessConfigContract
 
     private static readonly Lazy<string> ConfigSchemaTextLazy = new(() => ReadEmbeddedResource(ConfigSchemaResource));
     private static readonly Lazy<string> EventSchemaTextLazy = new(() => ReadEmbeddedResource(EventSchemaResource));
-    private static readonly Lazy<JsonSchema> ConfigSchemaLazy = new(() => JsonSchema.FromText(ConfigSchemaTextLazy.Value));
-    private static readonly Lazy<JsonSchema> EventSchemaLazy = new(() => JsonSchema.FromText(EventSchemaTextLazy.Value));
+    private static readonly Lazy<JsonSchema> ConfigSchemaLazy = new(() => ParseSchema(ConfigSchemaTextLazy.Value));
+    private static readonly Lazy<JsonSchema> EventSchemaLazy = new(() => ParseSchema(EventSchemaTextLazy.Value));
+
+    private static JsonSchema ParseSchema(string text)
+        => JsonSerializer.Deserialize<JsonSchema>(text)
+            ?? throw new InvalidOperationException("Embedded schema text deserialized to null.");
 
     /// <summary>
     /// Gets the raw JSON text of the embedded headless configuration schema.
@@ -97,35 +101,26 @@ public static class HeadlessConfigContract
             throw new ArgumentNullException(nameof(json));
         }
 
-        JsonNode? instance;
+        JsonDocument document;
         try
         {
-            instance = JsonNode.Parse(json);
+            document = JsonDocument.Parse(json);
         }
         catch (JsonException ex)
         {
             return ValidationResult.Failure(new[] { $"Invalid JSON: {ex.Message}" });
         }
 
-        return Evaluate(instance, schema);
+        using (document)
+        {
+            return Evaluate(document.RootElement, schema);
+        }
     }
 
     private static ValidationResult ValidateElement(JsonElement element, JsonSchema schema)
-    {
-        JsonNode? instance;
-        try
-        {
-            instance = JsonNode.Parse(element.GetRawText());
-        }
-        catch (JsonException ex)
-        {
-            return ValidationResult.Failure(new[] { $"Invalid JSON: {ex.Message}" });
-        }
+        => Evaluate(element, schema);
 
-        return Evaluate(instance, schema);
-    }
-
-    private static ValidationResult Evaluate(JsonNode? instance, JsonSchema schema)
+    private static ValidationResult Evaluate(JsonElement instance, JsonSchema schema)
     {
         var options = new EvaluationOptions { OutputFormat = OutputFormat.List };
         var results = schema.Evaluate(instance, options);
@@ -152,7 +147,7 @@ public static class HeadlessConfigContract
 
     private static void Walk(EvaluationResults node, List<string> messages)
     {
-        if (!node.IsValid && node.HasErrors && node.Errors is not null)
+        if (!node.IsValid && node.Errors is { Count: > 0 })
         {
             var location = node.InstanceLocation.ToString();
             location = string.IsNullOrEmpty(location) ? "(root)" : location;
@@ -162,9 +157,12 @@ public static class HeadlessConfigContract
             }
         }
 
-        foreach (var child in node.Details)
+        if (node.Details is not null)
         {
-            Walk(child, messages);
+            foreach (var child in node.Details)
+            {
+                Walk(child, messages);
+            }
         }
     }
 
