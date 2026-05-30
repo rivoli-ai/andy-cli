@@ -155,6 +155,17 @@ class Program
             await HandleCommandLineArgs(args);
             return;
         }
+        // Apply the persisted theme (falling back to an ANDY_THEME env default,
+        // then the built-in dark theme) before the first frame is rendered.
+        var themeMemory = new ThemeMemoryService();
+        var savedThemeName = themeMemory.LoadTheme()
+            ?? Environment.GetEnvironmentVariable("ANDY_THEME");
+        var savedTheme = Andy.Cli.Themes.Theme.GetByName(savedThemeName);
+        if (savedTheme != null)
+        {
+            Andy.Cli.Themes.Theme.Current = savedTheme;
+        }
+
         var caps = Andy.Tui.Backend.Terminal.CapabilityDetector.DetectFromEnvironment();
 
         // Ensure minimum viewport size to prevent crashes
@@ -203,6 +214,7 @@ class Program
             {
                 new InlineCommandHelp.CommandInfo { Name = "model", Description = "Manage AI models (list, switch, info, test)", Aliases = new[] { "m" } },
                 new InlineCommandHelp.CommandInfo { Name = "tools", Description = "Manage and list available tools", Aliases = new[] { "tool", "t" } },
+                new InlineCommandHelp.CommandInfo { Name = "theme", Description = "List and switch the UI theme", Aliases = new[] { "themes" } },
                 new InlineCommandHelp.CommandInfo { Name = "clear", Description = "Clear conversation history", Aliases = Array.Empty<string>() },
                 new InlineCommandHelp.CommandInfo { Name = "help", Description = "Show help information", Aliases = new[] { "?" } },
                 new InlineCommandHelp.CommandInfo { Name = "exit", Description = "Exit the application", Aliases = new[] { "quit", "bye" } }
@@ -313,6 +325,7 @@ class Program
             // Initialize commands
             var modelCommand = new ModelCommand(serviceProvider);
             var toolsCommand = new ToolsCommand(serviceProvider);
+            var themeCommand = new ThemeCommand(themeMemory);
             var commandPalette = new CommandPalette();
 
             Andy.Model.Llm.ILlmProvider? llmProvider = null;
@@ -619,6 +632,21 @@ class Program
                 },
                 new CommandPalette.CommandItem
                 {
+                    Name = "Switch Theme",
+                    Description = "List or change the UI theme",
+                    Category = "UI",
+                    Aliases = new[] { "theme", "themes" },
+                    RequiredParams = new[] { "theme" },
+                    ParameterHint = "Example: dark or light",
+                    GetAvailableOptions = () => Andy.Cli.Themes.Theme.AvailableThemes.ToArray(),
+                    Action = async args =>
+                    {
+                        var result = await themeCommand.ExecuteAsync(args);
+                        feed.AddMarkdownRich(result.Message);
+                    }
+                },
+                new CommandPalette.CommandItem
+                {
                     Name = "Help",
                     Description = "Show help information",
                     Category = "General",
@@ -652,6 +680,9 @@ class Program
                             "- **/model switch <provider>**: Change provider\n" +
                             "- **/model info**: Show current model details\n" +
                             "- **/model test [prompt]**: Test current model\n\n" +
+                            "### Theme Commands:\n" +
+                            "- **/theme**: List available themes and the current one\n" +
+                            "- **/theme <name>**: Switch the UI theme (e.g. dark, light)\n\n" +
                             "### Tool Commands:\n" +
                             "- **/tools list [category]**: List available tools\n" +
                             "- **/tools info <tool_name>**: Show tool details\n" +
@@ -1037,6 +1068,9 @@ class Program
                                         "- **/model switch <provider>**: Change provider\n" +
                                         "- **/model info**: Show current model details\n" +
                                         "- **/model test [prompt]**: Test current model\n\n" +
+                                        "### Theme Commands:\n" +
+                                        "- **/theme**: List available themes and the current one\n" +
+                                        "- **/theme <name>**: Switch the UI theme (e.g. dark, light)\n\n" +
                                         "### Tool Commands:\n" +
                                         "- **/tools list [category]**: List available tools\n" +
                                         "- **/tools info <tool_name>**: Show tool details\n" +
@@ -1050,6 +1084,13 @@ class Program
                                         "- **TextProcessing**: Text manipulation\n" +
                                         "- **System**: System information\n" +
                                         "- **Web**: HTTP and JSON tools");
+                                    return;
+                                }
+                                else if (commandName == "theme" || commandName == "themes")
+                                {
+                                    feed.AddUserMessage(cmd);
+                                    var result = await themeCommand.ExecuteAsync(args);
+                                    feed.AddMarkdownRich(result.Message);
                                     return;
                                 }
                                 else if (commandName == "clear")

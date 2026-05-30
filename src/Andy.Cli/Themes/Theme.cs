@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using DL = Andy.Tui.DisplayList;
 
 namespace Andy.Cli.Themes
@@ -7,6 +10,11 @@ namespace Andy.Cli.Themes
     /// </summary>
     public sealed class Theme
     {
+        /// <summary>
+        /// Human-readable, lookup-friendly name for this theme (e.g. "dark", "light").
+        /// </summary>
+        public string Name { get; set; } = "dark";
+
         // Background colors.
         // null = transparent: the terminal's own background (including transparency)
         // shows through. Main surface, header, prompt and dialog backgrounds are
@@ -70,10 +78,93 @@ namespace Andy.Cli.Themes
         /// <summary>
         /// Default dark theme.
         /// </summary>
-        public static Theme Dark { get; } = new Theme();
+        public static Theme Dark { get; } = new Theme { Name = "dark" };
 
         /// <summary>
-        /// Get the current active theme (can be extended for theme switching).
+        /// A light theme suited to terminals with a bright background.
+        /// </summary>
+        public static Theme Light { get; } = new Theme
+        {
+            Name = "light",
+            // Keep main surfaces transparent so the terminal background shows through,
+            // but use darker text/accents that remain legible on a light background.
+            Background = null,
+            HeaderBackground = null,
+            DialogBackground = null,
+            CodeBlockBackground = new DL.Rgb24(235, 235, 240),
+            PromptBackground = null,
+            ToastBackground = new DL.Rgb24(240, 235, 180),
+            StatusLineBackground = new DL.Rgb24(225, 225, 225),
+            KeyHintsBackground = new DL.Rgb24(230, 230, 230),
+
+            Text = new DL.Rgb24(40, 40, 40),
+            TextDim = new DL.Rgb24(110, 110, 110),
+            TextBright = new DL.Rgb24(0, 0, 0),
+
+            Primary = new DL.Rgb24(30, 90, 170),
+            Secondary = new DL.Rgb24(140, 110, 0),
+            Accent = new DL.Rgb24(50, 100, 180),
+
+            Success = new DL.Rgb24(0, 140, 0),
+            Warning = new DL.Rgb24(170, 120, 0),
+            Error = new DL.Rgb24(190, 30, 30),
+            Info = new DL.Rgb24(20, 110, 180),
+
+            Heading = new DL.Rgb24(140, 110, 0),
+            Code = new DL.Rgb24(70, 70, 70),
+            Ghost = new DL.Rgb24(160, 160, 160),
+            Border = new DL.Rgb24(170, 170, 170),
+            Separator = new DL.Rgb24(180, 185, 200),
+            KeyHighlight = new DL.Rgb24(140, 110, 0),
+
+            HeaderTitle = new DL.Rgb24(120, 100, 0),
+            HeaderPath = new DL.Rgb24(60, 90, 120),
+            HeaderGitInfo = new DL.Rgb24(140, 110, 0),
+            HeaderDelimiter = new DL.Rgb24(150, 150, 170),
+
+            SeparatorBase = new DL.Rgb24(120, 130, 150),
+            SeparatorAccent = new DL.Rgb24(50, 100, 180),
+            SeparatorToken = new DL.Rgb24(110, 130, 100),
+
+            Metadata = new DL.Rgb24(60, 100, 150),
+
+            UserLabel = new DL.Rgb24(0, 130, 0),
+            UserText = new DL.Rgb24(30, 90, 30),
+
+            ToolName = new DL.Rgb24(170, 110, 0),
+            ToolRunning = new DL.Rgb24(40, 90, 180),
+            ToolResult = new DL.Rgb24(90, 90, 90),
+        };
+
+        /// <summary>
+        /// Registry of all predefined themes, keyed by their lower-case name.
+        /// </summary>
+        private static readonly Dictionary<string, Theme> Registry =
+            new(StringComparer.OrdinalIgnoreCase)
+            {
+                [Dark.Name] = Dark,
+                [Light.Name] = Light,
+            };
+
+        /// <summary>
+        /// The names of all available predefined themes, in a stable order.
+        /// </summary>
+        public static IReadOnlyList<string> AvailableThemes { get; } =
+            new[] { Dark.Name, Light.Name };
+
+        /// <summary>
+        /// Look up a predefined theme by name (case-insensitive).
+        /// Returns null when no theme matches.
+        /// </summary>
+        public static Theme? GetByName(string? name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                return null;
+            return Registry.TryGetValue(name.Trim(), out var theme) ? theme : null;
+        }
+
+        /// <summary>
+        /// Get the current active theme.
         /// </summary>
         public static Theme Current { get; set; } = Dark;
     }
