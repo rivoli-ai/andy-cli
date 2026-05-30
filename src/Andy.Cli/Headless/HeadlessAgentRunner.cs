@@ -1,9 +1,11 @@
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Text;
 using Andy.Cli.HeadlessConfig;
 using Andy.Engine;
 using Andy.Llm;
+using Andy.Llm.Configuration;
 using Andy.Llm.Extensions;
 using Andy.Llm.Providers;
 using Andy.Model.Llm;
@@ -299,6 +301,15 @@ public static class HeadlessAgentRunner
         {
             options.DefaultProvider = config.Model.Provider;
         });
+
+        // The headless config names the model explicitly (config.Model.Id), but
+        // ConfigureLlmFromEnvironment only populates each provider's Model from
+        // env vars (e.g. OPENROUTER_MODEL). Some providers — OpenRouter among
+        // them — require a model at construction time, so thread config.Model.Id
+        // into the provider entry the factory will resolve for this run.
+        services.Configure<LlmOptions>(options =>
+            ApplyConfiguredModel(options, config.Model.Provider, config.Model.Id));
+
         services.AddSingleton<ILlmProviderFactory, LlmProviderFactory>();
 
         // Andy.Tools: minimal wiring — registry + executor + the validators
@@ -322,5 +333,28 @@ public static class HeadlessAgentRunner
         });
 
         return services.BuildServiceProvider();
+    }
+
+    // Sets the resolved model on the provider config the factory will pick for
+    // <paramref name="provider"/>, mirroring LlmProviderFactory's lookup: exact
+    // key first, then a match by provider type, creating the entry if neither
+    // exists. Internal for testing.
+    internal static void ApplyConfiguredModel(LlmOptions options, string provider, string modelId)
+    {
+        if (!options.Providers.TryGetValue(provider, out var providerConfig))
+        {
+            var match = options.Providers.FirstOrDefault(p => string.Equals(
+                p.Value.Provider ?? p.Key.Split('/')[0],
+                provider,
+                StringComparison.OrdinalIgnoreCase));
+            providerConfig = match.Value;
+            if (providerConfig is null)
+            {
+                providerConfig = new ProviderConfig { Provider = provider };
+                options.Providers[provider] = providerConfig;
+            }
+        }
+
+        providerConfig.Model = modelId;
     }
 }
