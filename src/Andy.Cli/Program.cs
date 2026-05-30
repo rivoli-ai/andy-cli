@@ -299,6 +299,15 @@ class Program
 
             // Conversation will be managed internally by AssistantService
 
+            // Start the instrumentation server up front so the real-time dashboard at
+            // http://localhost:5555 is reachable even when provider setup below fails
+            // (e.g. a missing API key). Previously it started only after a provider was
+            // created, so a setup error left the link dead.
+            var instrumentationLogger = serviceProvider.GetService<ILogger<SimpleAssistantService>>();
+            var instrumentationServer = new InstrumentationServer(port: 5555, logger: instrumentationLogger);
+            instrumentationServer.Start();
+            feed.AddMarkdownRich($"[instrumentation] Real-time dashboard available at http://localhost:5555");
+
             try
             {
                 // Get the appropriate provider based on configuration
@@ -328,11 +337,6 @@ class Program
                 var providerUrl = GetProviderUrl(currentProvider);
 
                 feed.AddMarkdownRich($"[model] {currentModel} with {currentProvider} provider [{providerUrl}] (tool-enabled)");
-
-                // Start instrumentation server for real-time visibility
-                var instrumentationServer = new InstrumentationServer(port: 5555, logger: logger);
-                instrumentationServer.Start();
-                feed.AddMarkdownRich($"[instrumentation] Real-time dashboard available at http://localhost:5555");
             }
             catch (Exception ex)
             {
@@ -1518,6 +1522,7 @@ class Program
     {
         return provider switch
         {
+            "openrouter" => Environment.GetEnvironmentVariable("OPENROUTER_API_BASE") ?? "https://openrouter.ai/api/v1",
             "cerebras" => "https://api.cerebras.ai",
             "openai" => Environment.GetEnvironmentVariable("OPENAI_API_BASE") ?? "https://api.openai.com",
             "anthropic" => "https://api.anthropic.com",
