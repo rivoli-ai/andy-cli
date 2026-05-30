@@ -33,8 +33,23 @@ public static class HeadlessConfigContract
     private static readonly Lazy<JsonSchema> EventSchemaLazy = new(() => ParseSchema(EventSchemaTextLazy.Value));
 
     private static JsonSchema ParseSchema(string text)
-        => JsonSerializer.Deserialize<JsonSchema>(text)
+    {
+        // JsonSchema.Net registers any schema carrying an "$id" into a process-global
+        // SchemaRegistry and throws "Overwriting registered schemas is not permitted"
+        // if another component (e.g. the andy-cli test suite's own schema loader)
+        // registers the same $id. These schemas contain no internal "$ref", so the
+        // $id is unused for resolution here; strip it before building so evaluation
+        // stays isolated and never collides with another registrant.
+        var node = JsonNode.Parse(text)
+            ?? throw new InvalidOperationException("Embedded schema text parsed to null.");
+        if (node is JsonObject obj)
+        {
+            obj.Remove("$id");
+        }
+
+        return JsonSerializer.Deserialize<JsonSchema>(node)
             ?? throw new InvalidOperationException("Embedded schema text deserialized to null.");
+    }
 
     /// <summary>
     /// Gets the raw JSON text of the embedded headless configuration schema.
