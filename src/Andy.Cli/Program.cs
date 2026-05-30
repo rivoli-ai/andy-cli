@@ -1188,12 +1188,9 @@ class Program
                 // Prepare header components
                 var gitInfo = GetGitInfo();
 
-                // Get version from assembly (only in release builds)
-                string version = "";
-                #if RELEASE
-                var assemblyVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
-                version = assemblyVersion != null ? $" v{assemblyVersion.Major}.{assemblyVersion.Minor}.{assemblyVersion.Build}" : "";
-                #endif
+                // Get the human-readable application version for display
+                var displayVersion = VersionInfo.ResolveDisplayVersion();
+                var version = string.IsNullOrEmpty(displayVersion) ? "" : $" v{displayVersion}";
 
                 var leftSection = $"Andy CLI{version}";
                 var rightSection = $"[{gitInfo.branch}@{gitInfo.commit}]";

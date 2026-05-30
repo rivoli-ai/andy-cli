@@ -11,6 +11,13 @@
     <SelfContained>false</SelfContained>
     <!-- Enable JSON reflection for trimming compatibility -->
     <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+    <!--
+      Default date-based version for the Andy ecosystem. The release workflow
+      (.github/workflows/release.yml) overrides this at publish time via
+      -p:Version. It flows to AssemblyVersion / FileVersion /
+      InformationalVersion and is shown next to the header.
+    -->
+    <Version>2026.5.30</Version>
   </PropertyGroup>
 
   <ItemGroup>
