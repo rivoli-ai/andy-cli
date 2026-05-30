@@ -33,10 +33,24 @@ public class HeadlessConfigSchemaTests
         return dir.FullName;
     }
 
-    // JsonSchema.Net registers schemas by $id and throws on re-registration.
-    // Cache the parsed schema so every test shares one instance.
+    // JsonSchema.Net registers any schema carrying an "$id" into a process-global
+    // SchemaRegistry and throws "Overwriting registered schemas is not permitted"
+    // when another component (the HeadlessConfigLoader, the AQ8 contract library)
+    // registers the same $id during the same test run. The schema has no internal
+    // "$ref", so the $id is unused for resolution here; strip it before building so
+    // this loader never touches the global registry. Cache the parsed schema so
+    // every test shares one instance.
     private static readonly Lazy<JsonSchema> s_schema = new(() =>
-        JsonSchema.FromFile(SchemaPath));
+    {
+        var node = JsonNode.Parse(File.ReadAllText(SchemaPath))
+            ?? throw new InvalidOperationException($"Schema at {SchemaPath} parsed to null.");
+        if (node is JsonObject obj)
+        {
+            obj.Remove("$id");
+        }
+        return JsonSerializer.Deserialize<JsonSchema>(node)
+            ?? throw new InvalidOperationException($"Schema at {SchemaPath} deserialized to null.");
+    });
 
     private static JsonSchema LoadSchema() => s_schema.Value;
 
