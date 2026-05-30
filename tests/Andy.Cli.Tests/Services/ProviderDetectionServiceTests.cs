@@ -14,6 +14,7 @@ public class ProviderDetectionServiceTests
         // Arrange
         var originalOllama = Environment.GetEnvironmentVariable("OLLAMA_API_BASE");
         var originalSkipOllama = Environment.GetEnvironmentVariable("ANDY_SKIP_OLLAMA");
+        var originalOpenRouter = Environment.GetEnvironmentVariable("OPENROUTER_API_KEY");
         var originalOpenAI = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
         var originalAnthropic = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
         var originalCerebras = Environment.GetEnvironmentVariable("CEREBRAS_API_KEY");
@@ -22,6 +23,7 @@ public class ProviderDetectionServiceTests
         try
         {
             // Clear higher priority providers
+            Environment.SetEnvironmentVariable("OPENROUTER_API_KEY", null);
             Environment.SetEnvironmentVariable("OPENAI_API_KEY", null);
             Environment.SetEnvironmentVariable("ANTHROPIC_API_KEY", null);
             Environment.SetEnvironmentVariable("CEREBRAS_API_KEY", null);
@@ -42,6 +44,7 @@ public class ProviderDetectionServiceTests
         {
             Environment.SetEnvironmentVariable("OLLAMA_API_BASE", originalOllama);
             Environment.SetEnvironmentVariable("ANDY_SKIP_OLLAMA", originalSkipOllama);
+            Environment.SetEnvironmentVariable("OPENROUTER_API_KEY", originalOpenRouter);
             Environment.SetEnvironmentVariable("OPENAI_API_KEY", originalOpenAI);
             Environment.SetEnvironmentVariable("ANTHROPIC_API_KEY", originalAnthropic);
             Environment.SetEnvironmentVariable("CEREBRAS_API_KEY", originalCerebras);
@@ -57,6 +60,7 @@ public class ProviderDetectionServiceTests
         var originalEndpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT");
         var originalOllama = Environment.GetEnvironmentVariable("OLLAMA_API_BASE");
         var originalSkipOllama = Environment.GetEnvironmentVariable("ANDY_SKIP_OLLAMA");
+        var originalOpenRouter = Environment.GetEnvironmentVariable("OPENROUTER_API_KEY");
         var originalOpenAI = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
         var originalAnthropic = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
         var originalCerebras = Environment.GetEnvironmentVariable("CEREBRAS_API_KEY");
@@ -67,6 +71,7 @@ public class ProviderDetectionServiceTests
             // Clear all higher priority providers
             Environment.SetEnvironmentVariable("OLLAMA_API_BASE", null);
             Environment.SetEnvironmentVariable("ANDY_SKIP_OLLAMA", "1"); // Skip Ollama detection
+            Environment.SetEnvironmentVariable("OPENROUTER_API_KEY", null);
             Environment.SetEnvironmentVariable("OPENAI_API_KEY", null);
             Environment.SetEnvironmentVariable("ANTHROPIC_API_KEY", null);
             Environment.SetEnvironmentVariable("CEREBRAS_API_KEY", null);
@@ -89,6 +94,7 @@ public class ProviderDetectionServiceTests
             Environment.SetEnvironmentVariable("AZURE_OPENAI_ENDPOINT", originalEndpoint);
             Environment.SetEnvironmentVariable("OLLAMA_API_BASE", originalOllama);
             Environment.SetEnvironmentVariable("ANDY_SKIP_OLLAMA", originalSkipOllama);
+            Environment.SetEnvironmentVariable("OPENROUTER_API_KEY", originalOpenRouter);
             Environment.SetEnvironmentVariable("OPENAI_API_KEY", originalOpenAI);
             Environment.SetEnvironmentVariable("ANTHROPIC_API_KEY", originalAnthropic);
             Environment.SetEnvironmentVariable("CEREBRAS_API_KEY", originalCerebras);
@@ -100,6 +106,7 @@ public class ProviderDetectionServiceTests
     public void DetectDefaultProvider_WithOnlyOpenAI_ReturnsOpenAI()
     {
         // Arrange
+        var originalOpenRouter = Environment.GetEnvironmentVariable("OPENROUTER_API_KEY");
         var originalOpenAI = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
         var originalAzureKey = Environment.GetEnvironmentVariable("AZURE_OPENAI_API_KEY");
         var originalAzureEndpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT");
@@ -111,6 +118,7 @@ public class ProviderDetectionServiceTests
             Environment.SetEnvironmentVariable("OLLAMA_API_BASE", null);
             Environment.SetEnvironmentVariable("AZURE_OPENAI_API_KEY", null);
             Environment.SetEnvironmentVariable("AZURE_OPENAI_ENDPOINT", null);
+            Environment.SetEnvironmentVariable("OPENROUTER_API_KEY", null);
 
             // Set OpenAI
             Environment.SetEnvironmentVariable("OPENAI_API_KEY", "test-openai-key");
@@ -125,6 +133,7 @@ public class ProviderDetectionServiceTests
         }
         finally
         {
+            Environment.SetEnvironmentVariable("OPENROUTER_API_KEY", originalOpenRouter);
             Environment.SetEnvironmentVariable("OPENAI_API_KEY", originalOpenAI);
             Environment.SetEnvironmentVariable("AZURE_OPENAI_API_KEY", originalAzureKey);
             Environment.SetEnvironmentVariable("AZURE_OPENAI_ENDPOINT", originalAzureEndpoint);
@@ -137,7 +146,9 @@ public class ProviderDetectionServiceTests
     {
         // Arrange
         var originalCerebras = Environment.GetEnvironmentVariable("CEREBRAS_API_KEY");
+        var originalOpenRouter = Environment.GetEnvironmentVariable("OPENROUTER_API_KEY");
         var originalOpenAI = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
+        var originalAnthropic = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
         var originalAzureKey = Environment.GetEnvironmentVariable("AZURE_OPENAI_API_KEY");
         var originalAzureEndpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT");
         var originalOllama = Environment.GetEnvironmentVariable("OLLAMA_API_BASE");
@@ -148,7 +159,9 @@ public class ProviderDetectionServiceTests
             Environment.SetEnvironmentVariable("OLLAMA_API_BASE", null);
             Environment.SetEnvironmentVariable("AZURE_OPENAI_API_KEY", null);
             Environment.SetEnvironmentVariable("AZURE_OPENAI_ENDPOINT", null);
+            Environment.SetEnvironmentVariable("OPENROUTER_API_KEY", null);
             Environment.SetEnvironmentVariable("OPENAI_API_KEY", null);
+            Environment.SetEnvironmentVariable("ANTHROPIC_API_KEY", null);
 
             // Set Cerebras
             Environment.SetEnvironmentVariable("CEREBRAS_API_KEY", "test-cerebras-key");
@@ -164,10 +177,38 @@ public class ProviderDetectionServiceTests
         finally
         {
             Environment.SetEnvironmentVariable("CEREBRAS_API_KEY", originalCerebras);
+            Environment.SetEnvironmentVariable("OPENROUTER_API_KEY", originalOpenRouter);
             Environment.SetEnvironmentVariable("OPENAI_API_KEY", originalOpenAI);
+            Environment.SetEnvironmentVariable("ANTHROPIC_API_KEY", originalAnthropic);
             Environment.SetEnvironmentVariable("AZURE_OPENAI_API_KEY", originalAzureKey);
             Environment.SetEnvironmentVariable("AZURE_OPENAI_ENDPOINT", originalAzureEndpoint);
             Environment.SetEnvironmentVariable("OLLAMA_API_BASE", originalOllama);
+        }
+    }
+
+    [Fact]
+    public void DetectDefaultProvider_WithOpenRouter_PrefersOpenRouter()
+    {
+        // OpenRouter is priority 0, so when its key is present it wins even if
+        // lower-priority providers (e.g. OpenAI) are also configured. This is the
+        // default Mimo-v2.5 setup.
+        var originalOpenRouter = Environment.GetEnvironmentVariable("OPENROUTER_API_KEY");
+        var originalOpenAI = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
+
+        try
+        {
+            Environment.SetEnvironmentVariable("OPENROUTER_API_KEY", "test-openrouter-key");
+            Environment.SetEnvironmentVariable("OPENAI_API_KEY", "test-openai-key");
+
+            var service = new ProviderDetectionService();
+
+            Assert.Equal("openrouter", service.DetectDefaultProvider());
+            Assert.True(service.IsProviderAvailable("openrouter"));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("OPENROUTER_API_KEY", originalOpenRouter);
+            Environment.SetEnvironmentVariable("OPENAI_API_KEY", originalOpenAI);
         }
     }
 

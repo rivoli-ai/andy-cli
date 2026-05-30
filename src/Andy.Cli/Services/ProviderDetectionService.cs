@@ -20,9 +20,15 @@ public class ProviderDetectionService
     {
         new ProviderInfo
         {
+            Name = "openrouter",
+            RequiredEnvVars = new[] { "OPENROUTER_API_KEY" },
+            Priority = 0 // Preferred when its key is present (default Mimo-v2.5 setup)
+        },
+        new ProviderInfo
+        {
             Name = "openai",
             RequiredEnvVars = new[] { "OPENAI_API_KEY" },
-            Priority = 1 // Highest priority - most reliable
+            Priority = 1 // Most reliable fallback
         },
         new ProviderInfo
         {

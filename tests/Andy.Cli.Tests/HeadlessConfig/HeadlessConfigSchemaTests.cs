@@ -205,6 +205,18 @@ public class HeadlessConfigSchemaTests
     }
 
     [Fact]
+    public void Model_AcceptsOpenRouterProvider()
+    {
+        var schema = LoadSchema();
+        var config = MinimalValidConfig();
+        config["model"]!["provider"] = "openrouter";
+        config["model"]!["id"] = "xiaomi/mimo-v2.5";
+
+        var result = schema.Evaluate(ToElement(config));
+        Assert.True(result.IsValid, "openrouter is a supported provider");
+    }
+
+    [Fact]
     public void Limits_MaxIterationsZero_Rejected()
     {
         var schema = LoadSchema();

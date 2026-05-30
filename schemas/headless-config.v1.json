@@ -58,7 +58,7 @@
       "additionalProperties": false,
       "properties": {
         "provider": {
-          "enum": ["anthropic", "openai", "google", "cerebras", "local"],
+          "enum": ["anthropic", "openai", "openrouter", "google", "cerebras", "groq", "local"],
           "description": "LLM provider. Pluggable via Andy.Llm adapter registry."
         },
         "id": {

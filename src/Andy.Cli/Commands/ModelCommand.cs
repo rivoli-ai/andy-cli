@@ -746,6 +746,7 @@ public class ModelCommand : ICommand
         // Fall back to hardcoded defaults
         return provider switch
         {
+            "openrouter" => "xiaomi/mimo-v2.5",
             "cerebras" => "llama-3.3-70b", // Only this model supports function calling
             "openai" => "gpt-4o",
             "anthropic" => "claude-3-sonnet-20240229",
