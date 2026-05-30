@@ -64,6 +64,8 @@
     <Compile Include="HeadlessConfig/HeadlessRunnerTests.cs" />
     <!-- Headless provider/model resolution (OpenRouter) -->
     <Compile Include="HeadlessConfig/HeadlessProviderModelTests.cs" />
+    <!-- AQ7 headless stability + regression fixture tests (rivoli-ai/andy-cli#52) -->
+    <Compile Include="Headless/HeadlessAgentRunnerStabilityTests.cs" />
   </ItemGroup>
 
   <ItemGroup>
