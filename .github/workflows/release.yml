@@ -31,10 +31,12 @@ jobs:
 
       - name: Determine version
         id: get_version
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            VERSION="${{ github.event.inputs.version }}"
-          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          if [ -n "$INPUT_VERSION" ]; then
+            VERSION="$INPUT_VERSION"
+          elif [ "${GITHUB_REF#refs/tags/}" != "$GITHUB_REF" ]; then
             VERSION="${GITHUB_REF#refs/tags/v}"
           else
             VERSION="$(date +%Y.%m.%d)"
@@ -50,7 +52,7 @@ jobs:
       - name: Generate aggregate checksums
         run: |
           cd release-artifacts
-          sha256sum *.tar.gz *.zip > SHA256SUMS.txt
+          sha256sum ./*.tar.gz ./*.zip > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Upload artifacts
