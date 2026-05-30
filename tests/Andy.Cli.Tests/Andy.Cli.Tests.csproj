@@ -25,6 +25,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Andy.Cli\Andy.Cli.csproj" />
+    <ProjectReference Include="..\..\src\Andy.Cli.Headless.Contract\Andy.Cli.Headless.Contract.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -64,10 +65,15 @@
     <Compile Include="HeadlessConfig/HeadlessRunnerTests.cs" />
     <!-- Headless provider/model resolution (OpenRouter) -->
     <Compile Include="HeadlessConfig/HeadlessProviderModelTests.cs" />
+<<<<<<< HEAD
+    <!-- AQ8 headless contract validation library (rivoli-ai/andy-cli#54) -->
+    <Compile Include="HeadlessConfig/HeadlessConfigContractTests.cs" />
+=======
     <!-- AQ5 headless cancel/timeout protocol tests (rivoli-ai/andy-cli#50) -->
     <Compile Include="Headless/HeadlessAgentRunnerCancelTests.cs" />
     <!-- AQ7 headless stability + regression fixture tests (rivoli-ai/andy-cli#52) -->
     <Compile Include="Headless/HeadlessAgentRunnerStabilityTests.cs" />
+>>>>>>> origin/main
   </ItemGroup>
 
   <ItemGroup>
