@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+    <IsPackable>true</IsPackable>
+    <PackageId>Andy.Cli.Headless.Contract</PackageId>
+    <Version>2026.5.29-rc.1</Version>
+    <Authors>Rivoli AI</Authors>
+    <Company>Rivoli AI</Company>
+    <Description>Contract validation for the andy-cli headless run configuration and event-stream schemas. Lets generators (andy-containers, conductor) verify their produced headless config against the canonical JSON schema, with pass/fail results and error messages.</Description>
+    <PackageTags>andy-cli;headless;json-schema;contract;validation</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Single source of truth: link the canonical schemas as embedded resources. -->
+    <EmbeddedResource Include="..\..\schemas\headless-config.v1.json">
+      <LogicalName>Andy.Cli.Headless.Contract.headless-config.v1.json</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\schemas\headless-events.v1.json">
+      <LogicalName>Andy.Cli.Headless.Contract.headless-events.v1.json</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="JsonSchema.Net" Version="7.3.4" />
+  </ItemGroup>
+
+</Project>
