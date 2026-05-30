@@ -66,6 +66,8 @@
     <Compile Include="HeadlessConfig/HeadlessProviderModelTests.cs" />
     <!-- AQ5 headless cancel/timeout protocol tests (rivoli-ai/andy-cli#50) -->
     <Compile Include="Headless/HeadlessAgentRunnerCancelTests.cs" />
+    <!-- AQ7 headless stability + regression fixture tests (rivoli-ai/andy-cli#52) -->
+    <Compile Include="Headless/HeadlessAgentRunnerStabilityTests.cs" />
   </ItemGroup>
 
   <ItemGroup>
