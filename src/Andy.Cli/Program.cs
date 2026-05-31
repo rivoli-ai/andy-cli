@@ -1463,13 +1463,16 @@ class Program
                 foreach (var op in overlay.Build().Ops) AppendOpaque(op, builder);
 
                 // The renderer only repaints cells it draws, so with transparent
-                // backgrounds the unmanaged left margin / gap rows can reveal stale
+                // backgrounds the unmanaged left margin / gap cells can reveal stale
                 // "prior output" left in the terminal. Whenever feed content reflows
-                // (items added/removed, line count or scroll change), force the next
-                // frame to be a full clear + repaint (ESC[2J) so that residue is wiped.
-                // (Scroll offset is intentionally excluded: scrolling only changes the
-                // diff-managed feed area, not the margin, so it needs no full repaint.)
-                int reflowSig = HashCode.Combine(feed.ItemCount, feed.RenderedLineCount, (int)scrollMode);
+                // (items added/removed, line count change) OR the user scrolls, force
+                // the next frame to be a full clear + repaint (ESC[2J) so that residue
+                // is wiped. Scrolling must be included: it shifts content and leaves
+                // stale glyphs (e.g. a lone "." or "n") in the margin/gap columns that
+                // the diff renderer never overwrites. Manual scrolling changes the
+                // offset discretely (per wheel notch / PageUp), so this is one repaint
+                // per scroll action, not per frame.
+                int reflowSig = HashCode.Combine(feed.ItemCount, feed.RenderedLineCount, (int)scrollMode, feed.ScrollOffset);
                 if (reflowSig != lastReflowSig)
                 {
                     lastReflowSig = reflowSig;
