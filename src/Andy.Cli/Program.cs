@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Andy.Tui.Backend.Terminal;
+using Andy.Cli.Input;
 using Andy.Cli.Instrumentation;
 using Andy.Cli.Widgets;
 using Andy.Cli.Commands;
@@ -184,9 +185,34 @@ class Program
         Console.Write("[49m");
         Console.Clear();
 
+        // Switch the terminal into raw byte mode so we can receive mouse wheel
+        // events. Returns null (and we fall back to Console.ReadKey) when input
+        // is redirected or stty is unavailable. Mouse reporting is only enabled
+        // when this succeeds, since Console.ReadKey cannot decode mouse bytes.
+        var rawInput = RawTerminalInput.TryStart(enableMouse: true);
+
         try
         {
             bool running = true;
+
+            // Blocking read of a single key, sourced from whichever input path is
+            // active. Used by modal loops (e.g. the exit dialog) that need to wait
+            // for one keypress. Wheel events are ignored while a modal is up.
+            ConsoleKeyInfo ReadKeyBlocking()
+            {
+                if (rawInput == null) return Console.ReadKey(true);
+                while (true)
+                {
+                    if (rawInput.TryDequeue(out var ev))
+                    {
+                        if (ev.Kind == TerminalInputKind.Key) return ev.Key;
+                    }
+                    else
+                    {
+                        Thread.Sleep(8);
+                    }
+                }
+            }
 
             // Scroll mode state
             ScrollMode scrollMode = ScrollMode.Feed;
@@ -757,7 +783,7 @@ class Program
                     await scheduler.RenderOnceAsync(confirmB.Build(), viewport, caps, pty, CancellationToken.None);
 
                     // Handle input
-                    ConsoleKeyInfo k2 = Console.ReadKey(true);
+                    ConsoleKeyInfo k2 = ReadKeyBlocking();
                     if (k2.Key == ConsoleKey.LeftArrow || k2.Key == ConsoleKey.RightArrow || k2.Key == ConsoleKey.Tab)
                     {
                         yesSelected = !yesSelected;
@@ -1199,22 +1225,43 @@ class Program
                     if (k.Key == ConsoleKey.PageUp) feed.ScrollLines(+2 * Math.Max(1, viewport.Height - 5), Math.Max(1, viewport.Height - 5));
                     if (k.Key == ConsoleKey.PageDown) feed.ScrollLines(-2 * Math.Max(1, viewport.Height - 5), Math.Max(1, viewport.Height - 5));
                 }
-                try
+                if (rawInput != null)
                 {
-                    while (Console.KeyAvailable)
+                    // Raw mode: drain decoded events. Mouse wheel scrolls the feed
+                    // (3 lines per notch); keys flow through the normal handler.
+                    while (rawInput.TryDequeue(out var ev))
                     {
-                        var k = Console.ReadKey(intercept: true);
-                        await HandleKey(k);
+                        if (ev.Kind == TerminalInputKind.Wheel)
+                        {
+                            int page = Math.Max(1, viewport.Height - 5);
+                            feed.ScrollLines(ev.WheelDelta * 3, page);
+                        }
+                        else
+                        {
+                            await HandleKey(ev.Key);
+                        }
                         if (!running) break;
                     }
                 }
-                catch (InvalidOperationException)
+                else
                 {
-                    while (Console.In.Peek() != -1)
+                    try
                     {
-                        var k = Console.ReadKey(intercept: true);
-                        await HandleKey(k);
-                        if (!running) break;
+                        while (Console.KeyAvailable)
+                        {
+                            var k = Console.ReadKey(intercept: true);
+                            await HandleKey(k);
+                            if (!running) break;
+                        }
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        while (Console.In.Peek() != -1)
+                        {
+                            var k = Console.ReadKey(intercept: true);
+                            await HandleKey(k);
+                            if (!running) break;
+                        }
                     }
                 }
                 // Render placeholder + CLI widgets
@@ -1493,6 +1540,9 @@ class Program
         }
         finally
         {
+            // Restore terminal settings + disable mouse before leaving the
+            // alternate screen, then re-enable wrap/cursor and exit alt screen.
+            rawInput?.Dispose();
             Console.Write("\u001b[?7h\u001b[?25h\u001b[?1049l");
         }
     }
@@ -1789,7 +1839,7 @@ class Program
 
         // Route to appropriate command
         var commandName = args[0].ToLowerInvariant();
-        
+
         // Filter out common flags from the arguments before passing to command
         var filteredArgs = args.Skip(1)
             .Where(arg => !arg.StartsWith("--debug", StringComparison.OrdinalIgnoreCase) &&

@@ -399,8 +399,12 @@ namespace Andy.Cli.Widgets
             // Calculate new scroll offset with bounds
             int newOffset = _scrollOffset + delta;
 
-            // Clamp to valid range: 0 (bottom/following tail) to total (top of content)
-            _scrollOffset = Math.Clamp(newOffset, 0, Math.Max(0, total));
+            // Clamp to valid range: 0 (bottom/following tail) up to the highest
+            // offset that still shows content, i.e. total minus the viewport
+            // height. Clamping to `total` instead would create a dead-zone above
+            // the top of the content where scrolling back down does nothing.
+            int maxOffset = Math.Max(0, total - _lastViewportHeight);
+            _scrollOffset = Math.Clamp(newOffset, 0, maxOffset);
             _followTail = _scrollOffset == 0;
             return _scrollOffset;
         }
@@ -418,6 +422,7 @@ namespace Andy.Cli.Widgets
         public int RenderedLineCount => _totalLinesCache;
 
         private int _totalLinesCache;
+        private int _lastViewportHeight;
 
         /// <summary>Render feed items inside rect, stacking vertically with bottom alignment when following tail.</summary>
         public void Render(in L.Rect rect, DL.DisplayList baseDl, DL.DisplayListBuilder b)
@@ -454,6 +459,7 @@ namespace Andy.Cli.Widgets
                 _animRemaining = Math.Min(_animRemaining + (total - _prevTotalLines), total);
             }
             _prevTotalLines = total; _totalLinesCache = total;
+            _lastViewportHeight = h; // remember for scroll-offset clamping
 
             int visible = Math.Min(h, total);
             int startLine;

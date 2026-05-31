@@ -53,6 +53,10 @@
     <Compile Include="Widgets/KeyHintsBarTests.cs" />
     <!-- FeedView reflow signal tests (margin residue fix) -->
     <Compile Include="Widgets/FeedViewReflowSignalTests.cs" />
+    <!-- FeedView scroll-offset clamp tests (PageUp/PageDown/wheel dead-zone fix) -->
+    <Compile Include="Widgets/FeedViewScrollClampTests.cs" />
+    <!-- Raw terminal input decoder tests (mouse wheel + keyboard) -->
+    <Compile Include="Input/TerminalInputParserTests.cs" />
     <!-- Code indexing tests -->
     <Compile Include="Tools/CodeIndexToolTests.cs" />
     <!-- Parallel tool execution tests -->
