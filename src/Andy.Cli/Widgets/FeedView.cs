@@ -421,6 +421,9 @@ namespace Andy.Cli.Widgets
         /// <summary>Total wrapped line count from the last <see cref="Render"/> (content reflow signal).</summary>
         public int RenderedLineCount => _totalLinesCache;
 
+        /// <summary>Current scroll offset in lines from the bottom (0 = following the tail).</summary>
+        public int ScrollOffset => _scrollOffset;
+
         private int _totalLinesCache;
         private int _lastViewportHeight;
 

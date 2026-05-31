@@ -119,16 +119,39 @@ public class FeedViewReflowSignalTests
     [Fact]
     public void ReflowSignature_ChangesWhenContentChanges()
     {
-        // Mirrors the signature Program.cs builds: HashCode.Combine(ItemCount, RenderedLineCount, scrollMode).
+        // Mirrors the signature Program.cs builds:
+        // HashCode.Combine(ItemCount, RenderedLineCount, scrollMode, ScrollOffset).
         // A different signature is what triggers the full clear+repaint that wipes margin residue.
         var feed = new FeedView();
         Render(feed);
-        int empty = System.HashCode.Combine(feed.ItemCount, feed.RenderedLineCount, 0);
+        int empty = Signature(feed);
 
         feed.AddMarkdown("now there is content");
         Render(feed);
-        int withContent = System.HashCode.Combine(feed.ItemCount, feed.RenderedLineCount, 0);
+        int withContent = Signature(feed);
 
         Assert.NotEqual(empty, withContent);
     }
+
+    [Fact]
+    public void ReflowSignature_ChangesWhenScrolled()
+    {
+        // Scrolling must change the reflow signature so the next frame is a full
+        // clear+repaint. Otherwise the diff renderer leaves stale glyphs (a lone
+        // "." or "n") behind in the unmanaged left margin / gap columns after a
+        // scroll. Regression guard for that fix.
+        var feed = new FeedView();
+        feed.AddMarkdown(string.Join("\n", System.Linq.Enumerable.Range(0, 100).Select(i => $"line {i}")));
+        Render(feed, height: 10); // content taller than the viewport so we can scroll
+
+        int atBottom = Signature(feed);
+        feed.ScrollLines(20, 10); // scroll up
+        Render(feed, height: 10);
+        int scrolled = Signature(feed);
+
+        Assert.NotEqual(atBottom, scrolled);
+    }
+
+    private static int Signature(FeedView feed)
+        => System.HashCode.Combine(feed.ItemCount, feed.RenderedLineCount, 0, feed.ScrollOffset);
 }
