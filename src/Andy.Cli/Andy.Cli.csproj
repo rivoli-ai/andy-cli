@@ -30,7 +30,8 @@
     <PackageReference Include="Andy.Llm" Version="2026.5.29-rc.31" />
     <PackageReference Include="Andy.MCP" Version="2026.4.26-rc.29" />
     <PackageReference Include="Andy.Model" Version="2025.10.29-rc.5" />
-    <PackageReference Include="Andy.Tools" Version="2025.10.16-rc.16" />
+    <PackageReference Include="Andy.Permissions" Version="2026.6.4-rc.4" />
+    <PackageReference Include="Andy.Tools" Version="2026.6.4-rc.22" />
     <PackageReference Include="Andy.Tui" Version="2026.5.29-rc.43" />
     <PackageReference Include="JsonRepairSharp" Version="1.2.3" />
     <PackageReference Include="JsonSchema.Net" Version="9.2.0" />

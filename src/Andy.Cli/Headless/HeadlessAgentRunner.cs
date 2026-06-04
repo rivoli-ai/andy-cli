@@ -350,6 +350,9 @@ public static class HeadlessAgentRunner
         services.AddSingleton<IToolExecutor, ToolExecutor>();
         services.AddSingleton<IPermissionProfileService, Andy.Tools.Core.PermissionProfileService>();
         services.AddSingleton<Andy.Tools.Framework.IToolLifecycleManager, Andy.Tools.Framework.ToolLifecycleManager>();
+        // Gate tool execution through the permission engine. Headless is non-interactive: anything that
+        // would prompt is denied (fail-closed) unless ANDY_PERMISSION_MODE=bypass or rules/injection allow it.
+        Andy.Cli.Services.CliPermissionServiceExtensions.AddAndyCliPermissions(services, null);
         services.AddSingleton(new Andy.Tools.Framework.ToolFrameworkOptions
         {
             RegisterBuiltInTools = false,
