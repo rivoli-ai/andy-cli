@@ -39,6 +39,7 @@ public static class ToolCatalog
         // System tools
         RegisterTool<ProcessInfoTool>(services);
         RegisterTool<SystemInfoTool>(services);
+        RegisterTool<ExecuteCommandTool>(services);
 
         // Text processing tools
         RegisterTool<FormatTextTool>(services);
@@ -58,7 +59,8 @@ public static class ToolCatalog
 
         // Custom CLI tools
         RegisterTool<Andy.Cli.Tools.CreateDirectoryTool>(services);
-        RegisterTool<Andy.Cli.Tools.BashCommandTool>(services);
+        // BashCommandTool retired: it was display-only (never executed). Real shell execution is now
+        // provided by Andy.Tools' ExecuteCommandTool (id "execute_command"), gated by the permission layer.
         RegisterTool<Andy.Cli.Tools.CodeIndexTool>(services);
     }
 

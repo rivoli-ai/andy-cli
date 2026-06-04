@@ -16,6 +16,7 @@ using Andy.Llm;
 using Andy.Llm.Extensions;
 using Andy.Model.Llm;
 using Andy.Model.Model;
+using Andy.Permissions.Model;
 using Andy.Tools;
 using Andy.Tools.Core;
 using Andy.Tools.Execution;
@@ -311,6 +312,10 @@ class Program
             // services.AddTransient<Andy.Cli.Parsing.Compiler.LlmResponseCompiler>();
             // services.AddTransient<Andy.Cli.Parsing.Rendering.AstRenderer>();
 
+            // Broker for handing tool-permission requests from the agent's background task to the
+            // main input-owning loop (which renders the modal). Same instance used by DI and the loop.
+            var permissionBroker = new Andy.Cli.Services.PermissionRequestBroker();
+
             // Configure Tool services - manually register to avoid HostedService requirement
             // Core services from AddAndyTools
             services.AddSingleton<Andy.Tools.Validation.IToolValidator, Andy.Tools.Validation.ToolValidator>();
@@ -322,6 +327,8 @@ class Program
             services.AddSingleton<IToolExecutor, ToolExecutor>();
             services.AddSingleton<Andy.Tools.Core.IPermissionProfileService, Andy.Tools.Core.PermissionProfileService>();
             services.AddSingleton<Andy.Tools.Framework.IToolLifecycleManager, Andy.Tools.Framework.ToolLifecycleManager>();
+            // Gate tool execution through the permission engine (interactive prompt for the TUI).
+            services.AddAndyCliPermissions(permissionBroker);
 
             // Framework options
             services.AddSingleton(new Andy.Tools.Framework.ToolFrameworkOptions
@@ -807,6 +814,74 @@ class Program
                 return confirmExit;
             }
 
+            // Modal asking the user to approve/deny a tool call. Runs on the main thread (which owns the
+            // input queue and renderer), reusing the same render + blocking-keypress primitive as the exit
+            // dialog. Returns the decision to hand back to the awaiting agent task.
+            async Task<PermissionDecision> ShowPermissionDialogAsync(PermissionRequest request)
+            {
+                string[] labels = { "Allow once", "Allow (session)", "Deny" };
+                int selected = 2; // default to the safe choice
+                bool open = true;
+
+                string Trunc(string s, int max) => s.Length <= max ? s : s[..Math.Max(0, max - 1)] + "…";
+
+                while (open)
+                {
+                    var pb = new DL.DisplayListBuilder();
+                    pb.PushClip(new DL.ClipPush(0, 0, viewport.Width, viewport.Height));
+                    pb.DrawRect(new DL.Rect(0, 0, viewport.Width, viewport.Height, new DL.Rgb24(0, 0, 0)));
+
+                    int bw = Math.Min(64, viewport.Width - 4);
+                    int bh = 9;
+                    int bx = (viewport.Width - bw) / 2;
+                    int by = (viewport.Height - bh) / 2;
+
+                    pb.PushClip(new DL.ClipPush(bx, by, bw, bh));
+                    pb.DrawRect(new DL.Rect(bx, by, bw, bh, new DL.Rgb24(30, 30, 40)));
+                    pb.DrawBorder(new DL.Border(bx, by, bw, bh, "double", new DL.Rgb24(200, 200, 80)));
+
+                    string title = "Permission required";
+                    pb.DrawText(new DL.TextRun(bx + (bw - title.Length) / 2, by + 1, title, new DL.Rgb24(255, 255, 255), new DL.Rgb24(30, 30, 40), DL.CellAttrFlags.Bold));
+
+                    var tool = Trunc($"Tool: {request.ToolDisplayName ?? request.ToolId}", bw - 4);
+                    pb.DrawText(new DL.TextRun(bx + 2, by + 3, tool, new DL.Rgb24(220, 220, 160), new DL.Rgb24(30, 30, 40), DL.CellAttrFlags.None));
+                    var summary = Trunc(request.ActionSummary, bw - 4);
+                    pb.DrawText(new DL.TextRun(bx + 2, by + 4, summary, new DL.Rgb24(200, 200, 210), new DL.Rgb24(30, 30, 40), DL.CellAttrFlags.None));
+
+                    int btnY = by + 6;
+                    int x = bx + 2;
+                    for (int i = 0; i < labels.Length; i++)
+                    {
+                        bool on = i == selected;
+                        var bg = on ? new DL.Rgb24(60, 90, 130) : new DL.Rgb24(40, 40, 50);
+                        var fg = on ? new DL.Rgb24(255, 255, 255) : new DL.Rgb24(180, 180, 180);
+                        string text = on ? $"[ {labels[i]} ]" : $"  {labels[i]}  ";
+                        pb.DrawRect(new DL.Rect(x, btnY, text.Length, 1, bg));
+                        pb.DrawText(new DL.TextRun(x, btnY, text, fg, bg, on ? DL.CellAttrFlags.Bold : DL.CellAttrFlags.None));
+                        x += text.Length + 2;
+                    }
+
+                    string hints = "← → Navigate  Enter Select  Esc Deny";
+                    pb.DrawText(new DL.TextRun(bx + (bw - hints.Length) / 2, by + bh - 1, hints, new DL.Rgb24(120, 120, 150), new DL.Rgb24(30, 30, 40), DL.CellAttrFlags.None));
+
+                    pb.Pop();
+                    await scheduler.RenderOnceAsync(pb.Build(), viewport, caps, pty, CancellationToken.None);
+
+                    var k = ReadKeyBlocking();
+                    if (k.Key == ConsoleKey.LeftArrow) selected = (selected + labels.Length - 1) % labels.Length;
+                    else if (k.Key == ConsoleKey.RightArrow || k.Key == ConsoleKey.Tab) selected = (selected + 1) % labels.Length;
+                    else if (k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.D || k.Key == ConsoleKey.N) { selected = 2; open = false; }
+                    else if (k.Key == ConsoleKey.Enter || k.Key == ConsoleKey.Spacebar) open = false;
+                }
+
+                return selected switch
+                {
+                    0 => new PermissionDecision(true, PersistScope.Once),
+                    1 => new PermissionDecision(true, PersistScope.Session),
+                    _ => new PermissionDecision(false, PersistScope.Once),
+                };
+            }
+
             while (running)
             {
                 // Check for terminal resize
@@ -819,6 +894,16 @@ class Program
                     // Force a full redraw on resize
                     Console.Clear();
                 }
+
+                // Service a pending tool-permission request (posted by the agent's background task) on
+                // this input-owning thread, then re-render on the next iteration.
+                if (permissionBroker.TryDequeue(out var pendingPermission) && pendingPermission != null)
+                {
+                    var decision = await ShowPermissionDialogAsync(pendingPermission.Request);
+                    pendingPermission.Completion.TrySetResult(decision);
+                    continue;
+                }
+
                 // Input (prefer KeyAvailable; fallback to Console.In.Peek in non-interactive contexts)
                 async Task HandleKey(ConsoleKeyInfo k)
                 {
@@ -1691,6 +1776,8 @@ class Program
         services.AddSingleton<IToolExecutor, ToolExecutor>();
         services.AddSingleton<Andy.Tools.Core.IPermissionProfileService, Andy.Tools.Core.PermissionProfileService>();
         services.AddSingleton<Andy.Tools.Framework.IToolLifecycleManager, Andy.Tools.Framework.ToolLifecycleManager>();
+        // Gate tool execution through the permission engine (non-interactive: fail-closed / bypass via env).
+        services.AddAndyCliPermissions(null);
 
         // Framework options
         services.AddSingleton(new Andy.Tools.Framework.ToolFrameworkOptions
@@ -1818,6 +1905,8 @@ class Program
         services.AddSingleton<IToolExecutor, ToolExecutor>();
         services.AddSingleton<Andy.Tools.Core.IPermissionProfileService, Andy.Tools.Core.PermissionProfileService>();
         services.AddSingleton<Andy.Tools.Framework.IToolLifecycleManager, Andy.Tools.Framework.ToolLifecycleManager>();
+        // Gate tool execution through the permission engine (non-interactive: fail-closed / bypass via env).
+        services.AddAndyCliPermissions(null);
 
         // Framework options
         services.AddSingleton(new Andy.Tools.Framework.ToolFrameworkOptions
