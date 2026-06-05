@@ -104,6 +104,25 @@ public sealed class ExecuteCommandToolIntegrationTests
     }
 
     [Fact]
+    public async Task Execute_command_runs_with_engine_default_profile_via_ui_executor()
+    {
+        // Reproduces the live path: the engine's SimpleAgent builds the context with the restrictive
+        // DEFAULT permission profile (ProcessExecution = false) and the call goes through
+        // UiUpdatingToolExecutor. execute_command declares the ProcessExecution capability, so without the
+        // capability grant in UiUpdatingToolExecutor it would be blocked before the permission gate runs.
+        using var sp = BuildProvider();
+        var inner = sp.GetRequiredService<IToolExecutor>();
+        var exec = new UiUpdatingToolExecutor(inner);
+
+        var defaultContext = new ToolExecutionContext(); // ProcessExecution defaults to false, like SimpleAgent
+        var result = await exec.ExecuteAsync("execute_command", Cmd("echo via_ui_executor"), defaultContext);
+
+        var (ok, _, stdout, err) = Read(result);
+        Assert.True(ok, err);
+        Assert.Contains("via_ui_executor", stdout);
+    }
+
+    [Fact]
     public async Task Known_safe_command_pwd_or_cd_runs()
     {
         using var sp = BuildProvider();

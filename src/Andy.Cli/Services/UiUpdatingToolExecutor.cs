@@ -49,6 +49,13 @@ namespace Andy.Cli.Services
             // Ensure we have a context with a correlation ID
             context ??= new ToolExecutionContext();
 
+            // The Andy.Permissions gate is the CLI's consent authority (allow/ask/deny per call). Grant the
+            // capability flags on the profile so the lower-level capability checks
+            // (SecurityManager.ValidateExecution + ToolBase.CanExecuteWithPermissions) don't pre-empt the
+            // gate. Without this, tools that declare ProcessExecution (execute_command) are blocked before
+            // the gate runs, because the engine builds the context with the restrictive default profile.
+            GrantGatedCapabilities(context);
+
             // If no correlation ID is set, create a unique one for this execution
             if (string.IsNullOrEmpty(context.CorrelationId))
             {
@@ -489,7 +496,25 @@ namespace Andy.Cli.Services
 
         public Task<ToolExecutionResult> ExecuteAsync(ToolExecutionRequest request)
         {
+            if (request?.Context != null)
+            {
+                GrantGatedCapabilities(request.Context);
+            }
+
             return _innerExecutor.ExecuteAsync(request);
+        }
+
+        /// <summary>
+        /// Grants the tool capability flags on the execution context's permission profile. The
+        /// Andy.Permissions gate decides actual consent per call; these flags only stop the lower-level
+        /// capability checks from blocking a tool before the gate runs.
+        /// </summary>
+        private static void GrantGatedCapabilities(ToolExecutionContext context)
+        {
+            context.Permissions.FileSystemAccess = true;
+            context.Permissions.NetworkAccess = true;
+            context.Permissions.ProcessExecution = true;
+            context.Permissions.EnvironmentAccess = true;
         }
 
         public Task<IList<string>> ValidateExecutionRequestAsync(ToolExecutionRequest request)
