@@ -68,6 +68,8 @@
     <Compile Include="Integration/MultiTurnToolCallContextTests.cs" />
     <!-- Bash tool (execute_command) integration tests -->
     <Compile Include="Integration/ExecuteCommandToolIntegrationTests.cs" />
+    <!-- list_directory tool integration tests -->
+    <Compile Include="Integration/ListDirectoryIntegrationTests.cs" />
     <!-- AQ1 headless config schema tests (rivoli-ai/andy-cli#46) -->
     <Compile Include="HeadlessConfig/HeadlessConfigSchemaTests.cs" />
     <!-- AQ2 headless runner tests (rivoli-ai/andy-cli#47) -->
