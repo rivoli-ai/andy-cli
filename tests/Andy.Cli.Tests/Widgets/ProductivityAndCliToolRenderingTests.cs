@@ -7,7 +7,7 @@ namespace Andy.Cli.Tests.Widgets
     /// Tests rendering of Productivity, Git, and CLI-specific tools
     /// Productivity Tools: TodoManagementTool, TodoExecutor
     /// Git Tools: GitDiffTool
-    /// CLI Tools: CreateDirectoryTool, BashCommandTool, CodeIndexTool
+    /// CLI Tools: CreateDirectoryTool, ExecuteCommandTool, CodeIndexTool
     /// </summary>
     public class ProductivityAndCliToolRenderingTests : ToolRenderingTestBase
     {
@@ -263,17 +263,17 @@ namespace Andy.Cli.Tests.Widgets
 
         #endregion
 
-        #region BashCommandTool Tests
+        #region ExecuteCommandTool Tests
 
         [Fact]
-        public void BashCommandTool_ParameterDisplay_ShowsCommand()
+        public void ExecuteCommandTool_ParameterDisplay_ShowsCommand()
         {
             var parameters = new Dictionary<string, object?>
             {
                 { "command", "ls -la" }
             };
 
-            var toolItem = CreateToolItem("bash", parameters);
+            var toolItem = CreateToolItem("execute_command", parameters);
             var display = GetParameterDisplay(toolItem);
 
             Assert.NotNull(display);
@@ -281,7 +281,7 @@ namespace Andy.Cli.Tests.Widgets
         }
 
         [Fact]
-        public void BashCommandTool_SuccessResult_ShowsCommandExecuted()
+        public void ExecuteCommandTool_SuccessResult_ShowsCommandExecuted()
         {
             var parameters = new Dictionary<string, object?>
             {
@@ -290,11 +290,11 @@ namespace Andy.Cli.Tests.Widgets
 
             var result = "Command executed (12 lines output)";
 
-            AssertResultDisplayContains("bash", parameters, result, "executed");
+            AssertResultDisplayContains("execute_command", parameters, result, "executed");
         }
 
         [Fact]
-        public void BashCommandTool_SuccessResult_ShowsNoOutput()
+        public void ExecuteCommandTool_SuccessResult_ShowsNoOutput()
         {
             var parameters = new Dictionary<string, object?>
             {
@@ -303,11 +303,11 @@ namespace Andy.Cli.Tests.Widgets
 
             var result = "Command executed";
 
-            AssertResultDisplayContains("bash", parameters, result, "executed");
+            AssertResultDisplayContains("execute_command", parameters, result, "executed");
         }
 
         [Fact]
-        public void BashCommandTool_ErrorResult_ShowsCommandNotFound()
+        public void ExecuteCommandTool_ErrorResult_ShowsCommandNotFound()
         {
             var parameters = new Dictionary<string, object?>
             {
@@ -316,11 +316,11 @@ namespace Andy.Cli.Tests.Widgets
 
             var errorMessage = "Command not found: nonexistent_command";
 
-            AssertErrorDisplayContains("bash", parameters, errorMessage, "not found");
+            AssertErrorDisplayContains("execute_command", parameters, errorMessage, "not found");
         }
 
         [Fact]
-        public void BashCommandTool_ErrorResult_ShowsExitCode()
+        public void ExecuteCommandTool_ErrorResult_ShowsExitCode()
         {
             var parameters = new Dictionary<string, object?>
             {
@@ -329,7 +329,7 @@ namespace Andy.Cli.Tests.Widgets
 
             var errorMessage = "Command failed with exit code 1";
 
-            AssertErrorDisplayContains("bash", parameters, errorMessage, "exit code");
+            AssertErrorDisplayContains("execute_command", parameters, errorMessage, "exit code");
         }
 
         #endregion
@@ -459,7 +459,7 @@ namespace Andy.Cli.Tests.Widgets
         #region Boundary Condition Tests
 
         [Fact]
-        public void BashCommandTool_ParameterDisplay_HandlesLongCommand()
+        public void ExecuteCommandTool_ParameterDisplay_HandlesLongCommand()
         {
             var longCommand = "find /Users/test -type f -name '*.cs' -exec grep -l 'pattern' {} \\; | xargs wc -l | sort -n";
 
@@ -468,7 +468,7 @@ namespace Andy.Cli.Tests.Widgets
                 { "command", longCommand }
             };
 
-            var toolItem = CreateToolItem("bash", parameters);
+            var toolItem = CreateToolItem("execute_command", parameters);
             var display = GetParameterDisplay(toolItem);
 
             Assert.NotNull(display);
@@ -555,14 +555,14 @@ namespace Andy.Cli.Tests.Widgets
         #region Tool-Specific Edge Cases
 
         [Fact]
-        public void BashCommandTool_ParameterDisplay_HandlesCommandWithPipes()
+        public void ExecuteCommandTool_ParameterDisplay_HandlesCommandWithPipes()
         {
             var parameters = new Dictionary<string, object?>
             {
                 { "command", "ps aux | grep dotnet | awk '{print $2}'" }
             };
 
-            var toolItem = CreateToolItem("bash", parameters);
+            var toolItem = CreateToolItem("execute_command", parameters);
             var display = GetParameterDisplay(toolItem);
 
             Assert.NotNull(display);

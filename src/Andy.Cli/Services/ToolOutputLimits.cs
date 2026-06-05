@@ -20,8 +20,6 @@ public static class ToolOutputLimits
         ["code_index"] = 1200,  // Reduced
         
         // Command execution - prevent huge outputs
-        ["bash"] = 1000,  // Reduced
-        ["bash_command"] = 1000,  // Reduced
         ["execute_command"] = 1000, // Reduced
         
         // Web operations - limit response sizes

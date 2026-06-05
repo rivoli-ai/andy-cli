@@ -334,7 +334,7 @@ public class ToolRegistryAdapter
     {
         "list_directory",
         "read_file",
-        "bash_command",
+        "execute_command",
         "search_files"
     };
 
