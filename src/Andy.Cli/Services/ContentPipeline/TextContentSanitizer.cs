@@ -11,7 +11,7 @@ public class TextContentSanitizer : IContentSanitizer
 {
     // Redact internal tool disclosures
     private static readonly Regex ToolJsonPattern = new(@"\{[^}]*\""(?:tool|function|tool_call)\""[^}]*\}", RegexOptions.Singleline | RegexOptions.Compiled | RegexOptions.IgnoreCase);
-    private static readonly Regex ToolMentionPattern = new(@"(?i)\b(tool call|using (?:a|the) tool|call(?:ing)? a tool|invoke|invoking|function call|list_directory|read_file|bash_command|create_directory|codeindex)\b", RegexOptions.Compiled);
+    private static readonly Regex ToolMentionPattern = new(@"(?i)\b(tool call|using (?:a|the) tool|call(?:ing)? a tool|invoke|invoking|function call|list_directory|read_file|execute_command|create_directory|codeindex)\b", RegexOptions.Compiled);
     private static readonly Regex EmptyJsonPattern = new(@"`json\s*\n\s*`", RegexOptions.Multiline | RegexOptions.Compiled);
     private static readonly Regex EmptyTripleJsonPattern = new(@"```json\s*\n\s*```", RegexOptions.Multiline | RegexOptions.Compiled);
     private static readonly Regex ConsecutiveNewlinesPattern = new(@"\n\s*\n\s*\n+", RegexOptions.Compiled);  // 3+ newlines with optional whitespace

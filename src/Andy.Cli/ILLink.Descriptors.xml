@@ -42,7 +42,6 @@
   <!-- Preserve custom CLI tools -->
   <assembly fullname="andy-cli">
     <type fullname="Andy.Cli.Tools.CreateDirectoryTool" preserve="all" />
-    <type fullname="Andy.Cli.Tools.BashCommandTool" preserve="all" />
     <type fullname="Andy.Cli.Tools.CodeIndexTool" preserve="all" />
   </assembly>
 

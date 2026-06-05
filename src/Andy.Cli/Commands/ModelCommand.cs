@@ -480,7 +480,7 @@ public class ModelCommand : ICommand
                 {
                     message.AppendLine();
                     message.AppendLine(ConsoleColors.NotePrefix("Cerebras provider limited to 4 essential tools to prevent API errors"));
-                    message.AppendLine("  Available tools: list_directory, read_file, bash_command, search_files");
+                    message.AppendLine("  Available tools: list_directory, read_file, execute_command, search_files");
                 }
 
                 message.AppendLine();
