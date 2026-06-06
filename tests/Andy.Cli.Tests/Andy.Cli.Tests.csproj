@@ -51,6 +51,8 @@
     <Compile Include="Widgets/TokenCounterTests.cs" />
     <!-- KeyHintsBar tests -->
     <Compile Include="Widgets/KeyHintsBarTests.cs" />
+    <!-- PromptLine color/style tests -->
+    <Compile Include="Widgets/PromptLineColorTests.cs" />
     <!-- PromptLine soft-wrapping + cursor navigation tests -->
     <Compile Include="Widgets/PromptLineWrappingTests.cs" />
     <!-- FeedView reflow signal tests (margin residue fix) -->
