@@ -383,7 +383,7 @@ namespace Andy.Cli.Widgets
                 }
                 string line = lines[startLine + i];
                 string snippet = line.Length > innerW ? line.Substring(0, innerW) : line;
-                b.DrawText(new DL.TextRun(textStartX, textStartY + i, snippet, theme.Primary, theme.PromptBackground, DL.CellAttrFlags.None));
+                b.DrawText(new DL.TextRun(textStartX, textStartY + i, snippet, theme.PromptText, theme.PromptBackground, DL.CellAttrFlags.None));
             }
             // ghost suggestion only on last visible row
             if (_suggest is not null && _focused && visible > 0)
@@ -407,7 +407,7 @@ namespace Andy.Cli.Widgets
                 if (rowInViewport >= 0 && rowInViewport < maxContentLines)
                 {
                     int caretCol = Math.Clamp(cc, 0, innerW - 1);
-                    b.DrawText(new DL.TextRun(textStartX + caretCol, textStartY + rowInViewport, "|", theme.Primary, theme.PromptBackground, DL.CellAttrFlags.None));
+                    b.DrawText(new DL.TextRun(textStartX + caretCol, textStartY + rowInViewport, "|", theme.PromptText, theme.PromptBackground, DL.CellAttrFlags.None));
                 }
             }
             // scrollbar when content exceeds max visible lines
