@@ -8,9 +8,13 @@ using Xunit;
 namespace Andy.Cli.Tests.Widgets;
 
 /// <summary>
-/// Verifies that the text the user types into the prompt is rendered with the
-/// dedicated, high-contrast <see cref="Theme.PromptText"/> color rather than the
-/// lower-contrast accent color, and that the choice stays readable across themes.
+/// Verifies that the text the user types into the prompt stays readable across
+/// themes regardless of the terminal background. Because the application cannot
+/// reliably detect the terminal background, the prompt text is drawn with the
+/// terminal's own default foreground color (<see cref="Theme.PromptText"/> is
+/// null, which the encoder emits as ANSI SGR 39). That default is inherently
+/// legible against the terminal's own background, so no theme forces an explicit
+/// RGB color that could clash with an unexpected terminal background.
 /// </summary>
 public class PromptLineColorTests
 {
@@ -54,6 +58,7 @@ public class PromptLineColorTests
 
         var run = FindRun(dl, "hello");
         Assert.NotNull(run);
+        // PromptText is the terminal default (null) so the foreground is left unset.
         Assert.Equal(Theme.Dark.PromptText, run!.Value.Fg);
         // The typed text must not fall back to the accent color.
         Assert.NotEqual(Theme.Dark.Primary, run!.Value.Fg);
@@ -70,46 +75,37 @@ public class PromptLineColorTests
         Assert.NotEqual(Theme.Light.Primary, run!.Value.Fg);
     }
 
-    // Approximate WCAG relative luminance for an sRGB color (0..1).
-    private static double Luminance(DL.Rgb24 c)
+    [Theory]
+    [InlineData("dark")]
+    [InlineData("light")]
+    public void PromptText_UsesTerminalDefaultForeground(string themeName)
     {
-        static double Channel(byte v)
-        {
-            double s = v / 255.0;
-            return s <= 0.03928 ? s / 12.92 : System.Math.Pow((s + 0.055) / 1.055, 2.4);
-        }
-        return 0.2126 * Channel(c.R) + 0.7152 * Channel(c.G) + 0.0722 * Channel(c.B);
-    }
+        var theme = Theme.GetByName(themeName)!;
 
-    private static double ContrastRatio(DL.Rgb24 a, DL.Rgb24 b)
-    {
-        double la = Luminance(a) + 0.05;
-        double lb = Luminance(b) + 0.05;
-        return la > lb ? la / lb : lb / la;
+        // A null foreground is emitted as ANSI SGR 39 (terminal default fg),
+        // which is the only choice guaranteed to be readable on the user's
+        // actual terminal background, which the app cannot detect.
+        Assert.Null(theme.PromptText);
+
+        // The typed text run must carry that unset (terminal default) foreground.
+        var dl = RenderWith(theme, "hello");
+        var run = FindRun(dl, "hello");
+        Assert.NotNull(run);
+        Assert.Null(run!.Value.Fg);
     }
 
     [Theory]
     [InlineData("dark")]
     [InlineData("light")]
-    public void PromptText_HasHigherContrastThanAccent_AgainstTypicalBackground(string themeName)
+    public void PromptField_ForegroundAndBackgroundContrastByConstruction(string themeName)
     {
         var theme = Theme.GetByName(themeName)!;
 
-        // PromptBackground is transparent (null); contrast is judged against the
-        // terminal surface the prompt sits on. Use the worst-case terminal
-        // background for each theme: black for dark, white for light.
-        var surface = themeName == "dark"
-            ? new DL.Rgb24(0, 0, 0)
-            : new DL.Rgb24(255, 255, 255);
-
-        double promptContrast = ContrastRatio(theme.PromptText, surface);
-        double accentContrast = ContrastRatio(theme.Primary, surface);
-
-        // The chosen prompt color must be at least as readable as the accent,
-        // and comfortably above the WCAG AA body-text threshold of 4.5:1.
-        Assert.True(promptContrast >= accentContrast,
-            $"PromptText contrast {promptContrast:F2} should be >= accent contrast {accentContrast:F2} for theme '{themeName}'");
-        Assert.True(promptContrast >= 4.5,
-            $"PromptText contrast {promptContrast:F2} should meet WCAG AA (4.5:1) for theme '{themeName}'");
+        // The prompt field is a self-contained, readable pair by construction:
+        // both foreground (PromptText) and background (PromptBackground) defer to
+        // the terminal's own default fg/bg, which the terminal guarantees to be a
+        // legible, contrasting pair. Neither forces an RGB color that could clash.
+        Assert.Null(theme.PromptText);
+        Assert.Null(theme.PromptBackground);
     }
 }
