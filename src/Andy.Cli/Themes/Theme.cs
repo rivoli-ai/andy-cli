@@ -33,6 +33,13 @@ namespace Andy.Cli.Themes
         public DL.Rgb24 TextDim { get; set; } = new DL.Rgb24(150, 150, 150);
         public DL.Rgb24 TextBright { get; set; } = new DL.Rgb24(255, 255, 255);
 
+        // Color used for the text the user types into the prompt input.
+        // Kept distinct from the accent (Primary) color so it stays a
+        // high-contrast, easily readable body-text color on the prompt
+        // background across themes. Defaults to a near-white tone suited to
+        // the dark theme; light theme overrides it with a near-black tone.
+        public DL.Rgb24 PromptText { get; set; } = new DL.Rgb24(235, 235, 235);
+
         // Accent colors
         public DL.Rgb24 Primary { get; set; } = new DL.Rgb24(150, 200, 255);
         public DL.Rgb24 Secondary { get; set; } = new DL.Rgb24(200, 200, 80);
@@ -100,6 +107,7 @@ namespace Andy.Cli.Themes
             Text = new DL.Rgb24(40, 40, 40),
             TextDim = new DL.Rgb24(110, 110, 110),
             TextBright = new DL.Rgb24(0, 0, 0),
+            PromptText = new DL.Rgb24(25, 25, 25),
 
             Primary = new DL.Rgb24(30, 90, 170),
             Secondary = new DL.Rgb24(140, 110, 0),

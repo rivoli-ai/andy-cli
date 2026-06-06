@@ -1748,6 +1748,9 @@ namespace Andy.Cli.Widgets
         private int _linesRemoved;
         private string _filePath = "";
         private readonly List<string> _details = new();
+        // Width available for rendering the current slice, captured in RenderSlice so
+        // result-summary helpers can fill the full feed width instead of a narrow cap.
+        private int _availableWidth = 80;
 
         public string ToolId => _toolId;
         public string ToolName => _toolName;
@@ -2025,6 +2028,10 @@ namespace Andy.Cli.Widgets
         public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
             if (width <= 0 || maxLines <= 0) return;
+
+            // Remember the full available width so single-line summaries (e.g. command
+            // output) can use the entire feed width instead of a narrow hard-coded cap.
+            _availableWidth = width;
 
             int row = y;
             int drawn = 0;
@@ -2424,12 +2431,17 @@ namespace Andy.Cli.Widgets
             return s.Replace("\n", " ").Replace("\r", " ").Trim();
         }
 
-        private static string FirstLine(string s)
+        private string FirstLine(string s)
         {
             var line = s.Replace("\r\n", "\n").Replace('\r', '\n');
             var nl = line.IndexOf('\n');
             if (nl >= 0) line = line.Substring(0, nl);
-            if (line.Length > 80) line = line.Substring(0, 77) + "...";
+            // Fill the available feed width rather than a narrow hard-coded cap so wide
+            // command output is not needlessly clipped to ~1/3 of the terminal. The final
+            // render also clips to the exact width; this keeps the content budget aligned
+            // with the available space. Reserve a few columns for the "  L  " gutter/prefix.
+            int budget = Math.Max(40, _availableWidth - 6);
+            if (line.Length > budget) line = line.Substring(0, Math.Max(0, budget - 3)) + "...";
             return line.Trim();
         }
 

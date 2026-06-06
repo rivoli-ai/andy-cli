@@ -25,6 +25,25 @@ public class SystemPromptBuilderTests
     }
 
     [Fact]
+    public void SystemPrompt_InstructsAgainstCdPreambleForShellCommands()
+    {
+        // Arrange
+        var builder = new SystemPromptBuilder();
+
+        // Act
+        var prompt = builder
+            .WithCoreMandates()
+            .WithWorkflowGuidelines()
+            .Build();
+
+        // Assert: the model must be told not to prepend a "cd <dir> &&" preamble and to use the
+        // execute_command working_directory parameter instead, so the approval prompt and executed
+        // command show the clean command only.
+        Assert.Contains("Do NOT prepend a 'cd <dir> &&' preamble", prompt);
+        Assert.Contains("set the tool's 'working_directory' parameter instead of using 'cd'", prompt);
+    }
+
+    [Fact]
     public void SystemPrompt_DistinguishesBetweenDisplayAndSave()
     {
         // Arrange

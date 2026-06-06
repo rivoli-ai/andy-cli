@@ -176,6 +176,32 @@ public sealed class ExecuteCommandToolIntegrationTests
     }
 
     [Fact]
+    public async Task Working_directory_parameter_runs_command_in_dir_without_cd_preamble()
+    {
+        // Proves the fix: a different run directory is selected via the tool's working_directory
+        // parameter (which sets ProcessStartInfo.WorkingDirectory) rather than a "cd <dir> &&" preamble
+        // on the command. The executed command stays clean, so the approval preview matches what runs.
+        using var sp = BuildProvider();
+        var exec = sp.GetRequiredService<IToolExecutor>();
+
+        var tempDir = System.IO.Path.GetTempPath().TrimEnd(System.IO.Path.DirectorySeparatorChar);
+
+        // "pwd" is known-safe; no "cd" appears anywhere in the command string.
+        var parameters = new Dictionary<string, object?>
+        {
+            ["command"] = "pwd",
+            ["working_directory"] = tempDir,
+        };
+        var result = await exec.ExecuteAsync("execute_command", parameters, Context());
+
+        var (ok, exit, stdout, err) = Read(result);
+        Assert.True(ok, err);
+        Assert.Equal(0, exit);
+        // The command ran in the requested directory even though it contained no "cd".
+        Assert.Contains(System.IO.Path.GetFileName(tempDir), stdout);
+    }
+
+    [Fact]
     public async Task Nonzero_exit_is_surfaced_as_failure()
     {
         using var sp = BuildProvider();
