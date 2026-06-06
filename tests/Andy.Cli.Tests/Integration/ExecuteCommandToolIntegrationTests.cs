@@ -28,10 +28,14 @@ public sealed class BashToolEnvCollection { }
 public sealed class ExecuteCommandToolIntegrationTests
 {
     /// <summary>Builds an andy-cli-representative provider with an isolated permission store.</summary>
-    private static ServiceProvider BuildProvider()
+    private static ServiceProvider BuildProvider(Andy.Permissions.Prompt.IPermissionPrompt? prompt = null)
     {
         var services = new ServiceCollection();
         services.AddLogging();
+        if (prompt is not null)
+        {
+            services.AddSingleton(prompt); // registered before AddAndyPermissions (which TryAdds a default)
+        }
 
         // Core Andy.Tools services — mirrors Program.cs.
         services.AddSingleton<IToolValidator, ToolValidator>();
@@ -120,6 +124,39 @@ public sealed class ExecuteCommandToolIntegrationTests
         var (ok, _, stdout, err) = Read(result);
         Assert.True(ok, err);
         Assert.Contains("via_ui_executor", stdout);
+    }
+
+    [Fact]
+    public async Task Ask_then_allow_session_via_prompt_runs_command_and_remembers()
+    {
+        // Mirrors the live interactive flow the user hit: a neutral command (not known-safe) ⇒ the gate
+        // asks; the user picks "Allow (session)" in the modal; the command must then ACTUALLY run (the
+        // capability grant in UiUpdatingToolExecutor lets ToolBase/SecurityManager pass) and must not
+        // prompt again for the same command this session.
+        var prompt = new AllowSessionPrompt();
+        using var sp = BuildProvider(prompt);
+        var exec = new UiUpdatingToolExecutor(sp.GetRequiredService<IToolExecutor>());
+
+        var first = await exec.ExecuteAsync("execute_command", Cmd("dotnet --version"), new ToolExecutionContext());
+        var (ok1, _, stdout1, err1) = Read(first);
+        Assert.True(ok1, err1);                 // ran after the user allowed (this is what was failing live)
+        Assert.Matches(@"\d+\.\d+", stdout1);
+        Assert.Equal(1, prompt.CallCount);      // prompted exactly once
+
+        var second = await exec.ExecuteAsync("execute_command", Cmd("dotnet --version"), new ToolExecutionContext());
+        Assert.True(second.IsSuccessful, second.ErrorMessage);
+        Assert.Equal(1, prompt.CallCount);      // "session" remembered ⇒ no second prompt
+    }
+
+    private sealed class AllowSessionPrompt : Andy.Permissions.Prompt.IPermissionPrompt
+    {
+        public int CallCount;
+        public Task<Andy.Permissions.Model.PermissionDecision> RequestAsync(
+            Andy.Permissions.Model.PermissionRequest request, System.Threading.CancellationToken cancellationToken = default)
+        {
+            System.Threading.Interlocked.Increment(ref CallCount);
+            return Task.FromResult(new Andy.Permissions.Model.PermissionDecision(true, Andy.Permissions.Model.PersistScope.Session));
+        }
     }
 
     [Fact]
