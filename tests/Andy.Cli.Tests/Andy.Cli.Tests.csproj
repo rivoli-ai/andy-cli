@@ -92,6 +92,8 @@
     <Compile Include="Headless/HeadlessAgentRunnerStabilityTests.cs" />
     <!-- AQ8 headless contract validation library (rivoli-ai/andy-cli#54) -->
     <Compile Include="HeadlessConfig/HeadlessConfigContractTests.cs" />
+    <!-- ESC cancels in-flight agent turn (fix/esc-cancels-turn) -->
+    <Compile Include="Services/SimpleAssistantServiceCancellationTests.cs" />
   </ItemGroup>
 
   <ItemGroup>

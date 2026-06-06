@@ -228,6 +228,7 @@ class Program
             var statusMessage = new StatusMessage();
             var prompt = new PromptLine();
             bool isProcessingMessage = false; // Track if we're processing a message
+            CancellationTokenSource? turnCts = null; // Cancels the in-flight agent turn when ESC is pressed
             prompt.SetBorder(true);
             prompt.SetShowCaret(true);
             prompt.SetFocused(true);
@@ -926,7 +927,15 @@ class Program
                             return;
                         }
 
-                        // Show exit confirmation dialog
+                        // If a turn is actively running, ESC cancels the in-flight
+                        // agent turn instead of quitting the app.
+                        if (isProcessingMessage)
+                        {
+                            turnCts?.Cancel();
+                            return;
+                        }
+
+                        // Idle: show exit confirmation dialog
                         if (await ShowExitConfirmationAsync())
                         {
                             running = false;
@@ -1255,21 +1264,30 @@ class Program
 
                         if (aiService != null)
                         {
-                            // Run the assistant processing on a background task so UI can update
+                            // Run the assistant processing on a background task so UI can update.
+                            // A per-turn CancellationTokenSource lets ESC cancel the in-flight turn.
+                            var cts = new CancellationTokenSource();
+                            turnCts = cts;
                             isProcessingMessage = true;
                             prompt.SetShowCaret(false); // Hide cursor during processing
                             _ = Task.Run(async () =>
                             {
                                 try
                                 {
-                                    statusMessage.SetMessage("Thinking", animated: true);
+                                    statusMessage.SetMessage("Thinking (ESC to cancel)", animated: true);
 
                                     // Process message with tool support (streaming disabled until properly implemented)
-                                    var response = await aiService.ProcessMessageAsync(cmd, enableStreaming: false);
+                                    var response = await aiService.ProcessMessageAsync(cmd, enableStreaming: false, cts.Token);
 
                                     // Token counter is now updated in real-time by SimpleAssistantService
 
                                     statusMessage.SetMessage("Ready for next question", animated: false);
+                                }
+                                catch (OperationCanceledException)
+                                {
+                                    // ESC cancelled the turn: surface a brief message and stay responsive.
+                                    feed.AddMarkdownRich("Cancelled.");
+                                    statusMessage.SetMessage("Cancelled", animated: false);
                                 }
                                 catch (Exception ex)
                                 {
@@ -1280,6 +1298,8 @@ class Program
                                 {
                                     isProcessingMessage = false;
                                     prompt.SetShowCaret(true); // Show cursor again when done
+                                    turnCts = null;
+                                    cts.Dispose();
                                 }
                             });
                         }
