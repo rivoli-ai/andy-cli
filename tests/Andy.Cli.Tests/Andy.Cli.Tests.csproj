@@ -51,6 +51,8 @@
     <Compile Include="Widgets/TokenCounterTests.cs" />
     <!-- KeyHintsBar tests -->
     <Compile Include="Widgets/KeyHintsBarTests.cs" />
+    <!-- PromptLine soft-wrapping + cursor navigation tests -->
+    <Compile Include="Widgets/PromptLineWrappingTests.cs" />
     <!-- FeedView reflow signal tests (margin residue fix) -->
     <Compile Include="Widgets/FeedViewReflowSignalTests.cs" />
     <!-- FeedView scroll-offset clamp tests (PageUp/PageDown/wheel dead-zone fix) -->

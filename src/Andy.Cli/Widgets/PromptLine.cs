@@ -22,6 +22,10 @@ namespace Andy.Cli.Widgets
         private bool _showBorder = true;
         private bool _useTerminalCursor = true;
         private int _lastX, _lastY, _lastInnerW, _lastStart;
+        // Wrap width (in columns) used for soft-wrapping the input across visual rows.
+        // Set by the host before measuring/rendering so cursor math and height match the
+        // actual render width. A non-positive value disables wrapping.
+        private int _wrapWidth;
         private DateTime _lastKeyTime = DateTime.MinValue;
         private const int PasteDetectionThresholdMs = 30; // Keys within 30ms are considered a paste
         private bool _inPasteMode = false;
@@ -37,6 +41,13 @@ namespace Andy.Cli.Widgets
         public void SetFocused(bool focused) { _focused = focused; }
         /// <summary>Enable using the terminal cursor for the caret (thin bar) instead of drawing a '|' glyph.</summary>
         public void UseTerminalCursor(bool use) { _useTerminalCursor = use; }
+        /// <summary>
+        /// Set the available inner width (in columns) used to soft-wrap the input text.
+        /// This must match the width the text is rendered at so that cursor positioning,
+        /// vertical navigation and height measurement all agree. A non-positive value
+        /// disables wrapping (single logical-line-per-row behavior).
+        /// </summary>
+        public void SetWrapWidth(int innerWidth) { _wrapWidth = innerWidth; }
         /// <summary>Current prompt text.</summary>
         public string Text => _text;
         /// <summary>Set the prompt text and move cursor to end.</summary>
@@ -324,31 +335,20 @@ namespace Andy.Cli.Widgets
 
         private void MoveCursorVertically(int direction)
         {
-            // direction: -1 for up, +1 for down
+            // direction: -1 for up, +1 for down. Operates on VISUAL rows so that moving up/down
+            // walks across soft-wrapped rows, not just explicit newlines.
             if (string.IsNullOrEmpty(_text)) return;
 
-            // Find current line and column
+            var rows = CurrentVisualRows();
             var (currentRow, currentCol) = GetCaretRowCol();
-            var lines = _text.Split('\n');
 
             int targetRow = currentRow + direction;
+            if (targetRow < 0 || targetRow >= rows.Count) return;
 
-            // Boundary check
-            if (targetRow < 0 || targetRow >= lines.Length) return;
-
-            // Calculate new cursor position
-            // Move to the start of the target line
-            int newCursor = 0;
-            for (int i = 0; i < targetRow; i++)
-            {
-                newCursor += lines[i].Length + 1; // +1 for the newline character
-            }
-
-            // Try to maintain the same column position, or go to end of line if shorter
-            var targetLine = lines[targetRow];
-            newCursor += Math.Min(currentCol, targetLine.Length);
-
-            _cursor = Math.Clamp(newCursor, 0, _text.Length);
+            var target = rows[targetRow];
+            // Try to keep the same column, clamped to the target row's content length.
+            int newCursor = target.Start + Math.Min(currentCol, target.Length);
+            _cursor = Math.Clamp(newCursor, 0, Normalize(_text).Length);
         }
 
         /// <summary>Render the prompt within the provided rectangle.</summary>
@@ -359,30 +359,33 @@ namespace Andy.Cli.Widgets
             const int promptPrefixWidth = 3; // " > " = 3 characters
             int innerW = Math.Max(0, w - 2 - promptPrefixWidth); // Account for borders + prompt prefix
             _lastX = x; _lastY = y; _lastInnerW = innerW;
+            // Wrap at the actual render width so measurement and cursor math stay consistent.
+            _wrapWidth = innerW;
             b.PushClip(new DL.ClipPush(x, y, w, h));
             // background and optional border
             b.DrawRect(new DL.Rect(x, y, w, h, theme.PromptBackground));
             if (_showBorder) b.DrawBorder(new DL.Border(x, y, w, h, "single", theme.Border));
-            // Lines and caret placement (account for borders taking 2 rows)
-            var lines = _text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
-            int total = lines.Length;
+            // Visual rows after soft-wrapping; caret placement uses the same rows.
+            string norm = Normalize(_text);
+            var rows = ComputeVisualRows(norm, innerW);
+            int total = rows.Count;
             int maxContentLines = _showBorder ? Math.Max(1, h - 2) : h;
             int visible = Math.Min(maxContentLines, total);
             int startLine = Math.Max(0, total - visible);
-            _lastStart = startLine; // reuse as start line for cursor calc
+            _lastStart = startLine; // reuse as start row for cursor calc
             int textStartY = _showBorder ? y + 1 : y; // Start after top border
             int textStartX = x + 1 + promptPrefixWidth; // Start after border + prompt prefix
             for (int i = 0; i < visible; i++)
             {
-                // Draw prompt prefix " > " on first visible line
+                // Draw prompt prefix " > " on first visible row
                 if (i == 0)
                 {
                     b.DrawText(new DL.TextRun(x + 1, textStartY + i, " ", theme.Primary, theme.PromptBackground, DL.CellAttrFlags.None));
                     b.DrawText(new DL.TextRun(x + 2, textStartY + i, ">", theme.Accent, theme.PromptBackground, DL.CellAttrFlags.Bold));
                     b.DrawText(new DL.TextRun(x + 3, textStartY + i, " ", theme.Primary, theme.PromptBackground, DL.CellAttrFlags.None));
                 }
-                string line = lines[startLine + i];
-                string snippet = line.Length > innerW ? line.Substring(0, innerW) : line;
+                var row = rows[startLine + i];
+                string snippet = norm.Substring(row.Start, row.Length);
                 b.DrawText(new DL.TextRun(textStartX, textStartY + i, snippet, theme.Primary, theme.PromptBackground, DL.CellAttrFlags.None));
             }
             // ghost suggestion only on last visible row
@@ -392,11 +395,12 @@ namespace Andy.Cli.Widgets
                 if (!string.IsNullOrEmpty(sug))
                 {
                     int lastRow = textStartY + visible - 1;
-                    string lastLine = lines.Length > 0 ? lines[^1] : string.Empty;
-                    int room = Math.Max(0, innerW - Math.Min(innerW, lastLine.Length));
+                    var lastVisual = rows[startLine + visible - 1];
+                    int lastLen = lastVisual.Length;
+                    int room = Math.Max(0, innerW - Math.Min(innerW, lastLen));
                     string ghost = sug!;
                     if (ghost.Length > room) ghost = ghost.Substring(0, room);
-                    b.DrawText(new DL.TextRun(textStartX + Math.Min(innerW, lastLine.Length), lastRow, ghost, theme.Ghost, theme.PromptBackground, DL.CellAttrFlags.None));
+                    b.DrawText(new DL.TextRun(textStartX + Math.Min(innerW, lastLen), lastRow, ghost, theme.Ghost, theme.PromptBackground, DL.CellAttrFlags.None));
                 }
             }
             // caret glyph if not using terminal cursor
@@ -429,8 +433,8 @@ namespace Andy.Cli.Widgets
             b.Pop();
         }
 
-        /// <summary>Return how many visual lines are present (splitting on newlines).</summary>
-        public int GetLineCount() => _text.Length == 0 ? 1 : _text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n').Length;
+        /// <summary>Return how many visual rows are present (after soft-wrapping at the configured width).</summary>
+        public int GetLineCount() => _text.Length == 0 ? 1 : CurrentVisualRows().Count;
 
         /// <summary>Get the desired height for the prompt area based on content (3-9 lines: 1 top border + 1-7 content + 1 bottom border).</summary>
         public int GetDesiredHeight()
@@ -440,16 +444,122 @@ namespace Andy.Cli.Widgets
             return clampedContent + 2; // +2 for top and bottom borders
         }
 
+        /// <summary>
+        /// A single visual (possibly soft-wrapped) row. <see cref="Start"/> is the index into the
+        /// normalized text where the row begins; <see cref="Length"/> is the number of text
+        /// characters shown on the row (excluding any trailing newline). <see cref="EndsWithNewline"/>
+        /// is true when the row is terminated by an explicit newline rather than a soft wrap.
+        /// </summary>
+        private readonly struct VisualRow
+        {
+            public VisualRow(int start, int length, bool endsWithNewline)
+            {
+                Start = start;
+                Length = length;
+                EndsWithNewline = endsWithNewline;
+            }
+            public int Start { get; }
+            public int Length { get; }
+            public bool EndsWithNewline { get; }
+        }
+
+        /// <summary>Normalize CRLF/CR to LF for consistent wrapping and cursor math.</summary>
+        private static string Normalize(string text) => text.Replace("\r\n", "\n").Replace('\r', '\n');
+
+        /// <summary>
+        /// Compute the visual rows for the given normalized text at a wrap width. Each logical line
+        /// (split on '\n') is broken into chunks of at most <paramref name="wrapWidth"/> columns.
+        /// A wrap width of zero or less disables wrapping (one visual row per logical line).
+        /// Empty logical lines still produce a single (empty) visual row.
+        /// </summary>
+        private static List<VisualRow> ComputeVisualRows(string text, int wrapWidth)
+        {
+            var rows = new List<VisualRow>();
+            int n = text.Length;
+            int lineStart = 0;
+            while (true)
+            {
+                // Find end of this logical line (exclusive) and whether it ends in a newline.
+                int lineEnd = lineStart;
+                while (lineEnd < n && text[lineEnd] != '\n') lineEnd++;
+                bool hasNewline = lineEnd < n; // a '\n' terminates this line
+                int lineLen = lineEnd - lineStart;
+
+                if (wrapWidth <= 0 || lineLen <= wrapWidth)
+                {
+                    rows.Add(new VisualRow(lineStart, lineLen, hasNewline));
+                }
+                else
+                {
+                    int pos = lineStart;
+                    while (pos < lineEnd)
+                    {
+                        int chunk = Math.Min(wrapWidth, lineEnd - pos);
+                        bool isLastChunk = pos + chunk >= lineEnd;
+                        rows.Add(new VisualRow(pos, chunk, isLastChunk && hasNewline));
+                        pos += chunk;
+                    }
+                }
+
+                if (!hasNewline)
+                {
+                    break;
+                }
+                lineStart = lineEnd + 1; // skip the '\n'
+                // A trailing newline at end of text yields a final empty row.
+                if (lineStart > n) break;
+                if (lineStart == n)
+                {
+                    rows.Add(new VisualRow(n, 0, false));
+                    break;
+                }
+            }
+            if (rows.Count == 0) rows.Add(new VisualRow(0, 0, false));
+            return rows;
+        }
+
+        /// <summary>Visual rows for the current text using the configured wrap width.</summary>
+        private List<VisualRow> CurrentVisualRows() => ComputeVisualRows(Normalize(_text), _wrapWidth);
+
+        /// <summary>
+        /// Map the current cursor index to a (row, col) coordinate in visual space.
+        /// A cursor that lands exactly on a soft-wrap boundary is reported at column 0 of the
+        /// following row so the caret remains visible instead of sitting in the clipped column.
+        /// </summary>
         private (int Row, int Col) GetCaretRowCol()
         {
-            // Count newlines before cursor
-            int row = 0, col = 0;
-            for (int i = 0; i < _cursor && i < _text.Length; i++)
+            var rows = CurrentVisualRows();
+            int cursor = Math.Clamp(_cursor, 0, Normalize(_text).Length);
+            for (int r = 0; r < rows.Count; r++)
             {
-                if (_text[i] == '\n') { row++; col = 0; }
-                else col++;
+                var row = rows[r];
+                int rowEnd = row.Start + row.Length; // index just past the last visible char
+                // Cursor strictly inside the row, or at its start.
+                if (cursor >= row.Start && cursor < rowEnd)
+                {
+                    return (r, cursor - row.Start);
+                }
+                if (cursor == rowEnd)
+                {
+                    // At the end of this row's content.
+                    if (row.EndsWithNewline)
+                    {
+                        // The newline is consumed by this row; caret sits past the text on this row.
+                        return (r, row.Length);
+                    }
+                    bool isLastRow = r == rows.Count - 1;
+                    if (isLastRow)
+                    {
+                        // End of all text.
+                        return (r, row.Length);
+                    }
+                    // Soft-wrap boundary: prefer column 0 of the next row.
+                    return (r + 1, 0);
+                }
             }
-            return (row, col);
+            // Fallback: end of last row.
+            int last = rows.Count - 1;
+            return (last, rows[last].Length);
         }
     }
 }

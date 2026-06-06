@@ -1444,6 +1444,13 @@ class Program
                     inlineCommandHelp.UpdateFilter(prompt.Text);
                     int helpH = inlineCommandHelp.GetHeight();
 
+                    // Keep the prompt's wrap width in sync with its render width so soft-wrapping,
+                    // height measurement and cursor positioning all agree. Render width below is
+                    // (viewport.Width - 4); inner text width subtracts the 2 borders and the 3-char
+                    // " > " prefix.
+                    int promptRenderW = Math.Max(1, viewport.Width - 4);
+                    prompt.SetWrapWidth(Math.Max(0, promptRenderW - 2 - 3));
+
                     int promptH = Math.Min(prompt.GetDesiredHeight(), Math.Max(3, viewport.Height / 2));
 
                     // Position prompt and help from the bottom up (no gaps)
