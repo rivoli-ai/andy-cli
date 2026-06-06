@@ -472,6 +472,15 @@ public class SimpleAssistantService : IDisposable
 
             return result.Response ?? string.Empty;
         }
+        catch (OperationCanceledException)
+        {
+            // The turn was cancelled (e.g. user pressed ESC). Clear transient UI and
+            // rethrow so the caller can surface a "Cancelled." message instead of
+            // treating the cancellation as a failure.
+            _feed.ClearProcessingIndicator();
+            _logger?.LogInformation("Message processing cancelled by user");
+            throw;
+        }
         catch (Exception ex)
         {
             // Clear the processing indicator if an error occurred
