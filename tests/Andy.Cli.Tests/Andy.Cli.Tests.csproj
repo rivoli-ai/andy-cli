@@ -62,12 +62,14 @@
     <!-- Parallel tool execution tests -->
     <Compile Include="Services/ParallelToolExecutionTests.cs" />
     <Compile Include="Services/CliPermissionPromptTests.cs" />
+    <Compile Include="Services/CliPermissionSessionBroadeningTests.cs" />
     <!-- ACP integration tests -->
     <Compile Include="ACP/AndyAgentProviderTests.cs" />
     <!-- Multi-turn conversation context tests -->
     <Compile Include="Integration/MultiTurnToolCallContextTests.cs" />
     <!-- Bash tool (execute_command) integration tests -->
     <Compile Include="Integration/ExecuteCommandToolIntegrationTests.cs" />
+    <Compile Include="Integration/PermissionSessionBroadeningIntegrationTests.cs" />
     <!-- list_directory tool integration tests -->
     <Compile Include="Integration/ListDirectoryIntegrationTests.cs" />
     <!-- AQ1 headless config schema tests (rivoli-ai/andy-cli#46) -->
