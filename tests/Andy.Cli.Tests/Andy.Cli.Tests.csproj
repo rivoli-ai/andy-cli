@@ -57,6 +57,8 @@
     <Compile Include="Widgets/FeedViewReflowSignalTests.cs" />
     <!-- FeedView scroll-offset clamp tests (PageUp/PageDown/wheel dead-zone fix) -->
     <Compile Include="Widgets/FeedViewScrollClampTests.cs" />
+    <!-- Command output width tests (full-width command output, no narrow cap) -->
+    <Compile Include="Widgets/CommandOutputWidthTests.cs" />
     <!-- Raw terminal input decoder tests (mouse wheel + keyboard) -->
     <Compile Include="Input/TerminalInputParserTests.cs" />
     <!-- Code indexing tests -->
