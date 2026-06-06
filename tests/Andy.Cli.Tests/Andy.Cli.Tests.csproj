@@ -53,10 +53,14 @@
     <Compile Include="Widgets/KeyHintsBarTests.cs" />
     <!-- PromptLine color/style tests -->
     <Compile Include="Widgets/PromptLineColorTests.cs" />
+    <!-- PromptLine soft-wrapping + cursor navigation tests -->
+    <Compile Include="Widgets/PromptLineWrappingTests.cs" />
     <!-- FeedView reflow signal tests (margin residue fix) -->
     <Compile Include="Widgets/FeedViewReflowSignalTests.cs" />
     <!-- FeedView scroll-offset clamp tests (PageUp/PageDown/wheel dead-zone fix) -->
     <Compile Include="Widgets/FeedViewScrollClampTests.cs" />
+    <!-- Command output width tests (full-width command output, no narrow cap) -->
+    <Compile Include="Widgets/CommandOutputWidthTests.cs" />
     <!-- Raw terminal input decoder tests (mouse wheel + keyboard) -->
     <Compile Include="Input/TerminalInputParserTests.cs" />
     <!-- Code indexing tests -->
@@ -64,12 +68,14 @@
     <!-- Parallel tool execution tests -->
     <Compile Include="Services/ParallelToolExecutionTests.cs" />
     <Compile Include="Services/CliPermissionPromptTests.cs" />
+    <Compile Include="Services/CliPermissionSessionBroadeningTests.cs" />
     <!-- ACP integration tests -->
     <Compile Include="ACP/AndyAgentProviderTests.cs" />
     <!-- Multi-turn conversation context tests -->
     <Compile Include="Integration/MultiTurnToolCallContextTests.cs" />
     <!-- Bash tool (execute_command) integration tests -->
     <Compile Include="Integration/ExecuteCommandToolIntegrationTests.cs" />
+    <Compile Include="Integration/PermissionSessionBroadeningIntegrationTests.cs" />
     <!-- list_directory tool integration tests -->
     <Compile Include="Integration/ListDirectoryIntegrationTests.cs" />
     <!-- AQ1 headless config schema tests (rivoli-ai/andy-cli#46) -->
