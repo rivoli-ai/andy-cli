@@ -69,6 +69,12 @@ public class SystemPromptBuilder
         _prompt.AppendLine("- Run independent operations in parallel when possible");
         _prompt.AppendLine("- Always use tools when they can help fulfill the user's request rather than explaining what you would do");
         _prompt.AppendLine();
+        _prompt.AppendLine("**Running shell commands (execute_command):**");
+        _prompt.AppendLine("- The command already runs in the working directory shown in the Environment Context.");
+        _prompt.AppendLine("- Do NOT prepend a 'cd <dir> &&' preamble to the command. Pass the bare command only (for example 'gh pr list', not 'cd /path && gh pr list').");
+        _prompt.AppendLine("- To run a command in a DIFFERENT directory, set the tool's 'working_directory' parameter instead of using 'cd'.");
+        _prompt.AppendLine("- Keeping the command clean ensures the approval prompt and the executed command show exactly what will run, with no hidden directory change.");
+        _prompt.AppendLine();
 
         return this;
     }
