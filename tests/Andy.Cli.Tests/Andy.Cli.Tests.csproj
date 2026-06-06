@@ -34,6 +34,7 @@
     <Compile Include="TestHelpers/TestCompatibilityShims.cs" />
     <Compile Include="VersionInfoTests.cs" />
     <Compile Include="Commands/ModelCommandTests.cs" />
+    <Compile Include="Themes/ThemeStateCollection.cs" />
     <Compile Include="Themes/ThemeSwitchingTests.cs" />
     <Compile Include="Services/ProviderDetectionServiceTests.cs" />
     <Compile Include="Services/SystemPromptBuilderTests.cs" />
@@ -71,6 +72,7 @@
     <Compile Include="Services/ParallelToolExecutionTests.cs" />
     <Compile Include="Services/CliPermissionPromptTests.cs" />
     <Compile Include="Services/CliPermissionSessionBroadeningTests.cs" />
+    <Compile Include="Services/ToolAdapterCommandGuardTests.cs" />
     <!-- ACP integration tests -->
     <Compile Include="ACP/AndyAgentProviderTests.cs" />
     <!-- Multi-turn conversation context tests -->

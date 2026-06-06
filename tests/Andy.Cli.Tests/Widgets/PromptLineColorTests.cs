@@ -12,6 +12,7 @@ namespace Andy.Cli.Tests.Widgets;
 /// dedicated, high-contrast <see cref="Theme.PromptText"/> color rather than the
 /// lower-contrast accent color, and that the choice stays readable across themes.
 /// </summary>
+[Collection(Andy.Cli.Tests.Themes.ThemeStateCollection.Name)]
 public class PromptLineColorTests
 {
     private static DL.TextRun? FindRun(DL.DisplayList dl, string content)
