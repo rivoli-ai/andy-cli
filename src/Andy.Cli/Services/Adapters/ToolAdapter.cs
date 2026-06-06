@@ -134,6 +134,126 @@ public class ToolAdapter : Andy.Model.Tooling.ITool
         };
     }
 
+    /// <summary>
+    /// Identifies the shell execution tool regardless of which alias the model used.
+    /// </summary>
+    private static bool IsExecuteCommandTool(string toolId, string callName)
+    {
+        return string.Equals(toolId, "execute_command", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(callName, "execute_command", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Returns a human-readable reason if the supplied execute_command parameters describe a command that is
+    /// missing or degenerate (no runnable executable token), otherwise null. A "degenerate" command is one
+    /// that, after trimming, is empty or whose first non-assignment token is not a usable executable name
+    /// (for example a bare number such as "1", a flag, or a pure shell metacharacter). Such inputs are
+    /// symptoms of a mangled tool call and must never reach the permission prompt or the shell.
+    /// </summary>
+    internal static string? GetInvalidCommandReason(IReadOnlyDictionary<string, object?> parameters)
+    {
+        if (!parameters.TryGetValue("command", out var commandObj) || commandObj == null)
+        {
+            return "execute_command was called without a 'command' argument. Provide the full shell command to run.";
+        }
+
+        var command = commandObj.ToString() ?? string.Empty;
+        var trimmed = command.Trim();
+        if (trimmed.Length == 0)
+        {
+            return "execute_command was called with an empty 'command'. Provide the full shell command to run.";
+        }
+
+        if (!HasRunnableExecutable(trimmed))
+        {
+            return $"execute_command received a malformed command ('{command}') with no runnable executable. "
+                 + "This usually means the command was garbled (for example a numbered-list prefix). "
+                 + "Re-issue the call with the complete command, such as 'dotnet test'.";
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Determines whether a command string begins with something that could plausibly be an executable: a
+    /// bare word that is not a number, not a flag, and not made of shell metacharacters. Leading
+    /// <c>VAR=value</c> environment assignments are skipped first.
+    /// </summary>
+    private static bool HasRunnableExecutable(string command)
+    {
+        var tokens = command.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        int i = 0;
+
+        // Skip leading environment assignments (FOO=bar) that precede the executable.
+        while (i < tokens.Length && IsEnvAssignment(tokens[i]))
+        {
+            i++;
+        }
+
+        if (i >= tokens.Length)
+        {
+            return false;
+        }
+
+        var token = tokens[i];
+
+        // A flag/option cannot be the executable.
+        if (token.StartsWith("-", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        // A purely numeric token (e.g. "1" from a markdown list) is not a command.
+        if (IsAllDigits(token))
+        {
+            return false;
+        }
+
+        // Must contain at least one character usable in an executable name.
+        foreach (var c in token)
+        {
+            if (char.IsLetterOrDigit(c) || c == '/' || c == '\\' || c == '.' || c == '_' || c == '-')
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsEnvAssignment(string token)
+    {
+        int eq = token.IndexOf('=');
+        if (eq <= 0)
+        {
+            return false;
+        }
+
+        for (int j = 0; j < eq; j++)
+        {
+            var c = token[j];
+            if (!char.IsLetterOrDigit(c) && c != '_')
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsAllDigits(string token)
+    {
+        foreach (var c in token)
+        {
+            if (!char.IsDigit(c))
+            {
+                return false;
+            }
+        }
+
+        return token.Length > 0;
+    }
+
     public async Task<Andy.Model.Model.ToolResult> ExecuteAsync(Andy.Model.Model.ToolCall call, CancellationToken ct = default)
     {
         try
@@ -148,6 +268,25 @@ public class ToolAdapter : Andy.Model.Tooling.ITool
             foreach (var kvp in rawParameters)
             {
                 parameters[kvp.Key] = ConvertJsonElement(kvp.Value);
+            }
+
+            // Reject degenerate shell invocations BEFORE prompting the user or executing anything.
+            // The upstream LLM/function-call parser can occasionally emit a mangled execute_command whose
+            // "command" argument is empty or a bare token with no executable (for example the literal "1"
+            // taken from a markdown numbered list such as "1. dotnet build"). Passing that straight through
+            // would (a) show a nonsensical permission prompt for the command "1" and (b) run garbage in the
+            // shell, where the OS can react in surprising ways. Fail fast with a clear message instead.
+            if (IsExecuteCommandTool(_toolId, call.Name))
+            {
+                var invalidReason = GetInvalidCommandReason(parameters);
+                if (invalidReason != null)
+                {
+                    _logger?.LogWarning("[TOOL_ADAPTER] Rejecting malformed execute_command call: {Reason}", invalidReason);
+                    return Andy.Model.Model.ToolResult.FromObject(
+                        call.Id, call.Name,
+                        new { error = invalidReason },
+                        isError: true);
+                }
             }
 
             // Log what we're about to do
@@ -287,7 +426,7 @@ public class ToolAdapter : Andy.Model.Tooling.ITool
                 // Try to use Data if available, otherwise use Message
                 object? resultData = result.Data;
 
-                 if (resultData == null && !string.IsNullOrEmpty(result.Message))
+                if (resultData == null && !string.IsNullOrEmpty(result.Message))
                 {
                     resultData = new { message = result.Message };
                 }

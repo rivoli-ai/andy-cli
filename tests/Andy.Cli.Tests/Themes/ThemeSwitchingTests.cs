@@ -9,6 +9,7 @@ using Xunit;
 
 namespace Andy.Cli.Tests.Themes;
 
+[Collection(ThemeStateCollection.Name)]
 public class ThemeSwitchingTests
 {
     // ----- Theme lookup by name -----
