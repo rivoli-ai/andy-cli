@@ -21,6 +21,30 @@ namespace Andy.Cli.Widgets
         private int _animRemaining; // lines to animate in
         private int _animSpeed = 2; // lines per frame
 
+        // Auto-scroll (bottom-follow) state.
+        // The feed auto-scrolls to the bottom when new content arrives, but only
+        // while the user is "pinned to bottom" (at or near the bottom) or has been
+        // idle for a while after scrolling. When the user scrolls up to read
+        // history, auto-scroll pauses and appended content does not yank the view.
+
+        /// <summary>How close (in lines from the bottom) still counts as "pinned to bottom".
+        /// Scrolling within this band keeps auto-scroll enabled.</summary>
+        public const int PinnedToBottomThresholdLines = 2;
+
+        /// <summary>How long the user must be idle after scrolling before auto-scroll resumes.</summary>
+        public static readonly TimeSpan AutoScrollIdleResumeThreshold = TimeSpan.FromSeconds(10);
+
+        // Injectable clock so idle-timer behavior is testable without the wall clock.
+        private Func<DateTime> _clock = () => DateTime.UtcNow;
+        private DateTime _lastScrollActivityUtc = DateTime.MinValue;
+
+        /// <summary>True when auto-scroll is currently enabled (the view follows new content to the bottom).
+        /// This is the case while the user is pinned at/near the bottom.</summary>
+        public bool IsAutoScrollEnabled => _scrollOffset <= PinnedToBottomThresholdLines;
+
+        /// <summary>Replace the time source used for the idle auto-scroll timer (testing hook).</summary>
+        internal void SetClockForTesting(Func<DateTime> clock) => _clock = clock ?? (() => DateTime.UtcNow);
+
         /// <summary>When true and scrolled to bottom, keep content pinned to bottom.</summary>
         public bool FollowTail { get => _followTail; set => _followTail = value; }
         /// <summary>Set focus state for the feed to affect rendering.</summary>
@@ -35,9 +59,46 @@ namespace Andy.Cli.Widgets
                 lock (_itemsLock)
                 {
                     _items.Add(item);
+                    OnContentAppended();
                 }
             }
         }
+
+        /// <summary>
+        /// Decide how appended content affects the scroll position.
+        /// Must be called while holding <see cref="_itemsLock"/>.
+        ///  - If auto-scroll is enabled (pinned to bottom, or idle long enough after
+        ///    scrolling), snap to the bottom so the new content is visible.
+        ///  - Otherwise the user is reading history, so hold their view steady by
+        ///    growing the offset-from-bottom as content is appended below.
+        /// </summary>
+        private void OnContentAppended()
+        {
+            bool idleResume = _scrollOffset > PinnedToBottomThresholdLines
+                && _lastScrollActivityUtc != DateTime.MinValue
+                && (_clock() - _lastScrollActivityUtc) >= AutoScrollIdleResumeThreshold;
+
+            if (IsAutoScrollEnabled || idleResume)
+            {
+                // Resume / stay pinned to the bottom.
+                _scrollOffset = 0;
+                _followTail = true;
+                _lastScrollActivityUtc = DateTime.MinValue;
+            }
+            else
+            {
+                // User is scrolled up reading; keep their anchor fixed by growing
+                // the offset by however many lines the new item adds. The actual
+                // line delta is reconciled against the measured total during Render
+                // (see _autoScrollHoldAnchor), so here we only mark that a hold is
+                // pending. Render clamps it to valid bounds.
+                _autoScrollHoldAnchor = true;
+            }
+        }
+
+        // When set, the next Render preserves the user's view across appended
+        // content by increasing _scrollOffset by the number of lines added.
+        private bool _autoScrollHoldAnchor;
         /// <summary>Convenience: append markdown item.</summary>
         public void AddMarkdown(string md) => AddItem(new MarkdownItem(md));
         /// <summary>Convenience: append markdown using Andy.Tui.Widgets.MarkdownRenderer to better handle inline formatting. Detects and renders markdown tables separately.</summary>
@@ -386,6 +447,8 @@ namespace Andy.Cli.Widgets
             _prevTotalLines = 0;
             _animRemaining = 0;
             _totalLinesCache = 0;
+            _autoScrollHoldAnchor = false;
+            _lastScrollActivityUtc = DateTime.MinValue;
         }
 
         /// <summary>Scroll the feed by delta lines (positive = up). Returns current offset.</summary>
@@ -406,6 +469,14 @@ namespace Andy.Cli.Widgets
             int maxOffset = Math.Max(0, total - _lastViewportHeight);
             _scrollOffset = Math.Clamp(newOffset, 0, maxOffset);
             _followTail = _scrollOffset == 0;
+
+            // Record the moment of this scroll so the idle timer can later decide
+            // whether auto-scroll should resume. A pending hold is no longer needed
+            // because the user explicitly moved the view.
+            _autoScrollHoldAnchor = false;
+            _lastScrollActivityUtc = _scrollOffset <= PinnedToBottomThresholdLines
+                ? DateTime.MinValue // back at/near the bottom: auto-scroll is active again
+                : _clock();
             return _scrollOffset;
         }
 
@@ -455,6 +526,19 @@ namespace Andy.Cli.Widgets
             var lineCounts = new int[itemsSnapshot.Length];
             int total = 0;
             for (int i = 0; i < itemsSnapshot.Length; i++) { int lc = itemsSnapshot[i].MeasureLineCount(w - 2); lineCounts[i] = lc; total += lc; }
+
+            // If the user is reading history and content was appended below the
+            // viewport, hold their view steady by growing the offset-from-bottom by
+            // the number of lines added. This keeps the same content under their
+            // eyes instead of letting it scroll away.
+            if (_autoScrollHoldAnchor && total > _prevTotalLines)
+            {
+                int added = total - _prevTotalLines;
+                int maxOffset = Math.Max(0, total - h);
+                _scrollOffset = Math.Clamp(_scrollOffset + added, 0, maxOffset);
+                _followTail = _scrollOffset == 0;
+            }
+            _autoScrollHoldAnchor = false;
 
             // Update animation on growth
             if (_followTail && _scrollOffset == 0 && total > _prevTotalLines)
