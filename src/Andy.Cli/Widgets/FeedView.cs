@@ -1233,8 +1233,9 @@ namespace Andy.Cli.Widgets
         /// <inheritdoc />
         public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
-            var bg = new DL.Rgb24(20, 20, 30);
-            var fg = new DL.Rgb24(200, 200, 220);
+            var theme = Themes.Theme.Current;
+            var bg = theme.CodeBlockBackground;
+            var fg = theme.Text;
             var lineNumColor = new DL.Rgb24(120, 140, 160); // Subtle blue-gray for line numbers
             var lineNumSeparatorColor = new DL.Rgb24(80, 90, 100); // Darker separator
 

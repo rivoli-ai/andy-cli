@@ -38,15 +38,16 @@ namespace Andy.Cli.Widgets
         public void Render(in L.Rect rect, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
             int x = (int)rect.X, y = (int)rect.Y, w = (int)rect.Width, h = (int)rect.Height;
+            var bg = Themes.Theme.Current.Background ?? _bg;
             b.PushClip(new DL.ClipPush(x, y, w, h));
-            b.DrawRect(new DL.Rect(x, y, w, h, _bg));
+            b.DrawRect(new DL.Rect(x, y, w, h, bg));
             int start = Math.Max(0, _lines.Count - h - _scroll);
             for (int i = 0; i < h; i++)
             {
                 int idx = start + i; if (idx >= _lines.Count) break;
                 string line = _lines[idx];
                 if (line.Length > w) line = line.Substring(0, w);
-                b.DrawText(new DL.TextRun(x, y + i, line, _fg, _bg, DL.CellAttrFlags.None));
+                b.DrawText(new DL.TextRun(x, y + i, line, _fg, bg, DL.CellAttrFlags.None));
             }
             b.Pop();
         }

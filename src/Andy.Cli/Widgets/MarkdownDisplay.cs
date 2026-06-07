@@ -65,8 +65,9 @@ namespace Andy.Cli.Widgets
         public void Render(in L.Rect rect, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
             int x = (int)rect.X, y = (int)rect.Y, w = (int)rect.Width, h = (int)rect.Height;
+            var bg = Themes.Theme.Current.Background ?? _bg;
             b.PushClip(new DL.ClipPush(x, y, w, h));
-            b.DrawRect(new DL.Rect(x, y, w, h, _bg));
+            b.DrawRect(new DL.Rect(x, y, w, h, bg));
             var lines = _linesCache;
             int total = lines.Length;
             int visible = Math.Min(h, total);
@@ -89,14 +90,14 @@ namespace Andy.Cli.Widgets
                 if (line.StartsWith("```")) { inCode = !inCode; continue; }
                 if (inCode)
                 {
-                    DrawLine(line, new DL.Rgb24(180, 180, 180), _bg, x + 1, cy++, w - 2, b);
+                    DrawLine(line, new DL.Rgb24(180, 180, 180), bg, x + 1, cy++, w - 2, b);
                     continue;
                 }
                 if (line.StartsWith("# "))
-                { DrawLine(line.Substring(2), _h, _bg, x + 1, cy++, w - 2, b, DL.CellAttrFlags.Bold); continue; }
+                { DrawLine(line.Substring(2), _h, bg, x + 1, cy++, w - 2, b, DL.CellAttrFlags.Bold); continue; }
                 if (line.StartsWith("## "))
-                { DrawLine(line.Substring(3), _h, _bg, x + 1, cy++, w - 2, b, DL.CellAttrFlags.Bold); continue; }
-                DrawLine(line, _fg, _bg, x + 1, cy++, w - 2, b);
+                { DrawLine(line.Substring(3), _h, bg, x + 1, cy++, w - 2, b, DL.CellAttrFlags.Bold); continue; }
+                DrawLine(line, _fg, bg, x + 1, cy++, w - 2, b);
             }
             b.Pop();
         }

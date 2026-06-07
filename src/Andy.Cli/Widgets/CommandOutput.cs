@@ -32,8 +32,9 @@ namespace Andy.Cli.Widgets
         {
             int x = (int)rect.X, y = (int)rect.Y, w = (int)rect.Width, h = (int)rect.Height;
             if (w <= 0 || h <= 0) return;
+            var bg = Themes.Theme.Current.Background ?? _bg;
             b.PushClip(new DL.ClipPush(x, y, w, h));
-            b.DrawRect(new DL.Rect(x, y, w, h, _bg));
+            b.DrawRect(new DL.Rect(x, y, w, h, bg));
             int start = Math.Max(0, Math.Min(_scroll, Math.Max(0, _lines.Count - h)));
             for (int i = 0; i < h; i++)
             {
@@ -42,7 +43,7 @@ namespace Andy.Cli.Widgets
                 string line = _lines[idx];
                 int room = Math.Max(0, w - 1);
                 if (line.Length > room) line = line.Substring(0, room);
-                b.DrawText(new DL.TextRun(x, y + i, line, _fg, _bg, DL.CellAttrFlags.None));
+                b.DrawText(new DL.TextRun(x, y + i, line, _fg, bg, DL.CellAttrFlags.None));
             }
             b.Pop();
         }

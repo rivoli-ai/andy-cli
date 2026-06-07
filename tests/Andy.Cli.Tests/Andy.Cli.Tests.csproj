@@ -57,6 +57,8 @@
     <Compile Include="Widgets/PromptLineColorTests.cs" />
     <!-- Command palette execution tests -->
     <Compile Include="Widgets/CommandPaletteTests.cs" />
+    <!-- Themed background tests (status/output widgets must follow the theme) -->
+    <Compile Include="Widgets/ThemedBackgroundTests.cs" />
     <!-- PromptLine soft-wrapping + cursor navigation tests -->
     <Compile Include="Widgets/PromptLineWrappingTests.cs" />
     <!-- FeedView reflow signal tests (margin residue fix) -->

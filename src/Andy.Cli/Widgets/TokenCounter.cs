@@ -37,6 +37,7 @@ namespace Andy.Cli.Widgets
         /// <summary>Render the token counter at the specified position.</summary>
         public void RenderAt(int x, int y, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
+            var bg = Themes.Theme.Current.Background ?? _bg;
             int totalTokens = _totalInputTokens + _totalOutputTokens;
             string text = $"Total: {FormatNumber(_totalInputTokens)}→{FormatNumber(_totalOutputTokens)} ({FormatNumber(totalTokens)})";
 
@@ -46,7 +47,7 @@ namespace Andy.Cli.Widgets
                 var color = (ch == '→' || char.IsDigit(ch) || ch == ',') ? _accent : _fg;
                 var attrs = (char.IsDigit(ch) || ch == ',') ? DL.CellAttrFlags.Bold : DL.CellAttrFlags.None;
 
-                b.DrawText(new DL.TextRun(x + i, y, ch.ToString(), color, _bg, attrs));
+                b.DrawText(new DL.TextRun(x + i, y, ch.ToString(), color, bg, attrs));
             }
         }
 
