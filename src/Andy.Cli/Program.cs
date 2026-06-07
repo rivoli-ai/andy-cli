@@ -186,11 +186,12 @@ class Program
         Console.Write("[49m");
         Console.Clear();
 
-        // Switch the terminal into raw byte mode so we can receive mouse wheel
-        // events. Returns null (and we fall back to Console.ReadKey) when input
-        // is redirected or stty is unavailable. Mouse reporting is only enabled
-        // when this succeeds, since Console.ReadKey cannot decode mouse bytes.
-        var rawInput = RawTerminalInput.TryStart(enableMouse: true);
+        // Switch the terminal into raw byte mode for keyboard decoding. Returns
+        // null (and we fall back to Console.ReadKey) when input is redirected or
+        // stty is unavailable. Mouse reporting starts OFF so the terminal's
+        // native click-drag text selection keeps working; the user can toggle
+        // mouse-wheel capture on with F3 (PageUp/PageDown scroll either way).
+        var rawInput = RawTerminalInput.TryStart(enableMouse: false);
 
         try
         {
@@ -692,6 +693,7 @@ class Program
                             "- **Ctrl+]**: Toggle scroll mode (Feed ↔ Prompt History)\n" +
                             "- **Ctrl+D**: Quit application\n" +
                             "- **F2**: Toggle HUD (performance overlay)\n" +
+                            "- **F3**: Toggle mouse capture (off = native text selection; on = mouse-wheel scroll)\n" +
                             "- **ESC**: Quit application\n" +
                             "- **Page Up/Down**: Scroll chat history\n" +
                             "- **↑/↓**: Navigate multi-line text or prompt history (when in History mode)\n" +
@@ -936,6 +938,27 @@ class Program
                     }
                     if (k.Key == ConsoleKey.F2) { hud.Enabled = !hud.Enabled; return; }
 
+                    // F3 toggles mouse capture. Mouse capture is off by default
+                    // so the terminal's native click-drag text selection works;
+                    // turning it on enables mouse-wheel scrolling of the feed at
+                    // the cost of suppressing native selection. Wheel scrolling
+                    // is also available via PageUp/PageDown regardless.
+                    if (k.Key == ConsoleKey.F3)
+                    {
+                        if (rawInput == null)
+                        {
+                            toast.Show("Mouse capture unavailable (no raw terminal)", 90);
+                        }
+                        else
+                        {
+                            bool on = rawInput.ToggleMouseReporting();
+                            toast.Show(on
+                                ? "Mouse capture ON (wheel scrolls; native text selection disabled)"
+                                : "Mouse capture OFF (native text selection enabled)", 120);
+                        }
+                        return;
+                    }
+
                     // Handle Ctrl+P / Cmd+P for command palette
                     if (k.Key == ConsoleKey.P && (k.Modifiers & ConsoleModifiers.Control) != 0)
                     {
@@ -1159,6 +1182,7 @@ class Program
                                         "- **Ctrl+]**: Toggle scroll mode (Feed ↔ Prompt History)\n" +
                                         "- **Ctrl+D**: Quit application\n" +
                                         "- **F2**: Toggle HUD (performance overlay)\n" +
+                            "- **F3**: Toggle mouse capture (off = native text selection; on = mouse-wheel scroll)\n" +
                                         "- **ESC**: Quit application\n" +
                                         "- **Page Up/Down**: Scroll chat history\n" +
                                         "- **↑/↓**: Navigate multi-line text or prompt history (when in History mode)\n" +
