@@ -31,6 +31,10 @@ namespace Andy.Cli.Widgets
         /// <summary>Render the status message at the specified position.</summary>
         public void RenderAt(int x, int y, int maxWidth, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
+            // Use the active theme's background so the status text doesn't sit on a
+            // black block under opaque themes. Transparent themes leave it null and the
+            // compositor shows the terminal background.
+            var bg = Themes.Theme.Current.Background ?? _bg;
             string displayMessage = _message;
 
             // Add animated dots for processing states
@@ -53,7 +57,7 @@ namespace Andy.Cli.Widgets
                 char ch = displayMessage[i];
                 var attrs = (ch == '.' && _isAnimated) ? DL.CellAttrFlags.Bold : DL.CellAttrFlags.None;
 
-                b.DrawText(new DL.TextRun(x + i, y, ch.ToString(), _fg, _bg, attrs));
+                b.DrawText(new DL.TextRun(x + i, y, ch.ToString(), _fg, bg, attrs));
             }
         }
 
