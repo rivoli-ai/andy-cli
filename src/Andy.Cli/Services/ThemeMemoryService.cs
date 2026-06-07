@@ -43,15 +43,23 @@ public class ThemeMemoryService
     }
 
     /// <summary>
-    /// Persist the selected theme name.
+    /// Persist the selected theme name, preserving the saved transparent-background
+    /// preference.
     /// </summary>
-    public void SaveTheme(string themeName)
+    public void SaveTheme(string themeName) => SaveTheme(themeName, LoadTransparentBackground());
+
+    /// <summary>
+    /// Persist the selected theme name together with the transparent-background
+    /// preference.
+    /// </summary>
+    public void SaveTheme(string themeName, bool transparentBackground)
     {
         try
         {
             var memory = new ThemeMemory
             {
                 Theme = themeName,
+                TransparentBackground = transparentBackground,
                 LastUsed = DateTime.UtcNow
             };
             var json = JsonSerializer.Serialize(memory, new JsonSerializerOptions
@@ -65,6 +73,12 @@ public class ThemeMemoryService
             // Silently fail if we can't save
         }
     }
+
+    /// <summary>
+    /// Persist only the transparent-background preference, keeping the saved theme name.
+    /// </summary>
+    public void SaveTransparentBackground(bool transparentBackground)
+        => SaveTheme(LoadTheme() ?? "", transparentBackground);
 
     /// <summary>
     /// Load the previously selected theme name, or null when none was saved.
@@ -87,9 +101,31 @@ public class ThemeMemoryService
         return null;
     }
 
+    /// <summary>
+    /// Load the persisted transparent-background preference (false when none saved).
+    /// </summary>
+    public bool LoadTransparentBackground()
+    {
+        try
+        {
+            if (File.Exists(_configPath))
+            {
+                var json = File.ReadAllText(_configPath);
+                var memory = JsonSerializer.Deserialize<ThemeMemory>(json);
+                return memory?.TransparentBackground ?? false;
+            }
+        }
+        catch
+        {
+            // If loading fails, behave as if nothing was saved
+        }
+        return false;
+    }
+
     private class ThemeMemory
     {
         public string Theme { get; set; } = "";
+        public bool TransparentBackground { get; set; }
         public DateTime LastUsed { get; set; }
     }
 }

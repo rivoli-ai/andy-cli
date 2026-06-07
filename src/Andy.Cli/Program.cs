@@ -162,7 +162,7 @@ class Program
         var themeMemory = new ThemeMemoryService();
         var savedThemeName = themeMemory.LoadTheme()
             ?? Environment.GetEnvironmentVariable("ANDY_THEME");
-        var savedTheme = Andy.Cli.Themes.Theme.GetByName(savedThemeName);
+        var savedTheme = Andy.Cli.Themes.Theme.Resolve(savedThemeName, themeMemory.LoadTransparentBackground());
         if (savedTheme != null)
         {
             Andy.Cli.Themes.Theme.Current = savedTheme;
@@ -241,7 +241,7 @@ class Program
             {
                 new InlineCommandHelp.CommandInfo { Name = "model", Description = "Manage AI models (list, switch, info, test)", Aliases = new[] { "m" } },
                 new InlineCommandHelp.CommandInfo { Name = "tools", Description = "Manage and list available tools", Aliases = new[] { "tool", "t" } },
-                new InlineCommandHelp.CommandInfo { Name = "theme", Description = "List and switch the UI theme", Aliases = new[] { "themes" } },
+                new InlineCommandHelp.CommandInfo { Name = "theme", Description = "List, switch, or toggle transparency of the UI theme", Aliases = new[] { "themes" } },
                 new InlineCommandHelp.CommandInfo { Name = "clear", Description = "Clear conversation history", Aliases = Array.Empty<string>() },
                 new InlineCommandHelp.CommandInfo { Name = "help", Description = "Show help information", Aliases = new[] { "?" } },
                 new InlineCommandHelp.CommandInfo { Name = "exit", Description = "Exit the application", Aliases = new[] { "quit", "bye" } }
@@ -715,7 +715,8 @@ class Program
                             "- **/model test [prompt]**: Test current model\n\n" +
                             "### Theme Commands:\n" +
                             "- **/theme**: List available themes and the current one\n" +
-                            "- **/theme <name>**: Switch the UI theme (e.g. dark, light)\n\n" +
+                            "- **/theme <name>**: Switch the UI theme (e.g. dark, dracula, nord)\n" +
+                            "- **/theme transparent on|off**: Toggle the transparent background\n\n" +
                             "### Tool Commands:\n" +
                             "- **/tools list [category]**: List available tools\n" +
                             "- **/tools info <tool_name>**: Show tool details\n" +
@@ -1181,7 +1182,8 @@ class Program
                                         "- **/model test [prompt]**: Test current model\n\n" +
                                         "### Theme Commands:\n" +
                                         "- **/theme**: List available themes and the current one\n" +
-                                        "- **/theme <name>**: Switch the UI theme (e.g. dark, light)\n\n" +
+                                        "- **/theme <name>**: Switch the UI theme (e.g. dark, dracula, nord)\n" +
+                                        "- **/theme transparent on|off**: Toggle the transparent background\n\n" +
                                         "### Tool Commands:\n" +
                                         "- **/tools list [category]**: List available tools\n" +
                                         "- **/tools info <tool_name>**: Show tool details\n" +
@@ -1352,10 +1354,17 @@ class Program
                 // Render placeholder + CLI widgets
                 var b = new DL.DisplayListBuilder();
                 b.PushClip(new DL.ClipPush(0, 0, viewport.Width, viewport.Height));
-                // No background rectangle - use transparent terminal background
+
+                var theme = Andy.Cli.Themes.Theme.Current;
+                // Opaque themes paint a full-surface background so switching themes
+                // recolors the whole screen; transparent themes leave it unpainted so
+                // the terminal background (including its transparency) shows through.
+                if (!theme.HasTransparentBackground && theme.Background is { } surfaceBg)
+                {
+                    b.DrawRect(new DL.Rect(0, 0, viewport.Width, viewport.Height, surfaceBg));
+                }
 
                 // Draw header with full-width background
-                var theme = Andy.Cli.Themes.Theme.Current;
                 b.DrawRect(new DL.Rect(0, 0, viewport.Width, 1, theme.HeaderBackground));
 
                 // Prepare header components
@@ -1600,16 +1609,18 @@ class Program
                     }
                 }
 
-                // Main surface: transparent. Drop any fill/bg a widget hardcoded so the
-                // terminal background shows through the UI (e.g. message blocks that bake
-                // in a black background).
+                // Main surface. For a transparent theme, drop any fill/bg a widget
+                // hardcoded so the terminal background shows through (e.g. message blocks
+                // that bake in a black background). For an opaque theme, keep the
+                // backgrounds so switching themes actually recolors the surface.
                 static void Append(object op, DL.DisplayListBuilder b)
                 {
+                    bool transparent = Andy.Cli.Themes.Theme.Current.HasTransparentBackground;
                     switch (op)
                     {
-                        case DL.Rect r: b.DrawRect(r with { Fill = null }); break;
+                        case DL.Rect r: b.DrawRect(transparent ? r with { Fill = null } : r); break;
                         case DL.Border br: b.DrawBorder(br); break;
-                        case DL.TextRun tr: b.DrawText(tr with { Bg = null }); break;
+                        case DL.TextRun tr: b.DrawText(transparent ? tr with { Bg = null } : tr); break;
                         case DL.ClipPush cp: b.PushClip(cp); break;
                         case DL.LayerPush lp: b.PushLayer(lp); break;
                         case DL.Pop: b.Pop(); break;
