@@ -1561,11 +1561,10 @@ namespace Andy.Cli.Widgets
 
             int row = y;
             int drawn = 0;
-            var green = new DL.Rgb24(60, 200, 120);
-            var red = new DL.Rgb24(240, 100, 100);
-            var cyan = new DL.Rgb24(120, 200, 255);
-            var dim = new DL.Rgb24(170, 170, 170);
-            var fg = _isSuccess ? green : red;
+            var theme = Themes.Theme.Current;
+            var cyan = theme.ToolName;
+            var dim = theme.TextDim;
+            var fg = _isSuccess ? theme.Success : theme.Error;
 
             // Header (tool name highlighted)
             if (drawn < maxLines && startLine <= 0)
@@ -1592,7 +1591,7 @@ namespace Andy.Cli.Widgets
                 var space = Math.Max(0, width - label.Length);
                 var body = _resultLine.Length > space ? _resultLine.Substring(0, Math.Max(0, space - 1)) + "…" : _resultLine;
                 b.DrawText(new DL.TextRun(x, row, label, dim, null, DL.CellAttrFlags.None));
-                b.DrawText(new DL.TextRun(x + label.Length, row, body, new DL.Rgb24(210, 210, 210), null, DL.CellAttrFlags.None));
+                b.DrawText(new DL.TextRun(x + label.Length, row, body, theme.ToolResult, null, DL.CellAttrFlags.None));
             }
         }
     }
