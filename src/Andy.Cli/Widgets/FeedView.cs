@@ -911,7 +911,8 @@ namespace Andy.Cli.Widgets
         /// <summary>Create a markdown item from raw markdown text.</summary>
         public MarkdownItem(string markdown)
         {
-            _lines = (markdown ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+            // Collapse blank-line runs and ensure a blank line before headings.
+            _lines = FeedMarkdown.Normalize(markdown ?? string.Empty).Split('\n');
         }
         /// <inheritdoc />
         public int MeasureLineCount(int width)
@@ -947,6 +948,48 @@ namespace Andy.Cli.Widgets
         }
     }
 
+    /// <summary>
+    /// Normalizes markdown before it is rendered into the feed: collapses any run of
+    /// blank (or whitespace-only) lines down to a single blank line, and guarantees a
+    /// single blank line before every markdown heading. Leading/trailing blanks are
+    /// trimmed. This keeps the rendered output from showing multiple consecutive blank
+    /// lines and gives headings consistent separation.
+    /// </summary>
+    public static class FeedMarkdown
+    {
+        public static string Normalize(string md)
+        {
+            if (string.IsNullOrEmpty(md)) return md ?? string.Empty;
+
+            var lines = md.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+            var outp = new List<string>(lines.Length);
+            foreach (var raw in lines)
+            {
+                if (string.IsNullOrWhiteSpace(raw))
+                {
+                    // Collapse: only keep a blank line if something precedes it and the
+                    // previous kept line is not already blank.
+                    if (outp.Count > 0 && outp[^1].Length != 0) outp.Add("");
+                    continue;
+                }
+
+                // Ensure a blank line before a heading (unless it starts the content).
+                if (IsHeading(raw) && outp.Count > 0 && outp[^1].Length != 0) outp.Add("");
+                outp.Add(raw);
+            }
+
+            while (outp.Count > 0 && outp[^1].Length == 0) outp.RemoveAt(outp.Count - 1);
+            return string.Join("\n", outp);
+        }
+
+        private static bool IsHeading(string line)
+        {
+            var t = line.TrimStart();
+            return t.StartsWith("# ") || t.StartsWith("## ") || t.StartsWith("### ")
+                || t.StartsWith("#### ") || t.StartsWith("##### ") || t.StartsWith("###### ");
+        }
+    }
+
     /// <summary>Markdown feed item that uses Andy.Tui.Widgets.MarkdownRenderer for improved inline formatting.</summary>
     public sealed class MarkdownRendererItem : IFeedItem
     {
@@ -961,6 +1004,8 @@ namespace Andy.Cli.Widgets
             _md = _originalMd;
             // Replace standalone "You" but not "You:" in user prompts
             _md = System.Text.RegularExpressions.Regex.Replace(_md, @"\bYou\b(?!:)", "Y\u200Cou");
+            // Collapse blank-line runs and ensure a blank line before headings.
+            _md = FeedMarkdown.Normalize(_md);
 
             // Note: Paragraph spacing is handled by Andy.Tui.Widgets.MarkdownRenderer
             // during rendering, so we don't need to do it here
@@ -1675,7 +1720,7 @@ namespace Andy.Cli.Widgets
             var theme = Themes.Theme.Current;
             if (theme.Background is { } mdBg)
                 renderer.SetColors(theme.Text, mdBg, theme.Accent);
-            renderer.SetText(_content.ToString());
+            renderer.SetText(FeedMarkdown.Normalize(_content.ToString()));
             renderer.Render(new L.Rect(x, y, width, maxLines), baseDl, b);
 
             // Don't show cursor at all - it's distracting and ugly

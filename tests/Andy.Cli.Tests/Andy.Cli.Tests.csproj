@@ -59,6 +59,8 @@
     <Compile Include="Widgets/CommandPaletteTests.cs" />
     <!-- Themed background tests (status/output widgets must follow the theme) -->
     <Compile Include="Widgets/ThemedBackgroundTests.cs" />
+    <!-- Feed markdown normalization (blank-line collapsing + heading spacing) -->
+    <Compile Include="Widgets/FeedMarkdownTests.cs" />
     <!-- PromptLine soft-wrapping + cursor navigation tests -->
     <Compile Include="Widgets/PromptLineWrappingTests.cs" />
     <!-- FeedView reflow signal tests (margin residue fix) -->
