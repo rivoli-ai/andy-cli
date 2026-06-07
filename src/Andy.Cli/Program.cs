@@ -162,7 +162,7 @@ class Program
         var themeMemory = new ThemeMemoryService();
         var savedThemeName = themeMemory.LoadTheme()
             ?? Environment.GetEnvironmentVariable("ANDY_THEME");
-        var savedTheme = Andy.Cli.Themes.Theme.GetByName(savedThemeName);
+        var savedTheme = Andy.Cli.Themes.Theme.Resolve(savedThemeName, themeMemory.LoadTransparentBackground());
         if (savedTheme != null)
         {
             Andy.Cli.Themes.Theme.Current = savedTheme;
@@ -241,7 +241,7 @@ class Program
             {
                 new InlineCommandHelp.CommandInfo { Name = "model", Description = "Manage AI models (list, switch, info, test)", Aliases = new[] { "m" } },
                 new InlineCommandHelp.CommandInfo { Name = "tools", Description = "Manage and list available tools", Aliases = new[] { "tool", "t" } },
-                new InlineCommandHelp.CommandInfo { Name = "theme", Description = "List and switch the UI theme", Aliases = new[] { "themes" } },
+                new InlineCommandHelp.CommandInfo { Name = "theme", Description = "List, switch, or toggle transparency of the UI theme", Aliases = new[] { "themes" } },
                 new InlineCommandHelp.CommandInfo { Name = "clear", Description = "Clear conversation history", Aliases = Array.Empty<string>() },
                 new InlineCommandHelp.CommandInfo { Name = "help", Description = "Show help information", Aliases = new[] { "?" } },
                 new InlineCommandHelp.CommandInfo { Name = "exit", Description = "Exit the application", Aliases = new[] { "quit", "bye" } }
@@ -715,7 +715,8 @@ class Program
                             "- **/model test [prompt]**: Test current model\n\n" +
                             "### Theme Commands:\n" +
                             "- **/theme**: List available themes and the current one\n" +
-                            "- **/theme <name>**: Switch the UI theme (e.g. dark, light)\n\n" +
+                            "- **/theme <name>**: Switch the UI theme (e.g. dark, dracula, nord)\n" +
+                            "- **/theme transparent on|off**: Toggle the transparent background\n\n" +
                             "### Tool Commands:\n" +
                             "- **/tools list [category]**: List available tools\n" +
                             "- **/tools info <tool_name>**: Show tool details\n" +
@@ -1181,7 +1182,8 @@ class Program
                                         "- **/model test [prompt]**: Test current model\n\n" +
                                         "### Theme Commands:\n" +
                                         "- **/theme**: List available themes and the current one\n" +
-                                        "- **/theme <name>**: Switch the UI theme (e.g. dark, light)\n\n" +
+                                        "- **/theme <name>**: Switch the UI theme (e.g. dark, dracula, nord)\n" +
+                                        "- **/theme transparent on|off**: Toggle the transparent background\n\n" +
                                         "### Tool Commands:\n" +
                                         "- **/tools list [category]**: List available tools\n" +
                                         "- **/tools info <tool_name>**: Show tool details\n" +
