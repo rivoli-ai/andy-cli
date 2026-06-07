@@ -125,6 +125,20 @@ public class ThemedBackgroundTests
     }
 
     [Fact]
+    public void ToolExecutionItem_UsesThemeToolColors()
+    {
+        var theme = new Theme { ToolName = new DL.Rgb24(1, 2, 3), ToolResult = new DL.Rgb24(4, 5, 6) };
+        var dl = Render(theme, b =>
+        {
+            var item = new ToolExecutionItem("read_file", new System.Collections.Generic.Dictionary<string, object?>(), "ok result", isSuccess: true);
+            item.RenderSlice(0, 0, 60, 0, 5, new DL.DisplayListBuilder().Build(), b);
+        });
+        var fgs = dl.Ops.OfType<DL.TextRun>().Select(t => t.Fg).ToList();
+        Assert.Contains(new DL.Rgb24(1, 2, 3), fgs.Select(f => f ?? default)); // tool header -> ToolName
+        Assert.Contains(new DL.Rgb24(4, 5, 6), fgs.Select(f => f ?? default)); // result body -> ToolResult
+    }
+
+    [Fact]
     public void ResponseSeparator_OpaqueTheme_PaintsThemeBackground()
     {
         var dl = Render(Opaque(), b =>
