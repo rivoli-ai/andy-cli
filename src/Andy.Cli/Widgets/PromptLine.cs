@@ -352,9 +352,14 @@ namespace Andy.Cli.Widgets
         }
 
         /// <summary>Render the prompt within the provided rectangle.</summary>
-        public void Render(in L.Rect rect, DL.DisplayList baseDl, DL.DisplayListBuilder b)
+        /// <param name="themeOverride">
+        /// Theme to render with; defaults to <see cref="Theme.Current"/>. Passing an
+        /// explicit theme keeps rendering deterministic (e.g. in tests) regardless of
+        /// the global active theme.
+        /// </param>
+        public void Render(in L.Rect rect, DL.DisplayList baseDl, DL.DisplayListBuilder b, Theme? themeOverride = null)
         {
-            var theme = Theme.Current;
+            var theme = themeOverride ?? Theme.Current;
             int x = (int)rect.X, y = (int)rect.Y, w = (int)rect.Width, h = (int)rect.Height;
             const int promptPrefixWidth = 3; // " > " = 3 characters
             int innerW = Math.Max(0, w - 2 - promptPrefixWidth); // Account for borders + prompt prefix

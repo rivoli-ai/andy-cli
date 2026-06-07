@@ -26,25 +26,19 @@ public class PromptLineColorTests
 
     private static DL.DisplayList RenderWith(Theme theme, string text)
     {
-        var original = Theme.Current;
-        try
-        {
-            Theme.Current = theme;
-            var prompt = new PromptLine();
-            prompt.SetText(text);
+        // Render with an explicit theme rather than mutating the global Theme.Current,
+        // so the assertion is deterministic even if another test changes the active
+        // theme concurrently.
+        var prompt = new PromptLine();
+        prompt.SetText(text);
 
-            var baseBuilder = new DL.DisplayListBuilder();
-            var baseDl = baseBuilder.Build();
-            var builder = new DL.DisplayListBuilder();
+        var baseBuilder = new DL.DisplayListBuilder();
+        var baseDl = baseBuilder.Build();
+        var builder = new DL.DisplayListBuilder();
 
-            var rect = new L.Rect(0, 0, 40, 5);
-            prompt.Render(rect, baseDl, builder);
-            return builder.Build();
-        }
-        finally
-        {
-            Theme.Current = original;
-        }
+        var rect = new L.Rect(0, 0, 40, 5);
+        prompt.Render(rect, baseDl, builder, theme);
+        return builder.Build();
     }
 
     [Fact]
