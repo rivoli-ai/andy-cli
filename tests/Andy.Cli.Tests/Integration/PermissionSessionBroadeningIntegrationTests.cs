@@ -119,12 +119,14 @@ public sealed class PermissionSessionBroadeningIntegrationTests
         var exec = new UiUpdatingToolExecutor(sp.GetRequiredService<IToolExecutor>());
 
         // 'dotnet' is neutral (not on the engine's known-safe list) so the gate asks the first time.
-        var first = await exec.ExecuteAsync("execute_command", Cmd("dotnet help"), new ToolExecutionContext());
+        // 'dotnet build --help' prints local help; it does not build and does not open a browser
+        // (unlike 'dotnet help <command>', which launches the online docs in a browser).
+        var first = await exec.ExecuteAsync("execute_command", Cmd("dotnet build --help"), new ToolExecutionContext());
         Assert.True(first.IsSuccessful, first.ErrorMessage);
         Assert.Equal(1, driver.PromptCount);
 
-        // Different args, SAME command class (dotnet help): broadened session rule covers it -> no new prompt.
-        var second = await exec.ExecuteAsync("execute_command", Cmd("dotnet help build"), new ToolExecutionContext());
+        // Different args, SAME command class (dotnet build): broadened session rule covers it -> no new prompt.
+        var second = await exec.ExecuteAsync("execute_command", Cmd("dotnet build -h"), new ToolExecutionContext());
         Assert.True(second.IsSuccessful, second.ErrorMessage);
         Assert.Equal(1, driver.PromptCount);
     }
