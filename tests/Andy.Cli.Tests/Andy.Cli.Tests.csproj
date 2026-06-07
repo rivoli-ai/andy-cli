@@ -63,6 +63,8 @@
     <Compile Include="Widgets/FeedMarkdownTests.cs" />
     <!-- Text wrapping (permission dialog, panels) -->
     <Compile Include="Widgets/TextWrapTests.cs" />
+    <!-- Code syntax highlighting (theme colors, no underline) -->
+    <Compile Include="Widgets/CodeHighlighterTests.cs" />
     <!-- PromptLine soft-wrapping + cursor navigation tests -->
     <Compile Include="Widgets/PromptLineWrappingTests.cs" />
     <!-- FeedView reflow signal tests (margin residue fix) -->

@@ -62,6 +62,16 @@ namespace Andy.Cli.Themes
         public DL.Rgb24 Heading { get; set; } = new DL.Rgb24(200, 200, 80);
         public DL.Rgb24 Code { get; set; } = new DL.Rgb24(180, 180, 180);
         public DL.Rgb24 Ghost { get; set; } = new DL.Rgb24(100, 100, 100);
+
+        // Syntax highlighting colors for code blocks and inline code. Distinct theme
+        // colors (never underlines) so keywords, types/class names, strings, comments
+        // and numbers are easy to tell apart. Defaults suit a dark background.
+        public DL.Rgb24 SyntaxKeyword { get; set; } = new DL.Rgb24(197, 134, 192); // purple
+        public DL.Rgb24 SyntaxType { get; set; } = new DL.Rgb24(78, 201, 176);  // teal
+        public DL.Rgb24 SyntaxString { get; set; } = new DL.Rgb24(206, 145, 120); // orange
+        public DL.Rgb24 SyntaxComment { get; set; } = new DL.Rgb24(106, 153, 85);  // green
+        public DL.Rgb24 SyntaxNumber { get; set; } = new DL.Rgb24(181, 206, 168); // light green
+        public DL.Rgb24 SyntaxIdentifier { get; set; } = new DL.Rgb24(220, 220, 220); // near-default
         public DL.Rgb24 Border { get; set; } = new DL.Rgb24(80, 80, 80);
         public DL.Rgb24 Separator { get; set; } = new DL.Rgb24(50, 55, 70);
         public DL.Rgb24 KeyHighlight { get; set; } = new DL.Rgb24(200, 200, 80);
@@ -153,6 +163,12 @@ namespace Andy.Cli.Themes
             Heading = new DL.Rgb24(140, 110, 0),
             Code = new DL.Rgb24(70, 70, 70),
             Ghost = new DL.Rgb24(160, 160, 160),
+            SyntaxKeyword = new DL.Rgb24(0, 0, 255),
+            SyntaxType = new DL.Rgb24(38, 127, 153),
+            SyntaxString = new DL.Rgb24(163, 21, 21),
+            SyntaxComment = new DL.Rgb24(0, 128, 0),
+            SyntaxNumber = new DL.Rgb24(9, 134, 88),
+            SyntaxIdentifier = new DL.Rgb24(40, 40, 40),
             Border = new DL.Rgb24(170, 170, 170),
             Separator = new DL.Rgb24(180, 185, 200),
             KeyHighlight = new DL.Rgb24(140, 110, 0),
@@ -219,6 +235,12 @@ namespace Andy.Cli.Themes
                 Heading = C(TS.ThemeToken.Accent),
                 Code = C(TS.ThemeToken.SyntaxPreproc),
                 Ghost = C(TS.ThemeToken.ForegroundMuted),
+                SyntaxKeyword = C(TS.ThemeToken.SyntaxKeyword),
+                SyntaxType = C(TS.ThemeToken.SyntaxPreproc),
+                SyntaxString = C(TS.ThemeToken.SyntaxString),
+                SyntaxComment = C(TS.ThemeToken.SyntaxComment),
+                SyntaxNumber = C(TS.ThemeToken.SyntaxNumber),
+                SyntaxIdentifier = C(TS.ThemeToken.Foreground),
                 Border = C(TS.ThemeToken.Border),
                 Separator = C(TS.ThemeToken.Border),
                 KeyHighlight = C(TS.ThemeToken.Warning),
