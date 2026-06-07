@@ -95,4 +95,45 @@ public class ThemedBackgroundTests
         Assert.Contains(OpaqueBg, RectFills(dl).Select(f => f ?? default));
         Assert.All(TextBgs(dl), bg => Assert.Equal(OpaqueBg, bg));
     }
+
+    // ----- Feed list/separator items -----
+
+    [Fact]
+    public void ModelListItem_OpaqueTheme_PaintsThemeBackground()
+    {
+        var dl = Render(Opaque(), b =>
+        {
+            var item = new ModelListItem("Available Models");
+            item.RenderSlice(0, 0, 40, 0, 5, new DL.DisplayListBuilder().Build(), b);
+        });
+        var bgs = TextBgs(dl);
+        Assert.NotEmpty(bgs);
+        Assert.All(bgs, bg => Assert.Equal(OpaqueBg, bg));
+    }
+
+    [Fact]
+    public void ToolListItem_OpaqueTheme_PaintsThemeBackground()
+    {
+        var dl = Render(Opaque(), b =>
+        {
+            var item = new ToolListItem("Available Tools");
+            item.RenderSlice(0, 0, 40, 0, 5, new DL.DisplayListBuilder().Build(), b);
+        });
+        var bgs = TextBgs(dl);
+        Assert.NotEmpty(bgs);
+        Assert.All(bgs, bg => Assert.Equal(OpaqueBg, bg));
+    }
+
+    [Fact]
+    public void ResponseSeparator_OpaqueTheme_PaintsThemeBackground()
+    {
+        var dl = Render(Opaque(), b =>
+        {
+            var sep = new ResponseSeparatorItem(inputTokens: 10, outputTokens: 20);
+            sep.RenderSlice(0, 0, 40, 0, 1, new DL.DisplayListBuilder().Build(), b);
+        });
+        var bgs = TextBgs(dl);
+        Assert.NotEmpty(bgs);
+        Assert.All(bgs, bg => Assert.Equal(OpaqueBg, bg));
+    }
 }
