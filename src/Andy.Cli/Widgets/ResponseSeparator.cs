@@ -41,6 +41,8 @@ namespace Andy.Cli.Widgets
             // Center the pattern
             int patternLength = fullPattern.Length;
             int startX = x + Math.Max(0, (width - patternLength) / 2);
+            // Use the theme background so the separator doesn't sit on a black block under opaque themes.
+            var bg = Themes.Theme.Current.Background;
 
             // Render the main pattern
             for (int i = 0; i < _pattern.Length && startX + i < x + width; i++)
@@ -49,7 +51,7 @@ namespace Andy.Cli.Widgets
                 var color = (ch == '◆') ? accentColor : baseColor;
                 var attrs = (ch == '◆') ? DL.CellAttrFlags.Bold : DL.CellAttrFlags.None;
 
-                b.DrawText(new DL.TextRun(startX + i, y, ch.ToString(), color, new DL.Rgb24(0, 0, 0), attrs));
+                b.DrawText(new DL.TextRun(startX + i, y, ch.ToString(), color, bg, attrs));
             }
 
             // Render token information
@@ -59,7 +61,7 @@ namespace Andy.Cli.Widgets
                 for (int i = 0; i < tokenInfo.Length && tokenStartX + i < x + width; i++)
                 {
                     char ch = tokenInfo[i];
-                    b.DrawText(new DL.TextRun(tokenStartX + i, y, ch.ToString(), tokenColor, new DL.Rgb24(0, 0, 0), DL.CellAttrFlags.None));
+                    b.DrawText(new DL.TextRun(tokenStartX + i, y, ch.ToString(), tokenColor, bg, DL.CellAttrFlags.None));
                 }
             }
         }
