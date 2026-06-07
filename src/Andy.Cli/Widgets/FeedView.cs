@@ -1380,53 +1380,11 @@ namespace Andy.Cli.Widgets
 
         private static IEnumerable<(string Text, DL.Rgb24 Color, DL.CellAttrFlags Attr)> Highlight(string line, string? lang)
         {
-            var normal = new DL.Rgb24(200, 200, 220);
-            var keyword = new DL.Rgb24(180, 220, 180);
-            var typecol = new DL.Rgb24(180, 200, 240);
-            var str = new DL.Rgb24(220, 200, 160);
-            var com = new DL.Rgb24(120, 140, 120);
-            // Comments
-            if (lang != null && lang.StartsWith("py"))
-            {
-                int hash = line.IndexOf('#');
-                string code = hash >= 0 ? line.Substring(0, hash) : line;
-                foreach (var part in TokenizePython(code)) yield return part;
-                if (hash >= 0) yield return (line.Substring(hash), com, DL.CellAttrFlags.None);
-                yield break;
-            }
-            else // default to C#-like
-            {
-                int sl = line.IndexOf("//");
-                string code = sl >= 0 ? line.Substring(0, sl) : line;
-                foreach (var part in TokenizeCSharp(code)) yield return part;
-                if (sl >= 0) yield return (line.Substring(sl), com, DL.CellAttrFlags.None);
-                yield break;
-            }
-
-            static IEnumerable<(string, DL.Rgb24, DL.CellAttrFlags)> TokenizeCSharp(string code)
-            {
-                var keywords = new HashSet<string>(new[] { "using", "namespace", "class", "public", "private", "protected", "internal", "static", "void", "int", "string", "var", "new", "return", "async", "await", "if", "else", "for", "foreach", "while", "switch", "case", "break", "true", "false" });
-                int i = 0; while (i < code.Length)
-                {
-                    char c = code[i];
-                    if (char.IsWhiteSpace(c)) { int j = i; while (j < code.Length && char.IsWhiteSpace(code[j])) j++; yield return (code.Substring(i, j - i), new DL.Rgb24(200, 200, 220), DL.CellAttrFlags.None); i = j; continue; }
-                    if (c == '"') { int j = i + 1; while (j < code.Length && code[j] != '"') { if (code[j] == '\\' && j + 1 < code.Length) j += 2; else j++; } j = Math.Min(code.Length, j + 1); yield return (code.Substring(i, j - i), new DL.Rgb24(220, 200, 160), DL.CellAttrFlags.None); i = j; continue; }
-                    if (char.IsLetter(c) || c == '_') { int j = i + 1; while (j < code.Length && (char.IsLetterOrDigit(code[j]) || code[j] == '_')) j++; var tok = code.Substring(i, j - i); var col = keywords.Contains(tok) ? new DL.Rgb24(180, 220, 180) : new DL.Rgb24(200, 200, 220); yield return (tok, col, DL.CellAttrFlags.None); i = j; continue; }
-                    yield return (code[i].ToString(), new DL.Rgb24(200, 200, 220), DL.CellAttrFlags.None); i++;
-                }
-            }
-            static IEnumerable<(string, DL.Rgb24, DL.CellAttrFlags)> TokenizePython(string code)
-            {
-                var keywords = new HashSet<string>(new[] { "def", "class", "return", "if", "elif", "else", "for", "while", "import", "from", "as", "True", "False", "None", "in", "and", "or", "not", "with", "yield" });
-                int i = 0; while (i < code.Length)
-                {
-                    char c = code[i];
-                    if (char.IsWhiteSpace(c)) { int j = i; while (j < code.Length && char.IsWhiteSpace(code[j])) j++; yield return (code.Substring(i, j - i), new DL.Rgb24(200, 200, 220), DL.CellAttrFlags.None); i = j; continue; }
-                    if (c == '"' || c == '\'') { char q = c; int j = i + 1; while (j < code.Length && code[j] != q) { if (code[j] == '\\' && j + 1 < code.Length) j += 2; else j++; } j = Math.Min(code.Length, j + 1); yield return (code.Substring(i, j - i), new DL.Rgb24(220, 200, 160), DL.CellAttrFlags.None); i = j; continue; }
-                    if (char.IsLetter(c) || c == '_') { int j = i + 1; while (j < code.Length && (char.IsLetterOrDigit(code[j]) || code[j] == '_')) j++; var tok = code.Substring(i, j - i); var col = keywords.Contains(tok) ? new DL.Rgb24(180, 220, 180) : new DL.Rgb24(200, 200, 220); yield return (tok, col, DL.CellAttrFlags.None); i = j; continue; }
-                    yield return (code[i].ToString(), new DL.Rgb24(200, 200, 220), DL.CellAttrFlags.None); i++;
-                }
-            }
+            // Theme-colored, never underlined: keywords, types/class names, method calls,
+            // strings, comments and numbers each get a distinct theme color.
+            var palette = SyntaxPalette.FromTheme(Themes.Theme.Current);
+            foreach (var (text, color) in CodeHighlighter.Highlight(line, lang, palette))
+                yield return (text, color, DL.CellAttrFlags.None);
         }
     }
 
