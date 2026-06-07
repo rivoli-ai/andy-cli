@@ -190,14 +190,17 @@ namespace Andy.Cli.Themes
                 // light ones do not (dark text would be unreadable on a dark terminal).
                 OffersTransparentBackground = IsDark(C(TS.ThemeToken.Background)),
 
+                // Header, prompt and footer share the body background so the surface
+                // reads as one cohesive color; dialogs/code/toasts intentionally stand
+                // out with a raised surface.
                 Background = C(TS.ThemeToken.Background),
-                HeaderBackground = C(TS.ThemeToken.Surface),
+                HeaderBackground = C(TS.ThemeToken.Background),
                 DialogBackground = C(TS.ThemeToken.Surface),
                 CodeBlockBackground = C(TS.ThemeToken.Surface),
                 PromptBackground = C(TS.ThemeToken.Background),
                 ToastBackground = C(TS.ThemeToken.SurfaceSelected),
-                StatusLineBackground = C(TS.ThemeToken.Surface),
-                KeyHintsBackground = C(TS.ThemeToken.SurfaceHover),
+                StatusLineBackground = C(TS.ThemeToken.Background),
+                KeyHintsBackground = C(TS.ThemeToken.Background),
 
                 Text = C(TS.ThemeToken.Foreground),
                 TextDim = C(TS.ThemeToken.ForegroundMuted),
