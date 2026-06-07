@@ -69,6 +69,8 @@
     <Compile Include="Widgets/CommandOutputWidthTests.cs" />
     <!-- Raw terminal input decoder tests (mouse wheel + keyboard) -->
     <Compile Include="Input/TerminalInputParserTests.cs" />
+    <!-- Mouse reporting enable/disable tests -->
+    <Compile Include="Input/MouseReportingTests.cs" />
     <!-- Code indexing tests -->
     <Compile Include="Tools/CodeIndexToolTests.cs" />
     <!-- Parallel tool execution tests -->
