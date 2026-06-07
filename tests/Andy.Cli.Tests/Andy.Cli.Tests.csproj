@@ -31,10 +31,12 @@
   <ItemGroup>
     <!-- Temporarily exclude test files that need updating for new API -->
     <Compile Remove="**/*.cs" />
+    <Compile Include="AssemblyInfo.cs" />
     <Compile Include="TestHelpers/TestCompatibilityShims.cs" />
     <Compile Include="VersionInfoTests.cs" />
     <Compile Include="Commands/ModelCommandTests.cs" />
     <Compile Include="Themes/ThemeSwitchingTests.cs" />
+    <Compile Include="Themes/PopularThemesTests.cs" />
     <Compile Include="Services/ProviderDetectionServiceTests.cs" />
     <Compile Include="Services/SystemPromptBuilderTests.cs" />
     <Compile Include="Services/SystemPromptsTests.cs" />
@@ -53,6 +55,8 @@
     <Compile Include="Widgets/KeyHintsBarTests.cs" />
     <!-- PromptLine color/style tests -->
     <Compile Include="Widgets/PromptLineColorTests.cs" />
+    <!-- Command palette execution tests -->
+    <Compile Include="Widgets/CommandPaletteTests.cs" />
     <!-- PromptLine soft-wrapping + cursor navigation tests -->
     <Compile Include="Widgets/PromptLineWrappingTests.cs" />
     <!-- FeedView reflow signal tests (margin residue fix) -->

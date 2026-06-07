@@ -1086,6 +1086,12 @@ namespace Andy.Cli.Widgets
             // Detect simple HTML links <a href="...">text</a> and render with Link widget
             if (TryRenderSimpleHtmlLink(slice, x, y, width, maxLines, baseDl, b)) return;
             var r = new Andy.Tui.Widgets.MarkdownRenderer();
+            // Render on the theme background (opaque themes); the renderer defaults to a
+            // black background, so without this LLM responses show up on a black block.
+            // Transparent themes leave it for the compositor to strip to the terminal bg.
+            var theme = Themes.Theme.Current;
+            if (theme.Background is { } mdBg)
+                r.SetColors(theme.Text, mdBg, theme.Accent);
             r.SetText(slice);
             r.Render(new L.Rect(x, y, width, maxLines), baseDl, b);
         }
@@ -1662,8 +1668,12 @@ namespace Andy.Cli.Widgets
                 return;
             }
 
-            // Render as simple markdown-styled text
+            // Render as simple markdown-styled text on the theme background (opaque
+            // themes); otherwise the renderer's default black background shows through.
             var renderer = new Andy.Tui.Widgets.MarkdownRenderer();
+            var theme = Themes.Theme.Current;
+            if (theme.Background is { } mdBg)
+                renderer.SetColors(theme.Text, mdBg, theme.Accent);
             renderer.SetText(_content.ToString());
             renderer.Render(new L.Rect(x, y, width, maxLines), baseDl, b);
 

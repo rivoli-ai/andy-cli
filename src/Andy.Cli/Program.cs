@@ -463,7 +463,7 @@ class Program
                     Description = "Show available AI models",
                     Category = "Model",
                     Aliases = new[] { "models", "list" },
-                    Action = async args =>
+                    AsyncAction = async args =>
                     {
                         var modelListItem = await modelCommand.CreateModelListItemAsync();
                         feed.AddItem(modelListItem);
@@ -477,7 +477,7 @@ class Program
                     Aliases = new[] { "switch", "change" },
                     RequiredParams = new[] { "provider" },
                     ParameterHint = "Example: cerebras or openai gpt-4o",
-                    Action = async args =>
+                    AsyncAction = async args =>
                     {
                         if (args.Length < 1)
                         {
@@ -533,7 +533,7 @@ class Program
                     Description = "Show current model details",
                     Category = "Model",
                     Aliases = new[] { "info", "current" },
-                    Action = async args =>
+                    AsyncAction = async args =>
                     {
                         var result = await modelCommand.ExecuteAsync(new[] { "info" });
                         feed.AddMarkdownRich(result.Message);
@@ -545,7 +545,7 @@ class Program
                     Description = "Test current model",
                     Category = "Model",
                     Aliases = new[] { "test" },
-                    Action = async args =>
+                    AsyncAction = async args =>
                     {
                         var result = await modelCommand.ExecuteAsync(new[] { "test" }.Concat(args).ToArray());
                         feed.AddMarkdownRich(result.Message);
@@ -585,7 +585,7 @@ class Program
                         }
                         return Array.Empty<string>();
                     },
-                    Action = async args =>
+                    AsyncAction = async args =>
                     {
                         if (args.Length < 1)
                         {
@@ -620,7 +620,7 @@ class Program
                         }
                         return Array.Empty<string>();
                     },
-                    Action = async args =>
+                    AsyncAction = async args =>
                     {
                         if (args.Length < 1)
                         {
@@ -672,7 +672,7 @@ class Program
                     RequiredParams = new[] { "theme" },
                     ParameterHint = "Example: dark or light",
                     GetAvailableOptions = () => Andy.Cli.Themes.Theme.AvailableThemes.ToArray(),
-                    Action = async args =>
+                    AsyncAction = async args =>
                     {
                         var result = await themeCommand.ExecuteAsync(args);
                         feed.AddMarkdownRich(result.Message);
