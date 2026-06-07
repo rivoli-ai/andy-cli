@@ -61,6 +61,8 @@
     <Compile Include="Widgets/ThemedBackgroundTests.cs" />
     <!-- Feed markdown normalization (blank-line collapsing + heading spacing) -->
     <Compile Include="Widgets/FeedMarkdownTests.cs" />
+    <!-- Text wrapping (permission dialog, panels) -->
+    <Compile Include="Widgets/TextWrapTests.cs" />
     <!-- PromptLine soft-wrapping + cursor navigation tests -->
     <Compile Include="Widgets/PromptLineWrappingTests.cs" />
     <!-- FeedView reflow signal tests (margin residue fix) -->

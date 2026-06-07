@@ -823,8 +823,7 @@ class Program
                 string[] labels = { "Allow once", "Allow (session)", "Deny" };
                 int selected = 2; // default to the safe choice
                 bool open = true;
-
-                string Trunc(string s, int max) => s.Length <= max ? s : s[..Math.Max(0, max - 1)] + "…";
+                int scroll = 0; // first visible wrapped summary line
 
                 while (open)
                 {
@@ -832,24 +831,47 @@ class Program
                     pb.PushClip(new DL.ClipPush(0, 0, viewport.Width, viewport.Height));
                     pb.DrawRect(new DL.Rect(0, 0, viewport.Width, viewport.Height, new DL.Rgb24(0, 0, 0)));
 
-                    int bw = Math.Min(64, viewport.Width - 4);
-                    int bh = 9;
+                    var panelBg = new DL.Rgb24(30, 30, 40);
+                    int bw = Math.Min(Math.Max(48, viewport.Width - 4), 96);
+                    int iw = Math.Max(8, bw - 4);
+
+                    var toolLine = $"Tool: {request.ToolDisplayName ?? request.ToolId}";
+                    var summaryLines = Andy.Cli.Widgets.TextWrap.Wrap(request.ActionSummary, iw);
+
+                    // Grow the dialog to show as many summary lines as fit; scroll if longer.
+                    const int chrome = 8; // borders(2) + title + blank + tool + blank + buttons + hints
+                    int maxSummary = Math.Max(1, viewport.Height - 2 - chrome);
+                    int summaryVisible = Math.Min(summaryLines.Count, maxSummary);
+                    int maxScroll = Math.Max(0, summaryLines.Count - summaryVisible);
+                    scroll = Math.Clamp(scroll, 0, maxScroll);
+
+                    int bh = summaryVisible + chrome;
                     int bx = (viewport.Width - bw) / 2;
-                    int by = (viewport.Height - bh) / 2;
+                    int by = Math.Max(0, (viewport.Height - bh) / 2);
 
                     pb.PushClip(new DL.ClipPush(bx, by, bw, bh));
-                    pb.DrawRect(new DL.Rect(bx, by, bw, bh, new DL.Rgb24(30, 30, 40)));
+                    pb.DrawRect(new DL.Rect(bx, by, bw, bh, panelBg));
                     pb.DrawBorder(new DL.Border(bx, by, bw, bh, "double", new DL.Rgb24(200, 200, 80)));
 
                     string title = "Permission required";
-                    pb.DrawText(new DL.TextRun(bx + (bw - title.Length) / 2, by + 1, title, new DL.Rgb24(255, 255, 255), new DL.Rgb24(30, 30, 40), DL.CellAttrFlags.Bold));
+                    pb.DrawText(new DL.TextRun(bx + (bw - title.Length) / 2, by + 1, title, new DL.Rgb24(255, 255, 255), panelBg, DL.CellAttrFlags.Bold));
 
-                    var tool = Trunc($"Tool: {request.ToolDisplayName ?? request.ToolId}", bw - 4);
-                    pb.DrawText(new DL.TextRun(bx + 2, by + 3, tool, new DL.Rgb24(220, 220, 160), new DL.Rgb24(30, 30, 40), DL.CellAttrFlags.None));
-                    var summary = Trunc(request.ActionSummary, bw - 4);
-                    pb.DrawText(new DL.TextRun(bx + 2, by + 4, summary, new DL.Rgb24(200, 200, 210), new DL.Rgb24(30, 30, 40), DL.CellAttrFlags.None));
+                    var tool = toolLine.Length <= iw ? toolLine : toolLine[..Math.Max(0, iw - 1)] + "…";
+                    pb.DrawText(new DL.TextRun(bx + 2, by + 3, tool, new DL.Rgb24(220, 220, 160), panelBg, DL.CellAttrFlags.None));
 
-                    int btnY = by + 6;
+                    if (maxScroll > 0)
+                    {
+                        string pos = $"[{scroll + 1}-{scroll + summaryVisible}/{summaryLines.Count} ↑↓]";
+                        pb.DrawText(new DL.TextRun(bx + bw - 2 - pos.Length, by + 3, pos, new DL.Rgb24(150, 150, 170), panelBg, DL.CellAttrFlags.None));
+                    }
+
+                    int sy = by + 4;
+                    for (int i = 0; i < summaryVisible; i++)
+                    {
+                        pb.DrawText(new DL.TextRun(bx + 2, sy + i, summaryLines[scroll + i], new DL.Rgb24(200, 200, 210), panelBg, DL.CellAttrFlags.None));
+                    }
+
+                    int btnY = sy + summaryVisible + 1;
                     int x = bx + 2;
                     for (int i = 0; i < labels.Length; i++)
                     {
@@ -862,8 +884,8 @@ class Program
                         x += text.Length + 2;
                     }
 
-                    string hints = "← → Navigate  Enter Select  Esc Deny";
-                    pb.DrawText(new DL.TextRun(bx + (bw - hints.Length) / 2, by + bh - 1, hints, new DL.Rgb24(120, 120, 150), new DL.Rgb24(30, 30, 40), DL.CellAttrFlags.None));
+                    string hints = maxScroll > 0 ? "← → Select  ↑ ↓ Scroll  Enter Confirm  Esc Deny" : "← → Navigate  Enter Select  Esc Deny";
+                    pb.DrawText(new DL.TextRun(bx + Math.Max(2, (bw - hints.Length) / 2), by + bh - 1, hints, new DL.Rgb24(120, 120, 150), panelBg, DL.CellAttrFlags.None));
 
                     pb.Pop();
                     await scheduler.RenderOnceAsync(pb.Build(), viewport, caps, pty, CancellationToken.None);
@@ -871,6 +893,10 @@ class Program
                     var k = ReadKeyBlocking();
                     if (k.Key == ConsoleKey.LeftArrow) selected = (selected + labels.Length - 1) % labels.Length;
                     else if (k.Key == ConsoleKey.RightArrow || k.Key == ConsoleKey.Tab) selected = (selected + 1) % labels.Length;
+                    else if (k.Key == ConsoleKey.UpArrow) scroll -= 1;
+                    else if (k.Key == ConsoleKey.DownArrow) scroll += 1;
+                    else if (k.Key == ConsoleKey.PageUp) scroll -= 5;
+                    else if (k.Key == ConsoleKey.PageDown) scroll += 5;
                     else if (k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.D || k.Key == ConsoleKey.N) { selected = 2; open = false; }
                     else if (k.Key == ConsoleKey.Enter || k.Key == ConsoleKey.Spacebar) open = false;
                 }
