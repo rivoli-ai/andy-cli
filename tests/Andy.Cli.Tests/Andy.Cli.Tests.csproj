@@ -92,6 +92,8 @@
     <Compile Include="Integration/PermissionSessionBroadeningIntegrationTests.cs" />
     <!-- list_directory tool integration tests -->
     <Compile Include="Integration/ListDirectoryIntegrationTests.cs" />
+    <!-- Andy.CodeIndex library in-process integration tests -->
+    <Compile Include="Integration/CodeIndexLibraryIntegrationTests.cs" />
     <!-- AQ1 headless config schema tests (rivoli-ai/andy-cli#46) -->
     <Compile Include="HeadlessConfig/HeadlessConfigSchemaTests.cs" />
     <!-- AQ2 headless runner tests (rivoli-ai/andy-cli#47) -->
