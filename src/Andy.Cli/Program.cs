@@ -345,6 +345,11 @@ class Program
             services.AddSingleton<CodeIndexingService>();
             services.AddHostedService<CodeIndexingService>(provider => provider.GetRequiredService<CodeIndexingService>());
 
+            // Register the Andy.CodeIndex library's DB-free analysis/chunking services
+            // (Roslyn-based) so they are available in-process for semantic indexing.
+            services.AddSingleton<Andy.CodeIndex.Application.Interfaces.ICodeAnalysisService, Andy.CodeIndex.Infrastructure.Services.CodeAnalysisService>();
+            services.AddSingleton<Andy.CodeIndex.Application.Interfaces.IChunkingService, Andy.CodeIndex.Infrastructure.Services.ChunkingService>();
+
             var serviceProvider = services.BuildServiceProvider();
 
             // Initialize tool registry and register tools
