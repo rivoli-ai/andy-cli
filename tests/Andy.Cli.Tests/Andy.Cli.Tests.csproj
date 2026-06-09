@@ -106,6 +106,8 @@
     <Compile Include="Headless/HeadlessAgentRunnerStabilityTests.cs" />
     <!-- AQ8 headless contract validation library (rivoli-ai/andy-cli#54) -->
     <Compile Include="HeadlessConfig/HeadlessConfigContractTests.cs" />
+    <!-- AX.3 headless built-in tool availability (rivoli-ai/conductor#2090) -->
+    <Compile Include="Headless/HeadlessBuiltInToolsTests.cs" />
   </ItemGroup>
 
   <ItemGroup>
