@@ -23,7 +23,30 @@ public sealed record HeadlessRunConfig
     public HeadlessEventSink? EventSink { get; init; }
     public Guid? PolicyId { get; init; }
     public IReadOnlyList<string>? Boundaries { get; init; }
+
+    // AX.4 (rivoli-ai/conductor#2091): per-run permission allow-list. Headless is
+    // fail-closed (AddAndyCliPermissions(services, null) → no interactive broker),
+    // so mutating built-ins (write_file/delete_file/move_file/copy_file/file_editor/
+    // replace_text/create_directory) and execute_command resolve to "Ask" → DENY.
+    // This field relaxes EXACTLY the listed tools to "Allow" (injected at the
+    // PermissionLayer.Injected layer, which overrides the Builtin Ask defaults).
+    // Every tool NOT listed stays fail-closed/denied. When ABSENT/null, behavior
+    // is unchanged (current fail-closed defaults) — backward compatible.
+    //
+    // Out of scope here (AX.9 / andy-containers): deriving this list from policies
+    // and writing it into the config. AX.4 only CONSUMES it.
+    public HeadlessPermissions? Permissions { get; init; }
+
     public HeadlessLimits Limits { get; init; } = new();
+}
+
+public sealed record HeadlessPermissions
+{
+    // Tool ids the run is permitted to execute (e.g. "write_file", "execute_command").
+    // A tool that is normally "Ask" (e.g. write_file) becomes executable when listed;
+    // a tool NOT listed stays denied. An empty list grants nothing beyond the
+    // auto-allowed read-only built-ins — same as omitting the block entirely.
+    public IReadOnlyList<string> AllowedTools { get; init; } = [];
 }
 
 public sealed record HeadlessAgent

@@ -116,7 +116,18 @@ public static class HeadlessAgentRunner
             maxTurns: maxTurns,
             logger: loggerFactory.CreateLogger<SimpleAgent>());
 
-        WireToolEvents(agent, emitter);
+        var auditor = new ToolUsageAuditor();
+        WireToolEvents(agent, emitter, auditor);
+
+        var allowedTools = config.Permissions?.AllowedTools ?? (IReadOnlyList<string>)Array.Empty<string>();
+
+        // Finalize a run that has reached the agent loop: emit the AX.4 tool-usage
+        // audit (once, just before `finished`) then the terminal `finished` event.
+        void Finalize(HeadlessExitCode code, int iters)
+        {
+            EmitToolUsageAudit(emitter, auditor, services, toolHost.Registry, allowedTools);
+            EmitFinished(emitter, stopwatch, iters, code);
+        }
 
         emitter.EmitStarted(
             runId: config.RunId,
@@ -153,14 +164,14 @@ public static class HeadlessAgentRunner
                 emitter.EmitError("Agent loop cancelled.", fatal: true);
                 exitCode = HeadlessExitCode.Cancelled;
             }
-            EmitFinished(emitter, stopwatch, iterations, exitCode);
+            Finalize(exitCode, iterations);
             return exitCode;
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Agent loop threw");
             emitter.EmitError($"Agent loop failed: {ex.GetType().Name}: {ex.Message}", fatal: true);
-            EmitFinished(emitter, stopwatch, iterations, HeadlessExitCode.AgentFailure);
+            Finalize(HeadlessExitCode.AgentFailure, iterations);
             return HeadlessExitCode.AgentFailure;
         }
 
@@ -185,7 +196,7 @@ public static class HeadlessAgentRunner
                 emitter.EmitError("Agent loop cancelled.", fatal: true);
                 exitCode = HeadlessExitCode.Cancelled;
             }
-            EmitFinished(emitter, stopwatch, iterations, exitCode);
+            Finalize(exitCode, iterations);
             return exitCode;
         }
 
@@ -207,7 +218,7 @@ public static class HeadlessAgentRunner
                 emitter.EmitError($"Agent loop did not converge: {stopReason}", fatal: true);
                 exitCode = HeadlessExitCode.AgentFailure;
             }
-            EmitFinished(emitter, stopwatch, iterations, exitCode);
+            Finalize(exitCode, iterations);
             return exitCode;
         }
 
@@ -224,11 +235,11 @@ public static class HeadlessAgentRunner
             emitter.EmitError(
                 $"Failed to write output file '{config.Output.File}': {ex.Message}",
                 fatal: true);
-            EmitFinished(emitter, stopwatch, iterations, HeadlessExitCode.AgentFailure);
+            Finalize(HeadlessExitCode.AgentFailure, iterations);
             return HeadlessExitCode.AgentFailure;
         }
 
-        EmitFinished(emitter, stopwatch, iterations, HeadlessExitCode.Success);
+        Finalize(HeadlessExitCode.Success, iterations);
         return HeadlessExitCode.Success;
     }
 
@@ -246,10 +257,13 @@ public static class HeadlessAgentRunner
     // and finishing in the same handler chain. The args themselves stay out
     // of the event stream (digest only) — the producer can't be sure they
     // don't carry secrets.
-    private static void WireToolEvents(SimpleAgent agent, HeadlessEventEmitter emitter)
+    private static void WireToolEvents(SimpleAgent agent, HeadlessEventEmitter emitter, ToolUsageAuditor auditor)
     {
         agent.ToolCalled += (_, e) =>
         {
+            // AX.4: tally every tool the agent invokes for the end-of-run audit.
+            auditor.RecordInvocation(e.ToolName);
+
             var callId = Guid.NewGuid().ToString("N")[..12];
             emitter.EmitToolCallStarted(callId, e.ToolName, argsDigest: null);
             // SimpleAgent does not emit a ToolFinished today; until it does,
@@ -258,6 +272,22 @@ public static class HeadlessAgentRunner
             // stream. Upgrade this when SimpleAgent grows ToolFinished.
             emitter.EmitToolCallFinished(callId, e.ToolName, ok: true, durationMs: 0);
         };
+    }
+
+    // AX.4: emit the end-of-run tool-usage audit just before `finished`, resolving
+    // each invoked tool's permitted status against the live permission engine.
+    private static void EmitToolUsageAudit(
+        HeadlessEventEmitter emitter,
+        ToolUsageAuditor auditor,
+        IServiceProvider services,
+        IToolRegistry registry,
+        IReadOnlyList<string> allowedTools)
+    {
+        var authorizer = services
+            .GetService(typeof(Andy.Permissions.Authorization.IToolPermissionAuthorizer))
+            as Andy.Permissions.Authorization.IToolPermissionAuthorizer;
+        var entries = auditor.BuildEntries(authorizer, registry);
+        emitter.EmitToolUsageAudit(allowedTools, entries);
     }
 
     private static ILlmProvider ResolveLlmProvider(IServiceProvider services, HeadlessRunConfig config)
@@ -392,7 +422,17 @@ public static class HeadlessAgentRunner
         // these into the IToolRegistry the SimpleAgent receives.
         Andy.Cli.Services.ToolCatalog.RegisterAllTools(services);
 
-        return services.BuildServiceProvider();
+        var provider = services.BuildServiceProvider();
+
+        // AX.4 (rivoli-ai/conductor#2091): inject the per-run permission allow-list.
+        // For each tool in config.permissions.allowed_tools, install a {tool}(*) Allow
+        // rule at the Injected layer (precedence 5), which overrides the Builtin "Ask"
+        // defaults (precedence 0). Tools NOT listed stay fail-closed/denied. Absent /
+        // empty list = no-op (unchanged fail-closed behavior).
+        Andy.Cli.Services.CliPermissionServiceExtensions.ApplyInjectedAllowList(
+            provider, config.Permissions?.AllowedTools);
+
+        return provider;
     }
 
     // Drains the ToolCatalog's ToolRegistrationInfo entries (registered in

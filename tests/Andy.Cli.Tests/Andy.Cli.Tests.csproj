@@ -108,6 +108,8 @@
     <Compile Include="HeadlessConfig/HeadlessConfigContractTests.cs" />
     <!-- AX.3 headless built-in tool availability (rivoli-ai/conductor#2090) -->
     <Compile Include="Headless/HeadlessBuiltInToolsTests.cs" />
+    <!-- AX.4 permission allow-list injection + tool restriction + audit (rivoli-ai/conductor#2091) -->
+    <Compile Include="Headless/HeadlessPermissionAllowListTests.cs" />
   </ItemGroup>
 
   <ItemGroup>

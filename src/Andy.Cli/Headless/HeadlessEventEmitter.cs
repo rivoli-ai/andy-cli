@@ -1,4 +1,5 @@
 using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -76,6 +77,24 @@ public sealed class HeadlessEventEmitter : IDisposable
             error
         });
 
+    // AX.4 (rivoli-ai/conductor#2091): end-of-run tool-usage audit. One event listing
+    // the injected allow-list and, per distinct tool the agent invoked, the invocation
+    // count and whether the permission engine permitted it. An external verifier (AX.10)
+    // keys off this to confirm only permitted tools ran.
+    public void EmitToolUsageAudit(
+        IReadOnlyList<string> allowedTools,
+        IReadOnlyList<ToolUsageAuditEntry> tools)
+        => Write(HeadlessEventKind.ToolUsageAudit, new
+        {
+            allowed_tools = allowedTools,
+            tools = tools.Select(t => new
+            {
+                tool_name = t.ToolName,
+                invocations = t.Invocations,
+                permitted = t.Permitted
+            })
+        });
+
     public void EmitOutputWritten(string path, long bytes)
         => Write(HeadlessEventKind.OutputWritten, new { path, bytes });
 
@@ -137,7 +156,12 @@ public enum HeadlessEventKind
     LlmChunk,
     ToolCallStarted,
     ToolCallFinished,
+    ToolUsageAudit,
     OutputWritten,
     Error,
     Finished
 }
+
+// AX.4 (rivoli-ai/conductor#2091): one row of the tool-usage audit — a distinct tool
+// the agent invoked, how many times, and whether the permission engine permitted it.
+public sealed record ToolUsageAuditEntry(string ToolName, int Invocations, bool Permitted);
