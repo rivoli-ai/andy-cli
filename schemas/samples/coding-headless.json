@@ -48,6 +48,16 @@
     "stream": "stdout"
   },
   "boundaries": ["write-branch", "sandboxed"],
+  "permissions": {
+    "allowed_tools": [
+      "read_file",
+      "write_file",
+      "file_editor",
+      "replace_text",
+      "create_directory",
+      "execute_command"
+    ]
+  },
   "limits": {
     "max_iterations": 400,
     "timeout_seconds": 3600

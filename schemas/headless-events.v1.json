@@ -24,6 +24,7 @@
         "llm_chunk",
         "tool_call_started",
         "tool_call_finished",
+        "tool_usage_audit",
         "output_written",
         "error",
         "finished"
@@ -73,6 +74,31 @@
         "duration_ms": { "type": "integer", "minimum": 0 },
         "result_digest": { "type": "string", "description": "SHA-256 hex of the canonical-JSON-serialized result. Optional; producers MAY omit on error." },
         "error":       { "type": "string", "description": "Short error string when ok=false. Producers SHOULD redact or truncate; consumers MUST NOT key on its content." }
+      }
+    },
+    "tool_usage_audit": {
+      "type": "object",
+      "description": "AX.4 (rivoli-ai/conductor#2091) end-of-run tool-usage audit. Records the distinct tools the agent actually invoked during the run and, for each, whether the permission engine permitted it under the injected allow-list. Lets an external verifier (AX.10) confirm that only permitted tools ran. Emitted once, just before `finished`.",
+      "required": ["allowed_tools", "tools"],
+      "properties": {
+        "allowed_tools": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "The per-run permission allow-list that was injected (config.permissions.allowed_tools). Empty when none was supplied."
+        },
+        "tools": {
+          "type": "array",
+          "description": "One entry per distinct tool invoked during the run.",
+          "items": {
+            "type": "object",
+            "required": ["tool_name", "invocations", "permitted"],
+            "properties": {
+              "tool_name":   { "type": "string" },
+              "invocations": { "type": "integer", "minimum": 1, "description": "How many times the agent invoked this tool." },
+              "permitted":   { "type": "boolean", "description": "true ⇒ the permission engine permitted this tool (in the allow-list or an auto-allowed read-only built-in); false ⇒ the tool was denied (fail-closed) at execution time." }
+            }
+          }
+        }
       }
     },
     "output_written": {

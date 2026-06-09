@@ -236,4 +236,53 @@ public static class CliPermissionServiceExtensions
 
         return list;
     }
+
+    /// <summary>
+    /// AX.4 (rivoli-ai/conductor#2091): inject a per-run permission allow-list into an already-built
+    /// provider's <see cref="IPermissionStore"/>, relaxing EXACTLY the listed tools to
+    /// <see cref="PermissionOutcome.Allow"/>. The rules are installed via
+    /// <see cref="IPermissionStore.SetInjectedRules"/>, which retags every rule to
+    /// <see cref="PermissionLayer.Injected"/> (precedence 5) — strictly above the
+    /// <see cref="PermissionLayer.Builtin"/> (precedence 0) "Ask" defaults that
+    /// <see cref="AppendAskDefaults"/> installs, so a normally-Ask tool such as <c>write_file</c>
+    /// becomes executable. A tool NOT in the list is never granted, so it stays fail-closed/denied.
+    ///
+    /// This is an allow-LIST, not a blanket bypass: each listed tool gets its own
+    /// <c>{tool}(*)</c> Allow rule and nothing else is touched. An empty or null list is a no-op
+    /// (current fail-closed defaults stand).
+    /// </summary>
+    /// <returns>The set of tool ids that were actually injected as Allow rules (de-duplicated).</returns>
+    public static IReadOnlyList<string> ApplyInjectedAllowList(
+        IServiceProvider provider,
+        IReadOnlyList<string>? allowedTools)
+    {
+        if (allowedTools is null || allowedTools.Count == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        var store = provider.GetService(typeof(IPermissionStore)) as IPermissionStore;
+        if (store is null)
+        {
+            // No store wired (e.g. permissions not registered) — nothing to relax.
+            return Array.Empty<string>();
+        }
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var rules = new List<PermissionRule>();
+        foreach (var tool in allowedTools)
+        {
+            if (string.IsNullOrWhiteSpace(tool) || !seen.Add(tool))
+            {
+                continue;
+            }
+
+            // {tool}(*) at the Injected layer: a tool-scoped Allow that overrides the Builtin Ask
+            // default for this tool only. SetInjectedRules retags to PermissionLayer.Injected.
+            rules.Add(PermissionRule.Parse($"{tool}(*)", PermissionOutcome.Allow, PermissionLayer.Injected));
+        }
+
+        store.SetInjectedRules(rules);
+        return seen.ToList();
+    }
 }

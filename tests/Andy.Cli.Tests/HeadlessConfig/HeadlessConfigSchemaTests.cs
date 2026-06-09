@@ -230,6 +230,61 @@ public class HeadlessConfigSchemaTests
         Assert.True(result.IsValid, "openrouter is a supported provider");
     }
 
+    // AX.4 (rivoli-ai/conductor#2091): optional permission allow-list block.
+    [Fact]
+    public void Permissions_AllowedTools_Validates()
+    {
+        var schema = LoadSchema();
+        var config = MinimalValidConfig();
+        config["permissions"] = new JsonObject
+        {
+            ["allowed_tools"] = new JsonArray("write_file", "execute_command")
+        };
+
+        var result = schema.Evaluate(ToElement(config));
+        Assert.True(result.IsValid, FormatErrors(result));
+    }
+
+    [Fact]
+    public void Permissions_Absent_StillValid()
+    {
+        // Backward compatible: omitting the block keeps the config valid.
+        var schema = LoadSchema();
+        var config = MinimalValidConfig();
+
+        var result = schema.Evaluate(ToElement(config));
+        Assert.True(result.IsValid, FormatErrors(result));
+    }
+
+    [Fact]
+    public void Permissions_RejectsUnknownProperty()
+    {
+        var schema = LoadSchema();
+        var config = MinimalValidConfig();
+        config["permissions"] = new JsonObject
+        {
+            ["allowed_tools"] = new JsonArray("write_file"),
+            ["bogus"] = true
+        };
+
+        var result = schema.Evaluate(ToElement(config));
+        Assert.False(result.IsValid, "permissions has additionalProperties:false");
+    }
+
+    [Fact]
+    public void Permissions_RejectsUppercaseToolName()
+    {
+        var schema = LoadSchema();
+        var config = MinimalValidConfig();
+        config["permissions"] = new JsonObject
+        {
+            ["allowed_tools"] = new JsonArray("Write_File")
+        };
+
+        var result = schema.Evaluate(ToElement(config));
+        Assert.False(result.IsValid, "allowed_tools entries must match the tool-name pattern");
+    }
+
     [Fact]
     public void Limits_MaxIterationsZero_Rejected()
     {

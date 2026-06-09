@@ -181,6 +181,22 @@
       "items": { "type": "string" },
       "description": "Policy-derived boundary tags (e.g. 'read-only', 'no-prod', 'draft-only'). Runtime uses these as guard-rails; the authoritative evaluation happens server-side at each tool call."
     },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "AX.4 (rivoli-ai/conductor#2091) per-run permission allow-list. Headless is fail-closed: mutating built-ins (write_file/delete_file/move_file/copy_file/file_editor/replace_text/create_directory) and execute_command default to deny. Tools listed here are relaxed to allow (injected above the builtin defaults); everything else stays denied. Absent = unchanged fail-closed behavior. Populated by AX.9/andy-containers from the resolved policy.",
+      "properties": {
+        "allowed_tools": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_.-]*$"
+          },
+          "description": "Tool ids the run is permitted to execute (e.g. 'write_file', 'execute_command'). A normally-Ask tool becomes executable when listed; a tool not listed stays denied. Empty grants nothing beyond auto-allowed read-only built-ins."
+        }
+      }
+    },
     "limits": {
       "type": "object",
       "required": ["max_iterations", "timeout_seconds"],
