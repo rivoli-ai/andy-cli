@@ -58,6 +58,26 @@ public static class HeadlessAgentRunner
         var exitCode = HeadlessExitCode.Success;
 
         await using var services = BuildServiceProvider(config, loggerFactory);
+
+        // AX.3 (rivoli-ai/conductor#2090): register the assistant's built-in
+        // tools into the SAME IToolRegistry the agent uses, so a headless
+        // coding agent actually has file/command/text tools — not just the
+        // config-declared cli/mcp tools. Mirrors the interactive path
+        // (Program.cs / ServiceConfiguration.cs): ToolCatalog.RegisterAllTools
+        // populates ToolRegistrationInfo entries in DI, which we then drain into
+        // the registry. HeadlessToolHost adds the config tools into the same
+        // registry afterwards, so built-ins and cli/mcp tools coexist.
+        //
+        // Permission caveat (AX.4 territory, NOT solved here): headless wires
+        // AddAndyCliPermissions(services, null) — fail-closed with no broker.
+        // Mutating built-ins (write_file/delete_file/move_file/copy_file/
+        // file_editor/replace_text/create_directory) resolve to "Ask" and are
+        // therefore DENIED at execution time with no interactive prompt;
+        // execute_command likewise asks via its capability. Read-only built-ins
+        // (read_file/list_directory/search_text/git_diff/etc.) stay
+        // auto-allowed. AX.4 injects the per-run allow-list that relaxes this.
+        RegisterBuiltInTools(services, loggerFactory);
+
         await using HeadlessToolHost? toolHost =
             await TryBuildToolHostAsync(config, services, loggerFactory, emitter, stderr, ct);
 
@@ -311,7 +331,9 @@ public static class HeadlessAgentRunner
         return bytes.LongLength;
     }
 
-    private static ServiceProvider BuildServiceProvider(HeadlessRunConfig config, ILoggerFactory loggerFactory)
+    // Internal for testing: lets a test exercise the real DI wiring (built-in
+    // tool catalog included) instead of reimplementing it in a parallel path.
+    internal static ServiceProvider BuildServiceProvider(HeadlessRunConfig config, ILoggerFactory loggerFactory)
     {
         var services = new ServiceCollection();
         services.AddSingleton(loggerFactory);
@@ -337,10 +359,11 @@ public static class HeadlessAgentRunner
 
         services.AddSingleton<ILlmProviderFactory, LlmProviderFactory>();
 
-        // Andy.Tools: minimal wiring — registry + executor + the validators
-        // / managers ToolExecutor depends on. We deliberately don't register
-        // any built-in tools (ToolCatalog.RegisterAllTools); the headless
-        // run's tool surface is exactly what HeadlessToolHost adds.
+        // Andy.Tools: registry + executor + the validators / managers
+        // ToolExecutor depends on. The built-in tool surface is registered as
+        // ToolRegistrationInfo entries here (AX.3) and drained into the registry
+        // in ExecuteAsync after the provider is built; HeadlessToolHost then
+        // layers the config cli/mcp tools onto the same registry.
         services.AddSingleton<Andy.Tools.Validation.IToolValidator, Andy.Tools.Validation.ToolValidator>();
         services.AddSingleton<IToolRegistry, Andy.Tools.Registry.ToolRegistry>();
         services.AddSingleton<Andy.Tools.Discovery.IToolDiscovery, Andy.Tools.Discovery.ToolDiscoveryService>();
@@ -355,12 +378,42 @@ public static class HeadlessAgentRunner
         Andy.Cli.Services.CliPermissionServiceExtensions.AddAndyCliPermissions(services, null);
         services.AddSingleton(new Andy.Tools.Framework.ToolFrameworkOptions
         {
+            // We register built-ins explicitly via ToolCatalog (the trim-safe,
+            // interactive-parity path) and drain them into the registry in
+            // ExecuteAsync, so the framework's own built-in registration stays
+            // off here — same convention as Program.cs/ServiceConfiguration.cs.
             RegisterBuiltInTools = false,
             EnableObservability = false,
             AutoDiscoverTools = false,
         });
 
+        // AX.3: register the built-in tool catalog (file/command/text/git/web/
+        // utility tools) as ToolRegistrationInfo singletons. ExecuteAsync drains
+        // these into the IToolRegistry the SimpleAgent receives.
+        Andy.Cli.Services.ToolCatalog.RegisterAllTools(services);
+
         return services.BuildServiceProvider();
+    }
+
+    // Drains the ToolCatalog's ToolRegistrationInfo entries (registered in
+    // BuildServiceProvider) into the run's IToolRegistry — the same instance
+    // HeadlessToolHost adds config cli/mcp tools to, and the same instance the
+    // SimpleAgent resolves tools from. Mirrors the interactive bootstrap in
+    // Program.cs / ServiceConfiguration.cs.
+    // Internal for testing: see BuildServiceProvider.
+    internal static void RegisterBuiltInTools(IServiceProvider services, ILoggerFactory loggerFactory)
+    {
+        var registry = services.GetRequiredService<IToolRegistry>();
+        var logger = loggerFactory.CreateLogger("Andy.Cli.Headless.HeadlessAgentRunner");
+        var registrations = services.GetServices<Andy.Tools.Framework.ToolRegistrationInfo>();
+        var count = 0;
+        foreach (var registration in registrations)
+        {
+            registry.RegisterTool(registration.ToolType, registration.Configuration);
+            count++;
+        }
+
+        logger.LogInformation("HeadlessAgentRunner: registered {ToolCount} built-in tool(s) into the run registry", count);
     }
 
     // Sets the resolved model on the provider config the factory will pick for
