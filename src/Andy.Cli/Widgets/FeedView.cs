@@ -480,6 +480,21 @@ namespace Andy.Cli.Widgets
             return _scrollOffset;
         }
 
+        /// <summary>
+        /// Snap the view to the bottom and re-enable auto-scroll (pin to bottom).
+        /// Used when the user starts typing into the prompt: the feed should return
+        /// to where the prompt is, regardless of how far up they had scrolled.
+        /// This resets <see cref="_scrollOffset"/> to 0 and clears any pending hold
+        /// or idle-timer state so the feed follows new content again.
+        /// </summary>
+        public void SnapToBottom()
+        {
+            _scrollOffset = 0;
+            _followTail = true;
+            _autoScrollHoldAnchor = false;
+            _lastScrollActivityUtc = DateTime.MinValue;
+        }
+
         /// <summary>Advance animation state one frame.</summary>
         public void Tick()
         {
