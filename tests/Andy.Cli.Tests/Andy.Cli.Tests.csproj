@@ -9,7 +9,7 @@
 
   <ItemGroup>
     <PackageReference Include="Andy.Llm" Version="2026.6.7-rc.38" />
-    <PackageReference Include="Andy.Tools" Version="2026.6.4-rc.24" />
+    <PackageReference Include="Andy.Tools" Version="2026.6.4-rc.25" />
     <PackageReference Include="Andy.Model" Version="2026.5.31-rc.8" />
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="JsonSchema.Net" Version="9.2.0" />
@@ -110,6 +110,8 @@
     <Compile Include="Headless/HeadlessBuiltInToolsTests.cs" />
     <!-- AX.4 permission allow-list injection + tool restriction + audit (rivoli-ai/conductor#2091) -->
     <Compile Include="Headless/HeadlessPermissionAllowListTests.cs" />
+    <!-- Headless SWE-style end-to-end task (real model; skips without OPENROUTER_API_KEY) -->
+    <Compile Include="Headless/HeadlessSweTaskTests.cs" />
   </ItemGroup>
 
   <ItemGroup>

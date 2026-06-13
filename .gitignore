@@ -89,3 +89,5 @@ publish/
 *.tar.gz
 *.zip
 *.sha256
+# Local NuGet feed for in-development Andy.* package fixes (see nuget.config)
+local-packages/

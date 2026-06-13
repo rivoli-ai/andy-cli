@@ -108,12 +108,23 @@ public static class HeadlessAgentRunner
         var toolExecutor = services.GetRequiredService<IToolExecutor>();
 
         var maxTurns = config.Limits.MaxIterations > 0 ? config.Limits.MaxIterations : 10;
+
+        // Operate in the configured workspace root, not the process cwd. SimpleAgent
+        // threads this into every ToolExecutionContext.WorkingDirectory, so relative
+        // paths the model uses (list_directory ".", read_file "calc.py") resolve
+        // against the repository under test rather than wherever the headless
+        // process happened to be launched. Without this the agent explores the
+        // wrong tree and silently fails to apply edits.
+        var workingDirectory = !string.IsNullOrWhiteSpace(config.Workspace.Root)
+            ? config.Workspace.Root
+            : null;
         using var agent = new SimpleAgent(
             llmProvider,
             toolHost.Registry,
             toolExecutor,
             systemPrompt: config.Agent.Instructions,
             maxTurns: maxTurns,
+            workingDirectory: workingDirectory,
             logger: loggerFactory.CreateLogger<SimpleAgent>());
 
         var auditor = new ToolUsageAuditor();
