@@ -405,6 +405,13 @@ namespace Andy.Cli.Widgets
                 {
                     if (_items[i] is RunningToolItem runningTool && runningTool.ToolId == toolId)
                     {
+                        // Idempotent: the tool executor marks completion the instant the tool
+                        // returns (stopping the spinner with the tool's real duration). A later
+                        // end-of-turn pass must not overwrite that with the whole-turn elapsed.
+                        if (runningTool.IsComplete)
+                        {
+                            break;
+                        }
                         runningTool.SetComplete(success, duration);
                         if (!string.IsNullOrEmpty(result))
                         {

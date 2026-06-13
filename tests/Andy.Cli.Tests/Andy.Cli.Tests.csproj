@@ -81,6 +81,8 @@
     <Compile Include="Input/MouseReportingTests.cs" />
     <!-- Code indexing tests -->
     <Compile Include="Tools/CodeIndexToolTests.cs" />
+    <!-- Tool spinner completion + concurrency regression tests -->
+    <Compile Include="Services/ToolSpinnerCompletionTests.cs" />
     <!-- Parallel tool execution tests -->
     <Compile Include="Services/ParallelToolExecutionTests.cs" />
     <Compile Include="Services/CliPermissionPromptTests.cs" />

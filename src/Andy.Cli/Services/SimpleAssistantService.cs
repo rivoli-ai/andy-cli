@@ -20,7 +20,10 @@ public class SimpleAssistantService : IDisposable
     private readonly ILogger<SimpleAssistantService>? _logger;
     private readonly string _modelName;
     private readonly string _providerName;
-    private readonly Dictionary<string, (DateTime startTime, Dictionary<string, object?>? parameters)> _runningTools = new();
+    // Concurrent: mutated from the agent's ToolCalled callback (background agent thread) and read/
+    // removed from the end-of-turn completion loop. A plain Dictionary raced across these threads and
+    // could corrupt internally, surfacing as a NullReferenceException that aborted the whole turn.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime startTime, Dictionary<string, object?>? parameters)> _runningTools = new();
     private int _toolCallCounter = 0;
     private int _lastInputTokens = 0;
     private int _lastOutputTokens = 0;
@@ -125,17 +128,11 @@ public class SimpleAssistantService : IDisposable
             };
             _feed.AddToolExecutionStart(toolId, e.ToolName, initialParams);
 
-            // Schedule completion after a reasonable timeout if not completed naturally
-            _ = Task.Run(async () =>
-            {
-                await Task.Delay(TimeSpan.FromSeconds(30));
-                if (_runningTools.ContainsKey(toolId))
-                {
-                    var elapsed = DateTime.UtcNow - _runningTools[toolId].startTime;
-                    _feed.AddToolExecutionComplete(toolId, true, FormatDuration(elapsed), "Completed");
-                    _runningTools.Remove(toolId);
-                }
-            });
+            // The spinner is stopped by UiUpdatingToolExecutor the instant the tool returns, and the
+            // end-of-turn loop below is the backstop for anything it missed. A previous 30s background
+            // timer here both spuriously marked still-running tools "Completed" and, by mutating
+            // _runningTools from a stray thread pool task (often one left over from a prior turn), raced
+            // the dictionary into the NullReferenceException that crashed the turn.
         };
     }
 
@@ -410,7 +407,7 @@ public class SimpleAssistantService : IDisposable
                 InstrumentationHub.Instance.Publish(toolCompleteEvent);
 
                 _feed.AddToolExecutionComplete(tool.Key, isSuccess, durationStr, resultSummary);
-                _runningTools.Remove(tool.Key);
+                _runningTools.TryRemove(tool.Key, out _);
             }
 
             // Calculate actual duration

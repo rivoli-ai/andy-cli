@@ -106,8 +106,12 @@ namespace Andy.Cli.Services
                 }
             }
 
-            // Execute the actual tool (parameters cannot be null here based on interface contract)
+            // Execute the actual tool (parameters cannot be null here based on interface contract).
+            // Time it so the UI can show the tool's real duration the moment it returns, rather
+            // than the whole-turn elapsed measured later by SimpleAssistantService.
+            var toolStopwatch = System.Diagnostics.Stopwatch.StartNew();
             var result = await _innerExecutor.ExecuteAsync(toolId, parameters ?? new Dictionary<string, object?>(), context);
+            toolStopwatch.Stop();
 
             // Track completion and update UI with result
             // IMPORTANT: We must track completion BEFORE SimpleAssistantService tries to read it
@@ -476,6 +480,15 @@ namespace Andy.Cli.Services
 
                 ToolExecutionTracker.Instance.TrackToolComplete(uiToolId, result.IsSuccessful, resultMessage, result.Data);
 
+                // Stop the spinner immediately now that the tool has returned data. Previously the
+                // running-tool item was only marked complete by SimpleAssistantService after the whole
+                // agent turn (including the final model response) finished, so the spinner and elapsed
+                // timer appeared to hang long after the tool was actually done. AddToolExecutionComplete
+                // is idempotent, so the later end-of-turn pass is a harmless no-op for this tool.
+                var feedViewForCompletion = ToolExecutionTracker.Instance.GetFeedView();
+                feedViewForCompletion?.AddToolExecutionComplete(
+                    uiToolId, result.IsSuccessful, FormatToolDuration(toolStopwatch.Elapsed), resultMessage);
+
                 // INSTRUMENTATION: Publish event when tool result is about to be sent back to LLM
                 var toolResultToLlmEvent = new ToolResultToLlmEvent
                 {
@@ -509,6 +522,16 @@ namespace Andy.Cli.Services
         /// Andy.Permissions gate decides actual consent per call; these flags only stop the lower-level
         /// capability checks from blocking a tool before the gate runs.
         /// </summary>
+        /// <summary>Format an elapsed tool duration the same way the feed status line does.</summary>
+        private static string FormatToolDuration(TimeSpan elapsed)
+        {
+            if (elapsed.TotalMilliseconds < 1000)
+                return $"{elapsed.TotalMilliseconds:F0}ms";
+            if (elapsed.TotalSeconds < 60)
+                return $"{elapsed.TotalSeconds:F1}s";
+            return $"{elapsed.TotalMinutes:F1}m";
+        }
+
         private static void GrantGatedCapabilities(ToolExecutionContext context)
         {
             context.Permissions.FileSystemAccess = true;
