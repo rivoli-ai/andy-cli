@@ -16,6 +16,7 @@ namespace Andy.Cli.Services
     {
         private readonly IToolExecutor _innerExecutor;
         private readonly ILogger<UiUpdatingToolExecutor>? _logger;
+        private readonly ToolCallLoopDetector _loopDetector = new();
 
         public event EventHandler<ToolExecutionStartedEventArgs>? ExecutionStarted
         {
@@ -104,6 +105,31 @@ namespace Andy.Cli.Services
                     // Update ONLY this specific tool by exact ID (critical for parallel executions)
                     feedView.UpdateToolByExactId(uiToolId, parameters);
                 }
+            }
+
+            // Loop guard: if the model keeps issuing the same call with identical arguments, it is
+            // almost certainly stuck (and burning tokens). Short-circuit with guidance instead of
+            // re-running the tool, so it stops repeating and changes approach.
+            var loopSignature = ToolCallLoopDetector.Signature(toolId, parameters);
+            if (_loopDetector.RecordAndIsLooping(loopSignature))
+            {
+                var guidance =
+                    $"Loop guard: the tool '{toolId}' has already been called repeatedly with identical " +
+                    "arguments and returned the same result. Stop repeating this call - use the results you " +
+                    "already have, or take a different approach to make progress.";
+                _logger?.LogWarning("[UI_EXECUTOR] Loop detected for {ToolId}; short-circuiting. Signature={Signature}",
+                    toolId, loopSignature);
+
+                if (!string.IsNullOrEmpty(uiToolId))
+                {
+                    ToolExecutionTracker.Instance.TrackToolComplete(uiToolId, false, guidance, null);
+                }
+
+                return new ToolExecutionResult
+                {
+                    IsSuccessful = false,
+                    Message = guidance
+                };
             }
 
             // Execute the actual tool (parameters cannot be null here based on interface contract)
