@@ -89,3 +89,6 @@ publish/
 *.tar.gz
 *.zip
 *.sha256
+
+# Claude Code local session/worktree data
+.claude/
