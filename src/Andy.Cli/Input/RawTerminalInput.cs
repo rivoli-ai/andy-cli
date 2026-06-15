@@ -12,10 +12,12 @@ namespace Andy.Cli.Input;
 /// existing keyboard handling.
 ///
 /// On start it puts the TTY into cbreak mode via <c>stty</c> (no echo, no
-/// canonical line buffering, CR left untranslated), enables SGR mouse reporting,
-/// and spins a background thread that polls fd 0 and feeds bytes through
-/// <see cref="TerminalInputParser"/>. Decoded events are queued for the main
-/// loop to drain. The original terminal settings and mouse mode are restored on
+/// canonical line buffering, CR left untranslated) and spins a background thread
+/// that polls fd 0 and feeds bytes through <see cref="TerminalInputParser"/>.
+/// Decoded events are queued for the main loop to drain. SGR mouse reporting is
+/// off by default (so the terminal's native click-drag text selection keeps
+/// working) and can be toggled at runtime via <see cref="SetMouseReporting"/>.
+/// The original terminal settings and mouse mode are restored on
 /// <see cref="Dispose"/>, process exit, and Ctrl+C.
 ///
 /// Input is read with libc <c>poll</c>/<c>read</c> on fd 0 rather than
@@ -40,20 +42,15 @@ public sealed class RawTerminalInput : IDisposable
     private readonly ConcurrentQueue<TerminalInputEvent> _queue = new();
     private readonly Thread _thread;
     private readonly string _savedStty;
-    private readonly bool _mouseEnabled;
+    private readonly MouseReporting _mouse;
     private volatile bool _stop;
     private int _restored; // 0 = not yet restored, 1 = restored (guards idempotency)
 
     private RawTerminalInput(string savedStty, bool enableMouse)
     {
         _savedStty = savedStty;
-        if (enableMouse)
-        {
-            // 1000 = button tracking (reports wheel as buttons 64/65),
-            // 1006 = SGR extended coordinates.
-            Console.Write("\u001b[?1000h\u001b[?1006h");
-            _mouseEnabled = true;
-        }
+        _mouse = new MouseReporting(Console.Write);
+        if (enableMouse) _mouse.Set(true);
 
         AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
         Console.CancelKeyPress += OnCancelKeyPress;
@@ -63,11 +60,30 @@ public sealed class RawTerminalInput : IDisposable
     }
 
     /// <summary>
+    /// Whether SGR mouse reporting is currently enabled. When on, the terminal
+    /// forwards mouse events to the app and native click-drag text selection is
+    /// suppressed.
+    /// </summary>
+    public bool MouseEnabled => _mouse.Enabled;
+
+    /// <summary>
+    /// Turn SGR mouse reporting on or off at runtime and return the new state.
+    /// </summary>
+    public bool SetMouseReporting(bool enabled) => _mouse.Set(enabled);
+
+    /// <summary>Flip mouse reporting and return the new state.</summary>
+    public bool ToggleMouseReporting() => _mouse.Toggle();
+
+    /// <summary>
     /// Attempt to switch the terminal into raw byte mode. Returns <c>null</c>
     /// when input is not an interactive TTY or <c>stty</c> is unavailable, in
     /// which case the caller should keep using <c>Console.ReadKey</c>.
+    ///
+    /// <paramref name="enableMouse"/> defaults to <c>false</c> so the terminal's
+    /// native click-drag text selection keeps working out of the box; callers
+    /// can opt in up front or flip it later via <see cref="SetMouseReporting"/>.
     /// </summary>
-    public static RawTerminalInput? TryStart(bool enableMouse)
+    public static RawTerminalInput? TryStart(bool enableMouse = false)
     {
         if (Console.IsInputRedirected) return null;
 
@@ -145,7 +161,9 @@ public sealed class RawTerminalInput : IDisposable
     {
         // Run at most once across Dispose / ProcessExit / Ctrl+C.
         if (Interlocked.Exchange(ref _restored, 1) != 0) return;
-        try { if (_mouseEnabled) Console.Write("\u001b[?1000l\u001b[?1006l"); } catch { /* ignore */ }
+        // Always disable mouse reporting on the way out if it was ever enabled,
+        // so the terminal is left with native click-drag selection restored.
+        SetMouseReporting(false);
         try { RunStty(_savedStty, out _); } catch { /* ignore */ }
     }
 
