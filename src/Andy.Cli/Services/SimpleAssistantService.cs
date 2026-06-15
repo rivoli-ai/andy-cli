@@ -17,6 +17,7 @@ public class SimpleAssistantService : IDisposable
     private readonly SimpleAgent _agent;
     private readonly FeedView _feed;
     private readonly TokenCounter? _tokenCounter;
+    private readonly ILoggerFactory? _loggerFactory;
     private readonly ILogger<SimpleAssistantService>? _logger;
     private readonly string _modelName;
     private readonly string _providerName;
@@ -44,11 +45,16 @@ public class SimpleAssistantService : IDisposable
         string modelName,
         string providerName,
         TokenCounter? tokenCounter = null,
-        ILogger<SimpleAssistantService>? logger = null)
+        ILoggerFactory? loggerFactory = null)
     {
         _feed = feed;
         _tokenCounter = tokenCounter;
-        _logger = logger;
+        // Take an ILoggerFactory so each collaborator gets a correctly-typed logger. Previously a
+        // single ILogger<SimpleAssistantService> was passed and `as ILogger<SimpleAgent>` / etc.
+        // were used, which always yield null (the generic types are unrelated) - so engine-, tool-,
+        // and pipeline-level logs silently went nowhere in the real app.
+        _loggerFactory = loggerFactory;
+        _logger = loggerFactory?.CreateLogger<SimpleAssistantService>();
         _modelName = modelName;
         _providerName = providerName;
 
@@ -69,7 +75,7 @@ public class SimpleAssistantService : IDisposable
         InstrumentationHub.Instance.SetSystemPrompt(systemPrompt);
 
         // Wrap the tool executor to update UI when tools execute
-        var uiExecutor = new UiUpdatingToolExecutor(toolExecutor, logger as ILogger<UiUpdatingToolExecutor>);
+        var uiExecutor = new UiUpdatingToolExecutor(toolExecutor, loggerFactory?.CreateLogger<UiUpdatingToolExecutor>());
 
         // Create the SimpleAgent
         _agent = new SimpleAgent(
@@ -78,7 +84,7 @@ public class SimpleAssistantService : IDisposable
             uiExecutor,  // Use the wrapped executor
             systemPrompt,
             maxTurns: MaxAgentTurns,
-            logger: logger as ILogger<SimpleAgent>
+            logger: loggerFactory?.CreateLogger<SimpleAgent>()
         );
 
         // Subscribe to agent events for UI updates
@@ -157,8 +163,8 @@ public class SimpleAssistantService : IDisposable
             // Create new content pipeline for this request
             var processor = new MarkdownContentProcessor();
             var sanitizer = new TextContentSanitizer();
-            var renderer = new FeedContentRenderer(_feed, _logger as ILogger<FeedContentRenderer>);
-            var pipeline = new ContentPipeline.ContentPipeline(processor, sanitizer, renderer, _logger as ILogger<ContentPipeline.ContentPipeline>);
+            var renderer = new FeedContentRenderer(_feed, _loggerFactory?.CreateLogger<FeedContentRenderer>());
+            var pipeline = new ContentPipeline.ContentPipeline(processor, sanitizer, renderer, _loggerFactory?.CreateLogger<ContentPipeline.ContentPipeline>());
 
             // Local shortcut: answer simple environment questions without LLM
             if (LooksLikeCurrentDirectoryQuery(userMessage))

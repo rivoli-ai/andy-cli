@@ -422,7 +422,7 @@ class Program
                 }
 
                 var toolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
-                var logger = serviceProvider.GetService<ILogger<SimpleAssistantService>>();
+                var loggerFactory = serviceProvider.GetService<ILoggerFactory>();
                 aiService = new SimpleAssistantService(
                     llmProvider,
                     toolRegistry,
@@ -431,7 +431,7 @@ class Program
                     currentModel,
                     currentProvider,
                     tokenCounter,
-                    logger);
+                    loggerFactory);
 
                 var providerUrl = GetProviderUrl(currentProvider);
 
@@ -531,7 +531,7 @@ class Program
                                     aiService?.Dispose();
 
                                     var toolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
-                                    var logger = serviceProvider.GetService<ILogger<SimpleAssistantService>>();
+                                    var loggerFactory = serviceProvider.GetService<ILoggerFactory>();
                                     aiService = new SimpleAssistantService(
                                         llmProvider,
                                         toolRegistry,
@@ -540,7 +540,7 @@ class Program
                                         newModel,
                                         newProvider,
                                         tokenCounter,
-                                        logger);
+                                        loggerFactory);
                                 }
 
                                 feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
@@ -1185,7 +1185,7 @@ class Program
                                                 aiService?.Dispose();
 
                                                 var toolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
-                                                var logger = serviceProvider.GetService<ILogger<SimpleAssistantService>>();
+                                                var loggerFactory = serviceProvider.GetService<ILoggerFactory>();
                                                 aiService = new SimpleAssistantService(
                                                     llmProvider,
                                                     toolRegistry,
@@ -1194,7 +1194,7 @@ class Program
                                                     newModel,
                                                     newProvider,
                                                     tokenCounter,
-                                                    logger);
+                                                    loggerFactory);
                                             }
 
                                             feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
