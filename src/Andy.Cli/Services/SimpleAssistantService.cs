@@ -478,6 +478,7 @@ public class SimpleAssistantService : IDisposable
             _feed.ClearProcessingIndicator();
 
             _logger?.LogError(ex, "Failed to process message");
+            CrashLog.Write("SimpleAssistantService.ProcessMessageAsync", ex);
 
             // Log full error details for debugging
             if (ex.Message.Contains("Cerebras") || _providerName.Contains("cerebras", StringComparison.OrdinalIgnoreCase))

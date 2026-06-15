@@ -120,6 +120,21 @@ class Program
 
     static async Task Main(string[] args)
     {
+        // Capture any otherwise-unlogged crash (TUI render loop, background tasks, etc.) to
+        // ~/.andy/logs/crash.log so a NullReferenceException isn't reduced to a bare message.
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            if (e.ExceptionObject is Exception uex)
+            {
+                Andy.Cli.Services.CrashLog.Write("AppDomain.UnhandledException", uex);
+            }
+        };
+        System.Threading.Tasks.TaskScheduler.UnobservedTaskException += (_, e) =>
+        {
+            Andy.Cli.Services.CrashLog.Write("UnobservedTaskException", e.Exception);
+            e.SetObserved();
+        };
+
         // Debug: Check if ANDY_DEBUG_RAW is set
         var debugRawEnv = Environment.GetEnvironmentVariable("ANDY_DEBUG_RAW");
         if (!string.IsNullOrEmpty(debugRawEnv))
@@ -1306,7 +1321,9 @@ class Program
                                 }
                                 catch (Exception ex)
                                 {
+                                    Andy.Cli.Services.CrashLog.Write("interactive.ProcessMessageAsync", ex);
                                     feed.AddMarkdownRich(ConsoleColors.ErrorPrefix(ex.Message));
+                                    feed.AddMarkdownRich(ConsoleColors.ErrorPrefix($"        (full trace: {Andy.Cli.Services.CrashLog.Path})"));
                                     statusMessage.SetMessage("Error occurred", animated: false);
                                 }
                                 finally

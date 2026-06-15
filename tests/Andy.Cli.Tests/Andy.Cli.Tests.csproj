@@ -112,6 +112,8 @@
     <Compile Include="Headless/HeadlessPermissionAllowListTests.cs" />
     <!-- Headless SWE-style end-to-end task (real model; skips without OPENROUTER_API_KEY) -->
     <Compile Include="Headless/HeadlessSweTaskTests.cs" />
+    <!-- Interactive ProcessMessageAsync NRE reproduction (real model; skips without OPENROUTER_API_KEY) -->
+    <Compile Include="Services/InteractiveAssistantReproTests.cs" />
   </ItemGroup>
 
   <ItemGroup>
