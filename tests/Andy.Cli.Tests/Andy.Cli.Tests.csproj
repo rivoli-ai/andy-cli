@@ -79,6 +79,8 @@
     <Compile Include="Input/TerminalInputParserTests.cs" />
     <!-- Code indexing tests -->
     <Compile Include="Tools/CodeIndexToolTests.cs" />
+    <!-- Engine/tool logger wiring (ILoggerFactory) regression -->
+    <Compile Include="Services/SimpleAssistantServiceLoggerWiringTests.cs" />
     <!-- Parallel tool execution tests -->
     <Compile Include="Services/ParallelToolExecutionTests.cs" />
     <Compile Include="Services/CliPermissionPromptTests.cs" />
