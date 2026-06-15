@@ -21,6 +21,14 @@ public class SimpleAssistantService : IDisposable
     private readonly string _modelName;
     private readonly string _providerName;
     private readonly Dictionary<string, (DateTime startTime, Dictionary<string, object?>? parameters)> _runningTools = new();
+    // Max agent turns (LLM round-trips, each of which may issue tool calls) per user
+    // message. When this is hit the engine stops with StopReason "max_turns_exceeded"
+    // and returns a full conversation-history dump as its response (see the guard in
+    // ProcessMessageAsync). 10 was far too low for real coding tasks, which routinely
+    // need a dozen+ explore/edit round-trips.
+    private const int MaxAgentTurns = 50;
+    private const string MaxTurnsStopReason = "max_turns_exceeded";
+
     private int _toolCallCounter = 0;
     private int _lastInputTokens = 0;
     private int _lastOutputTokens = 0;
@@ -66,7 +74,7 @@ public class SimpleAssistantService : IDisposable
             toolRegistry,
             uiExecutor,  // Use the wrapped executor
             systemPrompt,
-            maxTurns: 10,
+            maxTurns: MaxAgentTurns,
             logger: logger as ILogger<SimpleAgent>
         );
 
@@ -442,24 +450,23 @@ public class SimpleAssistantService : IDisposable
                 _feed.AddItem(new Andy.Cli.Widgets.SpacerItem(1));
             }
 
-            // Add response to pipeline
-            if (!string.IsNullOrEmpty(result.Response))
+            // Add response to pipeline. On the turn-limit path the engine returns the FULL
+            // conversation history (raw tool payloads, embedded CRLFs and all) as the response;
+            // SelectResponseContent replaces that with a concise notice so it doesn't flood the feed.
+            if (IsMaxTurnsExceeded(result.StopReason))
             {
-                pipeline.AddRawContent(result.Response);
+                _logger?.LogWarning("Agent hit the {MaxTurns}-turn limit; suppressing history dump", MaxAgentTurns);
             }
             else if (!result.Success)
             {
-                // Error case - show the error
                 _logger?.LogWarning("Agent failed. StopReason: {StopReason}", result.StopReason);
-                pipeline.AddRawContent($"**Error**: Agent failed with StopReason: {result.StopReason}");
             }
-            else
+            else if (string.IsNullOrEmpty(result.Response))
             {
-                // No response content - this is unexpected
                 _logger?.LogWarning("Agent returned empty response. Success: {Success}, StopReason: {StopReason}",
                     result.Success, result.StopReason);
-                pipeline.AddRawContent($"[No response received. StopReason: {result.StopReason}]");
             }
+            pipeline.AddRawContent(SelectResponseContent(result.Response, result.Success, result.StopReason));
 
             // Context line disabled to avoid rendering issues
             // pipeline.AddSystemMessage("", SystemMessageType.Context, priority: 1999);
@@ -469,6 +476,12 @@ public class SimpleAssistantService : IDisposable
 
             await pipeline.FinalizeAsync();
             pipeline.Dispose();
+
+            // Don't propagate the raw history dump as the return value either.
+            if (IsMaxTurnsExceeded(result.StopReason))
+            {
+                return $"[Reached the {MaxAgentTurns}-turn tool-call limit before completing this request.]";
+            }
 
             return result.Response ?? string.Empty;
         }
@@ -554,6 +567,33 @@ public class SimpleAssistantService : IDisposable
     {
         // Conservative estimate: 1 token ≈ 4 characters
         return Math.Max(1, characterCount / 4);
+    }
+
+    /// <summary>True when the agent stopped because it exhausted its turn budget.</summary>
+    internal static bool IsMaxTurnsExceeded(string? stopReason) =>
+        string.Equals(stopReason, MaxTurnsStopReason, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Decide what to render for an agent result. On the turn-limit path the engine packs the
+    /// entire conversation history into the response; we replace it with a short notice so the
+    /// feed isn't flooded with raw tool JSON and CRLFs.
+    /// </summary>
+    internal static string SelectResponseContent(string? response, bool success, string? stopReason)
+    {
+        if (IsMaxTurnsExceeded(stopReason))
+        {
+            return $"**Reached the {MaxAgentTurns}-turn tool-call limit** before completing this request. " +
+                   "Partial work above may be incomplete - try narrowing the task or asking it to continue.";
+        }
+        if (!string.IsNullOrEmpty(response))
+        {
+            return response;
+        }
+        if (!success)
+        {
+            return $"**Error**: Agent failed with StopReason: {stopReason}";
+        }
+        return $"[No response received. StopReason: {stopReason}]";
     }
 
     private static string FormatDuration(TimeSpan elapsed)
