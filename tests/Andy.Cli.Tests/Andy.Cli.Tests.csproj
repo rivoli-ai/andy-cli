@@ -83,6 +83,8 @@
     <Compile Include="Tools/CodeIndexToolTests.cs" />
     <!-- Tool spinner completion + concurrency regression tests -->
     <Compile Include="Services/ToolSpinnerCompletionTests.cs" />
+    <!-- Turn-limit response handling (suppress engine history dump) -->
+    <Compile Include="Services/MaxTurnsResponseTests.cs" />
     <!-- Parallel tool execution tests -->
     <Compile Include="Services/ParallelToolExecutionTests.cs" />
     <Compile Include="Services/CliPermissionPromptTests.cs" />
