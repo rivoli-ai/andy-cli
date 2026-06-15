@@ -87,6 +87,8 @@
     <Compile Include="Services/MaxTurnsResponseTests.cs" />
     <!-- Engine/tool logger wiring (ILoggerFactory) regression -->
     <Compile Include="Services/SimpleAssistantServiceLoggerWiringTests.cs" />
+    <!-- Tool-call loop detection (short-circuit repeated identical calls) -->
+    <Compile Include="Services/ToolCallLoopDetectionTests.cs" />
     <!-- Parallel tool execution tests -->
     <Compile Include="Services/ParallelToolExecutionTests.cs" />
     <Compile Include="Services/CliPermissionPromptTests.cs" />
