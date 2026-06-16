@@ -1018,134 +1018,85 @@ namespace Andy.Cli.Widgets
             // during rendering, so we don't need to do it here
         }
 
+        // Cache the measured display-row count per width. The feed lays out in display rows and
+        // calls RenderSlice with display-row indices, so measurement MUST equal what the renderer
+        // actually draws. The previous hand-rolled simulation (paragraph-spacing guess + width*0.8
+        // wrap estimate) diverged from the real renderer and over-counted, leaving the surplus rows
+        // blank at the bottom of every response. We now measure by rendering with the SAME renderer.
+        private int _cachedWidth = -1;
+        private int _cachedLineCount = -1;
+
         public int MeasureLineCount(int width)
         {
-            // Calculate actual line count considering word wrapping
             if (width <= 0) return 1;
+            if (width == _cachedWidth && _cachedLineCount >= 0) return _cachedLineCount;
 
-            // Apply the same paragraph spacing transformation that the renderer will apply
-            // to get an accurate line count
-            var markdown = SimulateParagraphSpacing(_md);
-            var lines = markdown.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
-            int totalLines = 0;
-
-            foreach (var line in lines)
-            {
-                if (string.IsNullOrEmpty(line))
-                {
-                    totalLines++;
-                }
-                else
-                {
-                    // Account for word wrapping - estimate based on line length
-                    // Markdown renderer typically uses about 80% of width for content
-                    int effectiveWidth = Math.Max(1, (int)(width * 0.8));
-                    int wrappedLines = (line.Length + effectiveWidth - 1) / effectiveWidth;
-                    totalLines += Math.Max(1, wrappedLines);
-                }
-            }
-
-            return Math.Max(1, totalLines);
+            int count = MeasureByRendering(width);
+            _cachedWidth = width;
+            _cachedLineCount = count;
+            return count;
         }
 
         /// <summary>
-        /// Simulates the paragraph spacing that Andy.Tui.Widgets.MarkdownRenderer will apply.
-        /// This is needed for accurate line count measurement.
+        /// Build the markdown renderer exactly as RenderSlice does, so measurement and rendering
+        /// wrap and space identically. Colors do not affect wrapping, so the result depends only on
+        /// the text and width.
         /// </summary>
-        private static string SimulateParagraphSpacing(string markdown)
+        private Andy.Tui.Widgets.MarkdownRenderer BuildRenderer()
         {
-            if (string.IsNullOrWhiteSpace(markdown)) return markdown;
-
-            var lines = markdown.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n').ToList();
-            var result = new List<string>();
-
-            for (int i = 0; i < lines.Count; i++)
-            {
-                string current = lines[i];
-                string next = i < lines.Count - 1 ? lines[i + 1] : "";
-
-                result.Add(current);
-
-                // Don't add spacing if current or next line is already blank
-                if (string.IsNullOrWhiteSpace(current) || string.IsNullOrWhiteSpace(next))
-                    continue;
-
-                // Don't add spacing at the end
-                if (i == lines.Count - 1)
-                    continue;
-
-                var currentType = GetLineType(current);
-                var nextType = GetLineType(next);
-
-                // Add blank line when transitioning between different content types
-                bool needsSpacing = false;
-
-                // After a list item, before a heading or non-list text
-                if (currentType == LineType.List && nextType != LineType.List)
-                    needsSpacing = true;
-
-                // Before a heading (except after another heading or list)
-                if (nextType == LineType.Heading && currentType != LineType.Heading && currentType != LineType.List)
-                    needsSpacing = true;
-
-                if (needsSpacing)
-                    result.Add("");
-            }
-
-            // Trim trailing blank lines (matches what renderer does)
-            while (result.Count > 0 && string.IsNullOrWhiteSpace(result[^1]))
-            {
-                result.RemoveAt(result.Count - 1);
-            }
-
-            return string.Join("\n", result);
+            var r = new Andy.Tui.Widgets.MarkdownRenderer();
+            // Render on the theme background (opaque themes); the renderer defaults to a black
+            // background, so without this LLM responses show up on a black block. Transparent
+            // themes leave it for the compositor to strip to the terminal bg.
+            var theme = Themes.Theme.Current;
+            if (theme.Background is { } mdBg)
+                r.SetColors(theme.Text, mdBg, theme.Accent);
+            r.SetText(_md);
+            return r;
         }
 
-        private enum LineType { Heading, List, Text }
-
-        private static LineType GetLineType(string line)
+        /// <summary>
+        /// The number of display rows the real renderer produces for this width = the row of the
+        /// last drawn glyph + 1. Rendered into a throwaway display list with a generous height bound.
+        /// </summary>
+        private int MeasureByRendering(int width)
         {
-            if (string.IsNullOrWhiteSpace(line))
-                return LineType.Text;
+            // Upper bound on rendered height: raw lines + a wrap allowance, doubled, with margin.
+            // Must exceed the true height (under-counting would clip content) without being wasteful.
+            int newlines = 0;
+            foreach (var c in _md) if (c == '\n') newlines++;
+            int bound = Math.Clamp((newlines + _md.Length / Math.Max(1, width) + 1) * 2 + 32, 64, 8192);
 
-            var trimmed = line.TrimStart();
+            var probe = new DL.DisplayListBuilder();
+            var probeBase = new DL.DisplayListBuilder().Build();
+            BuildRenderer().Render(new L.Rect(0, 0, width, bound), probeBase, probe);
 
-            // Check for headings
-            if (trimmed.StartsWith("# ") || trimmed.StartsWith("## ") || trimmed.StartsWith("### "))
-                return LineType.Heading;
-
-            // Check for list items
-            if (trimmed.StartsWith("- ") || trimmed.StartsWith("* ") ||
-                trimmed.StartsWith("• ") || trimmed.StartsWith("★ ") ||
-                System.Text.RegularExpressions.Regex.IsMatch(trimmed, @"^\d+\.\s"))
-                return LineType.List;
-
-            return LineType.Text;
+            int maxRow = -1;
+            foreach (var op in probe.Build().Ops)
+            {
+                if (op is DL.TextRun tr && !string.IsNullOrEmpty(tr.Content) && tr.Y > maxRow)
+                    maxRow = tr.Y;
+            }
+            return maxRow < 0 ? 1 : maxRow + 1;
         }
+
         public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
             // Guard against invalid dimensions
             if (width <= 0 || maxLines <= 0) return;
+            if (startLine < 0) return;
+            if (startLine >= MeasureLineCount(width)) return;
 
-            // Render only the requested slice by extracting those lines
-            var lines = _md.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+            // Detect a whole-content simple HTML link <a href="...">text</a> and render it as a link.
+            if (startLine == 0 && TryRenderSimpleHtmlLink(_md, x, y, width, maxLines, baseDl, b)) return;
 
-            // Guard against invalid startLine
-            if (startLine >= lines.Length || startLine < 0) return;
-
-            int end = Math.Min(lines.Length, startLine + maxLines);
-            var slice = string.Join("\n", lines[startLine..end]);
-            // Detect simple HTML links <a href="...">text</a> and render with Link widget
-            if (TryRenderSimpleHtmlLink(slice, x, y, width, maxLines, baseDl, b)) return;
-            var r = new Andy.Tui.Widgets.MarkdownRenderer();
-            // Render on the theme background (opaque themes); the renderer defaults to a
-            // black background, so without this LLM responses show up on a black block.
-            // Transparent themes leave it for the compositor to strip to the terminal bg.
-            var theme = Themes.Theme.Current;
-            if (theme.Background is { } mdBg)
-                r.SetColors(theme.Text, mdBg, theme.Accent);
-            r.SetText(slice);
-            r.Render(new L.Rect(x, y, width, maxLines), baseDl, b);
+            // Render the FULL markdown, shifted up by startLine display rows, clipped to the
+            // [y, y+maxLines) window. Because measurement uses this exact renderer, the rows the feed
+            // reserved line up with the rows drawn — no slicing by raw line index, no blank surplus.
+            int total = MeasureLineCount(width);
+            b.PushClip(new DL.ClipPush(x, y, width, maxLines));
+            BuildRenderer().Render(new L.Rect(x, y - startLine, width, total), baseDl, b);
+            b.Pop();
         }
 
         private static bool TryRenderSimpleHtmlLink(string text, int x, int y, int width, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
