@@ -32,7 +32,8 @@
     <PackageReference Include="Andy.MCP" Version="2026.4.26-rc.29" />
     <PackageReference Include="Andy.Model" Version="2026.5.31-rc.8" />
     <PackageReference Include="Andy.Permissions" Version="2026.6.4-rc.6" />
-    <PackageReference Include="Andy.Tools" Version="2026.6.13-rc.28" />
+    <PackageReference Include="Andy.Tools" Version="2026.6.16-rc.69" />
+    <PackageReference Include="Andy.Tools.Data" Version="2026.6.16-rc.69" />
     <PackageReference Include="Andy.Tui" Version="2026.6.7-rc.50" />
     <PackageReference Include="JsonRepairSharp" Version="1.2.3" />
     <PackageReference Include="JsonSchema.Net" Version="9.2.0" />
@@ -66,6 +67,7 @@
   <!-- Disable trimming for Andy.* assemblies to avoid anonymous type issues -->
   <ItemGroup>
     <TrimmerRootAssembly Include="Andy.Tools" />
+    <TrimmerRootAssembly Include="Andy.Tools.Data" />
     <TrimmerRootAssembly Include="Andy.Llm" />
     <TrimmerRootAssembly Include="Andy.Engine" />
     <TrimmerRootAssembly Include="Andy.Model" />

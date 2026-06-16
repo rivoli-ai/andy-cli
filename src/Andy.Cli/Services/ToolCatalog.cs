@@ -62,6 +62,15 @@ public static class ToolCatalog
         // BashCommandTool retired: it was display-only (never executed). Real shell execution is now
         // provided by Andy.Tools' ExecuteCommandTool (id "execute_command"), gated by the permission layer.
         RegisterTool<Andy.Cli.Tools.CodeIndexTool>(services);
+
+        // Dataframe tools (Andy.Tools.Data) over an embedded in-memory DuckDB engine: load
+        // (CSV/JSON/Parquet/Delta), inspect, transform, aggregate, join, reshape, and export tabular
+        // data with no SQL or code execution. AddAndyDataFrameTools registers IDuckDbBackend +
+        // IDatasetCatalog (singletons) and each dataframe_* tool as a ToolRegistrationInfo — the same
+        // mechanism RegisterTool uses above — so they drain into the IToolRegistry alongside the rest.
+        // Andy.Tools.Data is a TrimmerRootAssembly (see Andy.Cli.csproj) so the tool constructors
+        // survive trimming/AOT. Path-bearing tools resolve an optional IPathPolicy from DI if present.
+        Andy.Tools.Data.ServiceCollectionExtensions.AddAndyDataFrameTools(services);
     }
 
     /// <summary>

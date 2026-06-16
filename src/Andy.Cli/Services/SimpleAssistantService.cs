@@ -36,6 +36,30 @@ public class SimpleAssistantService : IDisposable
     private int _toolCallCounter = 0;
     private int _lastInputTokens = 0;
     private int _lastOutputTokens = 0;
+    // Set once the provider reports real token usage for the current turn; gates the
+    // estimate fallback so we never double-count or show char/4 estimates over real numbers.
+    private volatile bool _turnHadRealUsage;
+    // Live metrics for the in-flight turn, read every frame by the processing indicator.
+    private readonly TurnStats _liveStats = new();
+
+    /// <summary>Live metrics (elapsed, operations, tokens) for the in-flight turn.</summary>
+    public TurnStats LiveStats => _liveStats;
+
+    /// <summary>
+    /// Receives the provider's real token usage for one round-trip (fired by
+    /// <see cref="UsageTrackingLlmProvider"/>). Input reflects the current context size sent;
+    /// output accumulates across the turn's round-trips. Also feeds the cumulative session
+    /// counter so the bottom status bar reflects real billed tokens.
+    /// </summary>
+    private void OnLlmUsage(Andy.Model.Llm.LlmUsage usage)
+    {
+        _turnHadRealUsage = true;
+        _lastInputTokens = usage.PromptTokens;
+        _lastOutputTokens = usage.CompletionTokens;
+        _liveStats.SetInputTokens(usage.PromptTokens);
+        _liveStats.AddOutputTokens(usage.CompletionTokens);
+        _tokenCounter?.AddTokens(usage.PromptTokens, usage.CompletionTokens);
+    }
 
     public SimpleAssistantService(
         ILlmProvider llmProvider,
@@ -77,9 +101,14 @@ public class SimpleAssistantService : IDisposable
         // Wrap the tool executor to update UI when tools execute
         var uiExecutor = new UiUpdatingToolExecutor(toolExecutor, loggerFactory?.CreateLogger<UiUpdatingToolExecutor>());
 
+        // Wrap the LLM provider so each round-trip's REAL token usage flows into the live turn
+        // stats (thinking row) and the session token counter, replacing char/4 estimates.
+        var usageTrackingProvider = new UsageTrackingLlmProvider(
+            llmProvider, OnLlmUsage, loggerFactory?.CreateLogger<UsageTrackingLlmProvider>());
+
         // Create the SimpleAgent
         _agent = new SimpleAgent(
-            llmProvider,
+            usageTrackingProvider,
             toolRegistry,
             uiExecutor,  // Use the wrapped executor
             systemPrompt,
@@ -91,6 +120,9 @@ public class SimpleAssistantService : IDisposable
         _agent.ToolCalled += (sender, e) =>
         {
             _logger?.LogInformation("Tool called: {ToolName}", e.ToolName);
+
+            // Count this operation against the live turn stats (drives the thinking-row counter).
+            _liveStats.IncrementOperations();
 
             // Use a unique ID for each tool call
             var baseToolId = e.ToolName.ToLower().Replace(" ", "_").Replace("-", "_");
@@ -177,11 +209,15 @@ public class SimpleAssistantService : IDisposable
                 return msg;
             }
 
-            // Show processing indicator while waiting for LLM response
-            _feed.AddProcessingIndicator();
-
-            // Track processing time
+            // Track processing time and begin live turn metrics before showing the indicator,
+            // so the thinking row has a valid clock/counters from its first frame.
             var startTime = DateTime.UtcNow;
+            _liveStats.Begin(startTime);
+            _turnHadRealUsage = false;
+
+            // Show processing indicator (renders live elapsed/operations/context stats) while
+            // waiting for the LLM response.
+            _feed.AddProcessingIndicator(_liveStats);
 
             // Estimate input tokens from user message and conversation history
             var history = _agent.GetHistory();
@@ -189,8 +225,11 @@ public class SimpleAssistantService : IDisposable
             var userMessageLength = userMessage.Length;
             _lastInputTokens = EstimateTokens(contextLength + userMessageLength);
 
-            // Update token counter with input tokens immediately
-            _tokenCounter?.AddTokens(_lastInputTokens, 0);
+            // Seed the live stats with an input estimate so the thinking row shows context size
+            // immediately; real per-round-trip usage (OnLlmUsage) overwrites it once the first LLM
+            // response arrives. The session token counter is updated from real usage only (or an
+            // estimate fallback at end of turn) to avoid double-counting.
+            _liveStats.SetInputTokens(_lastInputTokens);
 
             // INSTRUMENTATION: Publish LLM request event
             var requestEvent = new LlmRequestEvent
@@ -231,11 +270,17 @@ public class SimpleAssistantService : IDisposable
             };
             InstrumentationHub.Instance.Publish(responseEvent);
 
-            // Estimate output tokens from response
-            _lastOutputTokens = EstimateTokens(result.Response?.Length ?? 0);
-
-            // Update token counter with output tokens
-            _tokenCounter?.AddTokens(0, _lastOutputTokens);
+            // If the provider reported real usage during the turn, the live stats and session
+            // counter were already updated per round-trip via OnLlmUsage. Only fall back to a
+            // char/4 estimate when no usage was available (e.g. a provider that omits it), so the
+            // counters still move rather than freezing at zero.
+            if (!_turnHadRealUsage)
+            {
+                _lastOutputTokens = EstimateTokens(result.Response?.Length ?? 0);
+                _tokenCounter?.AddTokens(_lastInputTokens, _lastOutputTokens);
+                _liveStats.SetInputTokens(_lastInputTokens);
+                _liveStats.SetOutputTokens(_lastOutputTokens);
+            }
 
             // Complete any running tools
             var toolsToComplete = _runningTools.ToList();
@@ -428,6 +473,7 @@ public class SimpleAssistantService : IDisposable
             var duration = DateTime.UtcNow - startTime;
 
             // Clear the processing indicator (has 1 blank line built-in)
+            _liveStats.End();
             _feed.ClearProcessingIndicator();
 
             // Processing completed message disabled to avoid rendering issues
@@ -491,6 +537,7 @@ public class SimpleAssistantService : IDisposable
         catch (Exception ex)
         {
             // Clear the processing indicator if an error occurred
+            _liveStats.End();
             _feed.ClearProcessingIndicator();
 
             _logger?.LogError(ex, "Failed to process message");
@@ -539,6 +586,10 @@ public class SimpleAssistantService : IDisposable
         public TimeSpan TotalDuration { get; set; }
         public int LastInputTokens { get; set; }
         public int LastOutputTokens { get; set; }
+        public string ModelName { get; set; } = string.Empty;
+        public string ProviderName { get; set; } = string.Empty;
+        /// <summary>Model context window in tokens, or 0 when unknown.</summary>
+        public int MaxContextTokens { get; set; }
     }
 
     /// <summary>
@@ -558,7 +609,10 @@ public class SimpleAssistantService : IDisposable
             EstimatedTokens = estimatedTokens,
             TotalDuration = TimeSpan.Zero, // Duration tracked per-message in SimpleAgent
             LastInputTokens = _lastInputTokens,
-            LastOutputTokens = _lastOutputTokens
+            LastOutputTokens = _lastOutputTokens,
+            ModelName = _modelName,
+            ProviderName = _providerName,
+            MaxContextTokens = ContextWindow.GetMaxTokens(_modelName, _providerName)
         };
     }
 

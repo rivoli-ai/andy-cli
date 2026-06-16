@@ -425,9 +425,10 @@ namespace Andy.Cli.Widgets
         }
 
         /// <summary>Add processing indicator with animation.</summary>
-        public void AddProcessingIndicator()
+        /// <param name="stats">Optional live turn metrics rendered alongside the spinner.</param>
+        public void AddProcessingIndicator(TurnStats? stats = null)
         {
-            AddItem(new ProcessingIndicatorItem());
+            AddItem(new ProcessingIndicatorItem(stats));
         }
 
         /// <summary>Clear processing indicator.</summary>
@@ -1647,12 +1648,35 @@ namespace Andy.Cli.Widgets
     public sealed class ProcessingIndicatorItem : IFeedItem
     {
         private readonly DateTime _startTime;
+        private readonly TurnStats? _stats;
         private int _animationFrame;
         private readonly string[] _spinnerFrames = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" };
 
-        public ProcessingIndicatorItem()
+        public ProcessingIndicatorItem(TurnStats? stats = null)
         {
             _startTime = DateTime.UtcNow;
+            _stats = stats;
+        }
+
+        /// <summary>
+        /// Compose the live suffix appended to the processing message: elapsed time,
+        /// operations performed, and context tokens, separated by " · ". Public/static so the
+        /// formatting can be unit-tested without driving the display list.
+        /// </summary>
+        internal static string BuildStatsSuffix(TimeSpan elapsed, TurnStats? stats)
+        {
+            var segments = new System.Collections.Generic.List<string>();
+            if (elapsed.TotalSeconds >= 1)
+                segments.Add($"{elapsed.TotalSeconds:F1}s");
+            if (stats != null)
+            {
+                segments.Add(stats.Operations == 1 ? "1 op" : $"{stats.Operations} ops");
+                if (stats.InputTokens > 0)
+                    segments.Add($"{TokenFormat.Short(stats.InputTokens)} in");
+                if (stats.OutputTokens > 0)
+                    segments.Add($"{TokenFormat.Short(stats.OutputTokens)} out");
+            }
+            return segments.Count == 0 ? string.Empty : " · " + string.Join(" · ", segments);
         }
 
         public int MeasureLineCount(int width)
@@ -1677,12 +1701,9 @@ namespace Andy.Cli.Widgets
                 var dim = new DL.Rgb24(150, 150, 150);
                 var spinner = _spinnerFrames[_animationFrame];
 
-                // Calculate elapsed time
+                // Build message with spinner plus live stats (elapsed, operations, context tokens)
                 var elapsed = DateTime.UtcNow - _startTime;
-                var elapsedText = elapsed.TotalSeconds < 1 ? "" : $" [{elapsed.TotalSeconds:F1}s]";
-
-                // Build message with spinner
-                var message = $"{spinner} Processing request{elapsedText}";
+                var message = $"{spinner} Processing request{BuildStatsSuffix(elapsed, _stats)}";
 
                 // Draw background rectangle for full line width to clear any previous content
                 b.DrawRect(new DL.Rect(x, row, width, 1, theme.Background));

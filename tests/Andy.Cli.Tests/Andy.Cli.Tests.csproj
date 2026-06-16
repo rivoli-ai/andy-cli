@@ -9,7 +9,7 @@
 
   <ItemGroup>
     <PackageReference Include="Andy.Llm" Version="2026.6.7-rc.38" />
-    <PackageReference Include="Andy.Tools" Version="2026.6.13-rc.28" />
+    <PackageReference Include="Andy.Tools" Version="2026.6.16-rc.69" />
     <PackageReference Include="Andy.Model" Version="2026.5.31-rc.8" />
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="JsonSchema.Net" Version="9.2.0" />
@@ -52,6 +52,11 @@
     <Compile Include="Widgets/MarkdownRendererItemMeasureTests.cs" />
     <!-- Token counter tests -->
     <Compile Include="Widgets/TokenCounterTests.cs" />
+    <Compile Include="Widgets/ContextStatusBarTests.cs" />
+    <Compile Include="Widgets/TurnStatsTests.cs" />
+    <Compile Include="Widgets/ProcessingIndicatorStatsTests.cs" />
+    <Compile Include="Services/ContextWindowTests.cs" />
+    <Compile Include="Services/UsageTrackingLlmProviderTests.cs" />
     <!-- KeyHintsBar tests -->
     <Compile Include="Widgets/KeyHintsBarTests.cs" />
     <!-- PromptLine color/style tests -->

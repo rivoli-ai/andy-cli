@@ -241,6 +241,7 @@ class Program
             hints.SetHints(new[] { ("Ctrl+P", "Commands"), ("PgUp/PgDn", "Scroll"), ("F2", "Toggle HUD"), ("ESC", "Quit"), ("", "http://localhost:5555") });
             var toast = new Toast(); // Don't show initial toast as it interferes with prompt
             var tokenCounter = new TokenCounter();
+            var contextStatusBar = new ContextStatusBar();
             var statusMessage = new StatusMessage();
             var prompt = new PromptLine();
             bool isProcessingMessage = false; // Track if we're processing a message
@@ -1504,18 +1505,42 @@ class Program
                 var baseDl = b.Build();
                 var wb = new DL.DisplayListBuilder();
 
-                // Calculate heights for bottom UI elements
-                int tokenCounterWidth = tokenCounter.GetWidth();
-                int reservedRightWidth = tokenCounterWidth + 2;
+                // Calculate heights for bottom UI elements.
+                // The context status bar now occupies its own full-width bottom row (the token
+                // counter that used to share the hints row is folded into it), so the hints bar
+                // gets the full viewport width and reserves nothing on its right.
+                int reservedRightWidth = 0;
 
                 // Get the actual height needed for hints bar (may be multi-line)
-                int hintsBarHeight = hints.GetRequiredHeight(viewport.Width - reservedRightWidth);
+                int hintsBarHeight = hints.GetRequiredHeight(viewport.Width);
 
                 // Bottom layout (from bottom up):
-                // - hintsBarHeight lines: hints bar + token counter
+                // - 1 line: context status bar (context metrics + model info)
+                // - hintsBarHeight lines: hints bar
                 // - 1 line: status message
                 // Toast overlaps with content area when visible
-                int bottomReserved = hintsBarHeight + 1; // hints + message
+                int bottomReserved = hintsBarHeight + 2; // status bar + hints + message
+
+                // Update context status bar with current metrics
+                // Use cumulative token counts from the TokenCounter
+                int contextTurnCount = 0;
+                int contextMaxTokens = 0;
+                string contextModel = string.Empty;
+                string contextProvider = string.Empty;
+                if (aiService != null)
+                {
+                    var stats = aiService.GetContextStats();
+                    contextTurnCount = stats.TurnCount;
+                    contextMaxTokens = stats.MaxContextTokens;
+                    contextModel = stats.ModelName;
+                    contextProvider = stats.ProviderName;
+                }
+                contextStatusBar.Update(
+                    tokenCounter.TotalInputTokens,
+                    tokenCounter.TotalOutputTokens,
+                    contextMaxTokens,
+                    contextTurnCount);
+                contextStatusBar.SetModelInfo(contextModel, contextProvider);
 
                 // Main output area and prompt at bottom
                 // Ensure we have enough space to render
@@ -1600,22 +1625,23 @@ class Program
                     b.DrawText(new DL.TextRun(2, 3, $"Min: {MIN_WIDTH}x{MIN_HEIGHT}", new DL.Rgb24(200, 200, 200), null, DL.CellAttrFlags.None));
                 }
 
-                // Render bottom UI elements (hints, token counter, status message)
+                // Render bottom UI elements (context status bar, hints, status message)
                 // These are positioned from the bottom up
-                int statusMessageY = viewport.Height - hintsBarHeight - 1;
+                int statusMessageY = viewport.Height - hintsBarHeight - 2;
                 statusMessage.RenderAt(2, statusMessageY, Math.Max(0, viewport.Width - 4), baseDl, wb);
 
                 toast.Tick(); // Advance toast TTL
-                int toastY = viewport.Height - hintsBarHeight - 2;
+                int toastY = viewport.Height - hintsBarHeight - 3;
                 toast.RenderAt(2, toastY, baseDl, wb);
 
-                hints.Render(viewport, baseDl, wb, reservedRightWidth);
+                // Render hints into a viewport one row shorter so they sit ABOVE the context
+                // status bar (which the bar owns at viewport.Height - 1). KeyHintsBar anchors
+                // itself to the bottom of the viewport it is given, so shrinking the height by
+                // one lifts it clear of the bar instead of being painted over.
+                hints.Render((viewport.Width, viewport.Height - 1), baseDl, wb, reservedRightWidth);
 
-                int tokenCounterX = viewport.Width - tokenCounterWidth - 2;
-                if (tokenCounterX > 0)
-                {
-                    tokenCounter.RenderAt(tokenCounterX, viewport.Height - 1, baseDl, wb);
-                }
+                // Render the context status bar on the bottom row of the viewport
+                contextStatusBar.Render(viewport, baseDl, wb);
 
                 // Render command palette (if open) into a SEPARATE builder. Overlays
                 // must occlude the content behind them, so they keep their own

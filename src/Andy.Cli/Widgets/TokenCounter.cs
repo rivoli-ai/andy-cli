@@ -26,6 +26,12 @@ namespace Andy.Cli.Widgets
             _totalOutputTokens = 0;
         }
 
+        /// <summary>Get the total input tokens.</summary>
+        public int TotalInputTokens => _totalInputTokens;
+
+        /// <summary>Get the total output tokens.</summary>
+        public int TotalOutputTokens => _totalOutputTokens;
+
         /// <summary>Set the colors for the token counter.</summary>
         public void SetColors(DL.Rgb24 fg, DL.Rgb24 bg, DL.Rgb24 accent)
         {
