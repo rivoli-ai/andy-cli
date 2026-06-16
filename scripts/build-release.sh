@@ -8,7 +8,19 @@ set -e
 VERSION=${1:-"v0.0.0-local"}
 OUTPUT_DIR="release-artifacts"
 
-echo "Building Andy CLI $VERSION"
+# The version shown to users (VersionInfo reads AssemblyInformationalVersion, which accepts any
+# string), with any leading "v" stripped.
+RAW_VERSION="${VERSION#v}"
+
+# AssemblyVersion/FileVersion must be a numeric, dot-separated System.Version with each component
+# in 0..65534 — a value like "2026061601" or a SemVer pre-release would fail the build. Derive a
+# safe numeric version from RAW_VERSION (first up-to-4 digit groups, each clamped), defaulting to
+# 0.0.0. The display string still comes from InformationalVersion below, so users see RAW_VERSION.
+SAFE_VERSION="$(printf '%s' "$RAW_VERSION" | grep -oE '[0-9]+' | head -4 \
+    | awk '{ n=$1+0; if (n>65534) n=65534; print n }' | paste -sd. -)"
+[ -z "$SAFE_VERSION" ] && SAFE_VERSION="0.0.0"
+
+echo "Building Andy CLI $RAW_VERSION (assembly version $SAFE_VERSION)"
 echo "================================"
 
 # Clean previous builds
@@ -36,8 +48,9 @@ for platform in "${PLATFORMS[@]}"; do
     # Build directory for this platform
     BUILD_DIR="$OUTPUT_DIR/build/$artifact_name"
 
-    # Publish. Pass the release version through so the binary reports it
-    # (VersionInfo reads AssemblyInformationalVersion); strip any leading "v".
+    # Publish. InformationalVersion carries the human-readable release string (what the binary
+    # reports); Version/FileVersion get the sanitized numeric version so the build never fails on
+    # a non-System.Version release name.
     dotnet publish src/Andy.Cli/Andy.Cli.csproj \
         --configuration Release \
         --runtime "$runtime" \
@@ -45,8 +58,9 @@ for platform in "${PLATFORMS[@]}"; do
         --output "$BUILD_DIR" \
         -p:PublishTrimmed=true \
         -p:PublishSingleFile=true \
-        -p:Version="${VERSION#v}" \
-        -p:InformationalVersion="${VERSION#v}"
+        -p:Version="$SAFE_VERSION" \
+        -p:FileVersion="$SAFE_VERSION" \
+        -p:InformationalVersion="$RAW_VERSION"
 
     # Create archive
     cd "$BUILD_DIR"
