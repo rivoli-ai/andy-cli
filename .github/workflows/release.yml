@@ -1,5 +1,14 @@
 name: Release Build
 
+# On-demand cross-platform release. Build the binaries only when you want a new
+# version — never on every merge:
+#   * push a tag:        git tag v2026.6.16 && git push origin v2026.6.16   (builds + publishes a GitHub Release)
+#   * or run manually:   Actions -> "Release Build" -> Run workflow          (builds + smoke-tests; publishes only on a tag)
+#
+# Pipeline: secret-scan (gate) -> build (6 targets) -> smoke-test -> publish Release.
+#
+# The signed/notarized variant lives in release-signed.yml (manual only).
+
 on:
   push:
     tags:
@@ -7,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g., 1.0.0). Defaults to the current date when omitted.'
+        description: 'Release version (e.g., 2026.6.16). Defaults to the current date when omitted.'
         required: false
         type: string
 
@@ -15,14 +24,37 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  # 1) Gate: refuse to build/publish a tree that contains secrets. Runs before anything is built,
+  #    so a version that leaks a secret is never produced. Scans the working tree as it will be
+  #    compiled (--no-git), which is what ends up "in the app".
+  secret-scan:
+    name: Secret scan (gate)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+      - name: Scan for secrets with gitleaks
+        run: |
+          set -euo pipefail
+          TAG="$(curl -fsSL https://api.github.com/repos/gitleaks/gitleaks/releases/latest | grep -oP '"tag_name": *"\K[^"]+')"
+          VER="${TAG#v}"
+          echo "Using gitleaks ${TAG}"
+          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/${TAG}/gitleaks_${VER}_linux_x64.tar.gz" | tar -xz gitleaks
+          # --no-git scans the checked-out files (what gets compiled), not historical commits.
+          # Exit non-zero (fail the release) if anything is found.
+          ./gitleaks detect --no-git --source . --redact --verbose --exit-code 1
+
+  # 2) Build all six platform binaries (self-contained, single-file, trimmed) via the shared script.
+  build:
+    name: Build binaries
+    needs: secret-scan
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.VERSION }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
 
@@ -66,10 +98,110 @@ jobs:
             release-artifacts/SHA256SUMS.txt
           retention-days: 30
 
-      - name: Attach to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+  # 3) Simple post-build check: each binary launches on its native platform and reports the version
+  #    it was built as. Covers both architectures on macOS plus x64 Linux/Windows on standard runners;
+  #    linux-arm64 and win-arm64 are built but not smoke-tested here (no free arm64 Linux/Windows
+  #    runners) — add `ubuntu-24.04-arm` / `windows-11-arm` entries if those runners are available.
+  smoke-test:
+    name: Smoke test ${{ matrix.artifact }}
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: andy-cli-linux-x64
+            archive: andy-cli-linux-x64.tar.gz
+          - os: macos-13          # Intel
+            artifact: andy-cli-macos-x64
+            archive: andy-cli-macos-x64.tar.gz
+          - os: macos-14          # Apple Silicon
+            artifact: andy-cli-macos-arm64
+            archive: andy-cli-macos-arm64.tar.gz
+          - os: windows-latest
+            artifact: andy-cli-windows-x64
+            archive: andy-cli-windows-x64.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-binaries
+          path: dist
+
+      - name: Run binary (Unix)
+        if: runner.os != 'Windows'
+        env:
+          EXPECTED: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          archive="$(find dist -name '${{ matrix.archive }}' | head -1)"
+          mkdir run && tar -xzf "$archive" -C run
+          chmod +x run/andy-cli
+          out="$(run/andy-cli --version)"
+          echo "Output: $out"
+          echo "$out" | grep -q "andy-cli"
+          echo "$out" | grep -q "${EXPECTED#v}"
+
+      - name: Run binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          EXPECTED: ${{ needs.build.outputs.version }}
+        run: |
+          $archive = Get-ChildItem -Recurse -Filter '${{ matrix.archive }}' dist | Select-Object -First 1
+          New-Item -ItemType Directory run | Out-Null
+          Expand-Archive $archive.FullName -DestinationPath run
+          $out = & run/andy-cli.exe --version | Out-String
+          Write-Host "Output: $out"
+          if ($out -notmatch "andy-cli") { Write-Error "missing andy-cli marker"; exit 1 }
+          $expected = "${env:EXPECTED}" -replace '^v',''
+          if ($out -notmatch [regex]::Escape($expected)) { Write-Error "version $expected not reported"; exit 1 }
+
+  # 4) Publish the GitHub Release (web) with auto-generated notes plus a human summary. Tags only.
+  release:
+    name: Publish GitHub Release
+    needs: [build, smoke-test]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history so we can diff against the previous tag
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-binaries
+          path: release-artifacts
+
+      - name: Build release summary
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.build.outputs.version }}"
+          PREV="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          {
+            echo "## andy-cli ${VERSION}"
+            echo
+            echo "Self-contained binaries for Linux, macOS and Windows (x64 and arm64) — no .NET runtime required. Download the archive for your platform, extract, and run."
+            echo
+            echo "### Changes"
+            if [ -n "$PREV" ]; then
+              git log --no-merges --pretty='- %s' "${PREV}..${GITHUB_REF_NAME}"
+            else
+              git log --no-merges --pretty='- %s' -n 20
+            fi
+            echo
+            echo "### Verify downloads"
+            echo '```'
+            echo "sha256sum -c SHA256SUMS.txt"
+            echo '```'
+          } > RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
+
+      - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
+          body_path: RELEASE_NOTES.md
+          generate_release_notes: true  # appends GitHub's auto PR/commit changelog under the summary
           files: |
             release-artifacts/*.tar.gz
             release-artifacts/*.zip

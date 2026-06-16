@@ -36,14 +36,17 @@ for platform in "${PLATFORMS[@]}"; do
     # Build directory for this platform
     BUILD_DIR="$OUTPUT_DIR/build/$artifact_name"
 
-    # Publish
+    # Publish. Pass the release version through so the binary reports it
+    # (VersionInfo reads AssemblyInformationalVersion); strip any leading "v".
     dotnet publish src/Andy.Cli/Andy.Cli.csproj \
         --configuration Release \
         --runtime "$runtime" \
         --self-contained true \
         --output "$BUILD_DIR" \
         -p:PublishTrimmed=true \
-        -p:PublishSingleFile=true
+        -p:PublishSingleFile=true \
+        -p:Version="${VERSION#v}" \
+        -p:InformationalVersion="${VERSION#v}"
 
     # Create archive
     cd "$BUILD_DIR"

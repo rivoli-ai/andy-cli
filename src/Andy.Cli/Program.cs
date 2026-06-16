@@ -149,6 +149,15 @@ class Program
             File.WriteAllText(debugCheckFile, $"Program.Main() at {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC\nANDY_DEBUG_RAW = '{debugRawEnv}'\nArgs: {string.Join(", ", args)}\n");
         }
 
+        // Print version and exit (non-interactive). Used by the release smoke test to verify the
+        // built binary reports the version it was published as. Handled here because "--version"
+        // starts with '-' and would otherwise fall through to interactive TUI mode.
+        if (args.Length > 0 && (args[0] == "--version" || args[0] == "-v" || args[0] == "version"))
+        {
+            Console.WriteLine($"andy-cli {VersionInfo.ResolveDisplayVersion()}");
+            return;
+        }
+
         // Check for --acp flag to run in ACP server mode
         if (args.Length > 0 && args[0] == "--acp")
         {
