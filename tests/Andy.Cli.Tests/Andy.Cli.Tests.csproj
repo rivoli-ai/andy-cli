@@ -35,6 +35,7 @@
     <Compile Include="TestHelpers/TestCompatibilityShims.cs" />
     <Compile Include="VersionInfoTests.cs" />
     <Compile Include="Commands/ModelCommandTests.cs" />
+    <Compile Include="Commands/PermissionsCommandTests.cs" />
     <Compile Include="Themes/ThemeSwitchingTests.cs" />
     <Compile Include="Themes/PopularThemesTests.cs" />
     <Compile Include="Services/ProviderDetectionServiceTests.cs" />

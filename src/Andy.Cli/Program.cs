@@ -389,6 +389,7 @@ class Program
             // Initialize commands
             var modelCommand = new ModelCommand(serviceProvider);
             var toolsCommand = new ToolsCommand(serviceProvider);
+            var permissionsCommand = new PermissionsCommand(serviceProvider);
             var themeCommand = new ThemeCommand(themeMemory);
             var commandPalette = new CommandPalette();
 
@@ -753,6 +754,10 @@ class Program
                             "- **/tools list [category]**: List available tools\n" +
                             "- **/tools info <tool_name>**: Show tool details\n" +
                             "- **/tools execute <tool_name> [params]**: Run a tool\n\n" +
+                            "### Permission Commands:\n" +
+                            "- **/permissions**: List effective permission rules by layer\n" +
+                            "- **/permissions allow|ask|deny <tool[(spec)]> [--scope user|project|local]**: Persist a rule\n" +
+                            "- **/permissions path**: Show the rule file locations\n\n" +
                             "## Providers:\n" +
                             "- **cerebras**: Fast Llama models\n" +
                             "- **openai**: GPT-4 models\n" +
@@ -1229,6 +1234,14 @@ class Program
                                     }
                                     return;
                                 }
+                                else if (commandName == "permissions" || commandName == "perms" || commandName == "perm")
+                                {
+                                    feed.AddUserMessage(cmd);
+                                    var result = await permissionsCommand.ExecuteAsync(args);
+                                    // Fence the output so the layered rule list stays aligned (monospace).
+                                    feed.AddMarkdownRich("```\n" + result.Message + "\n```");
+                                    return;
+                                }
                                 else if (commandName == "help" || commandName == "?")
                                 {
                                     feed.AddUserMessage(cmd);
@@ -1268,6 +1281,10 @@ class Program
                                         "- **/tools list [category]**: List available tools\n" +
                                         "- **/tools info <tool_name>**: Show tool details\n" +
                                         "- **/tools execute <tool_name> [params]**: Run a tool\n\n" +
+                                        "### Permission Commands:\n" +
+                                        "- **/permissions**: List effective permission rules by layer\n" +
+                                        "- **/permissions allow|ask|deny <tool[(spec)]> [--scope user|project|local]**: Persist a rule\n" +
+                                        "- **/permissions path**: Show the rule file locations\n\n" +
                                         "## Providers:\n" +
                                         "- **cerebras**: Fast Llama models\n" +
                                         "- **openai**: GPT-4 models\n" +
@@ -2078,6 +2095,11 @@ class Program
             case "t":
                 command = new ToolsCommand(serviceProvider);
                 break;
+            case "permissions":
+            case "perms":
+            case "perm":
+                command = new PermissionsCommand(serviceProvider);
+                break;
             case "help":
             case "?":
                 Console.WriteLine("Andy CLI - AI Assistant Command Line Interface");
@@ -2087,6 +2109,7 @@ class Program
                 Console.WriteLine("Commands:");
                 Console.WriteLine("  model, m       - Manage AI models");
                 Console.WriteLine("  tools, t       - Manage and list available tools");
+                Console.WriteLine("  permissions    - View and modify tool permission rules");
                 Console.WriteLine("  help, ?        - Show this help message");
                 Console.WriteLine();
                 Console.WriteLine("Run without arguments to start the interactive TUI mode.");
