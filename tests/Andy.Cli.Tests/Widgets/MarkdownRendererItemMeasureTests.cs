@@ -103,4 +103,34 @@ public class MarkdownRendererItemMeasureTests
         Assert.NotEmpty(bodyRuns);
         Assert.All(bodyRuns, r => Assert.NotEqual(heading, r.Fg));
     }
+
+    [Fact]
+    public void Render_ColorsHeaders_EvenWithOpaqueThemeBackground()
+    {
+        // The default theme has a null Background (SetColors is skipped). Real themes are opaque,
+        // so SetColors runs before SetHeaderColors - verify headers still get the heading color
+        // and aren't overwritten by the body/accent color in that path.
+        var prev = Andy.Cli.Themes.Theme.Current;
+        try
+        {
+            var opaque = new Andy.Cli.Themes.Theme
+            {
+                Background = new DL.Rgb24(10, 10, 12),
+                Text = new DL.Rgb24(220, 220, 220),
+                Accent = new DL.Rgb24(120, 160, 255),
+                Heading = new DL.Rgb24(215, 125, 40),
+            };
+            Andy.Cli.Themes.Theme.Current = opaque;
+
+            var item = new MarkdownRendererItem("## Heading Text\n\nbody line");
+            var b = new DL.DisplayListBuilder();
+            item.RenderSlice(0, 0, 80, 0, item.MeasureLineCount(80), new DL.DisplayListBuilder().Build(), b);
+            var headerRuns = b.Build().Ops.OfType<DL.TextRun>()
+                .Where(r => !string.IsNullOrEmpty(r.Content) && r.Y == 0).ToList();
+
+            Assert.NotEmpty(headerRuns);
+            Assert.All(headerRuns, r => Assert.Equal(opaque.Heading, r.Fg));
+        }
+        finally { Andy.Cli.Themes.Theme.Current = prev; }
+    }
 }
