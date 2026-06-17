@@ -143,6 +143,7 @@
     <!-- New unit tests for previously-uncovered correctness-critical logic -->
     <Compile Include="Services/JsonRepairServiceTests.cs" />
     <Compile Include="Services/PermissionRuleFileTests.cs" />
+    <Compile Include="Services/ToolCatalogDataFrameTests.cs" />
   </ItemGroup>
 
   <ItemGroup>
