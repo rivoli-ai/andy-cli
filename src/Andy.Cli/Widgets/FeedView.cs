@@ -1379,56 +1379,71 @@ namespace Andy.Cli.Widgets
 
     public sealed class UserBubbleItem : IFeedItem
     {
-        private readonly string[] _lines;
+        private readonly string _text;
         private readonly int _messageNumber;
+        // Wrapped body cached per width: the prompt submits the full (possibly multi-line or
+        // long, soft-wrapped) message, so the bubble must WRAP it - truncating to the bubble
+        // width previously dropped everything past the first visual row.
+        private int _cachedWidth = -1;
+        private List<string> _cachedBody = new();
+
         public UserBubbleItem(string text, int messageNumber = 0)
         {
-            _lines = (text ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+            _text = text ?? string.Empty;
             _messageNumber = messageNumber;
         }
-        public int MeasureLineCount(int width) => Math.Max(1, _lines.Length + 2); // top and bottom border rows
+
+        private List<string> Body(int width)
+        {
+            if (width == _cachedWidth) return _cachedBody;
+            _cachedBody = TextWrap.Wrap(_text, Math.Max(1, width - 4));
+            if (_cachedBody.Count == 0) _cachedBody.Add(string.Empty);
+            _cachedWidth = width;
+            return _cachedBody;
+        }
+
+        // top border + label row + wrapped body rows + bottom border
+        public int MeasureLineCount(int width) => Body(width).Count + 3;
+
         public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
-            int total = _lines.Length + 2;
+            var body = Body(width);
+            int total = body.Count + 3;
             int end = Math.Min(total, startLine + maxLines);
             var borderColor = new DL.Rgb24(120, 180, 255); // light blue
             var labelColor = new DL.Rgb24(150, 200, 255);
+            var textColor = new DL.Rgb24(220, 220, 220);
+            int inner = Math.Max(0, width - 2);
+
             for (int i = startLine; i < end; i++)
             {
                 int row = y + (i - startLine);
                 if (i == 0)
                 {
-                    // top border with rounded corners
-                    int inner = Math.Max(0, width - 2);
                     b.DrawText(new DL.TextRun(x, row, "╭" + new string('─', inner) + "╮", borderColor, null, DL.CellAttrFlags.None));
+                    continue;
                 }
-                else if (i == total - 1)
+                if (i == total - 1)
                 {
-                    // bottom border with rounded corners
-                    int inner = Math.Max(0, width - 2);
                     b.DrawText(new DL.TextRun(x, row, "╰" + new string('─', inner) + "╯", borderColor, null, DL.CellAttrFlags.None));
+                    continue;
+                }
+
+                // Side borders for every interior row.
+                if (width >= 1) b.DrawText(new DL.TextRun(x, row, "│", borderColor, null, DL.CellAttrFlags.None));
+                if (width >= 2) b.DrawText(new DL.TextRun(x + width - 1, row, "│", borderColor, null, DL.CellAttrFlags.None));
+
+                if (i == 1)
+                {
+                    // Label on its own row so the wrapped message below uses the full width.
+                    string label = _messageNumber > 0 ? $"You (#{_messageNumber}):" : "You:";
+                    b.DrawText(new DL.TextRun(x + 2, row, label, labelColor, null, DL.CellAttrFlags.Bold));
                 }
                 else
                 {
-                    // content line with side borders
-                    string content = _lines[i - 1];
-                    if (i == 1)
-                    {
-                        // show label with message number on first content row
-                        string label = _messageNumber > 0 ? $"You (#{_messageNumber}):" : "You:";
-                        b.DrawText(new DL.TextRun(x + 2, row, label + " ", labelColor, null, DL.CellAttrFlags.Bold));
-                        int available = Math.Max(0, width - 4 - (label.Length + 1));
-                        string t = available > 0 ? (content.Length > available ? content.Substring(0, available) : content) : string.Empty;
-                        b.DrawText(new DL.TextRun(x + 2 + label.Length + 1, row, t, new DL.Rgb24(220, 220, 220), null, DL.CellAttrFlags.None));
-                    }
-                    else
-                    {
-                        int available = Math.Max(0, width - 4);
-                        string t = content.Length > available ? content.Substring(0, available) : content;
-                        b.DrawText(new DL.TextRun(x + 2, row, t, new DL.Rgb24(220, 220, 220), null, DL.CellAttrFlags.None));
-                    }
-                    if (width >= 1) b.DrawText(new DL.TextRun(x, row, "│", borderColor, null, DL.CellAttrFlags.None));
-                    if (width >= 2) b.DrawText(new DL.TextRun(x + width - 1, row, "│", borderColor, null, DL.CellAttrFlags.None));
+                    int idx = i - 2; // index into wrapped body rows
+                    if (idx >= 0 && idx < body.Count)
+                        b.DrawText(new DL.TextRun(x + 2, row, body[idx], textColor, null, DL.CellAttrFlags.None));
                 }
             }
         }
