@@ -9,7 +9,7 @@
 
   <ItemGroup>
     <PackageReference Include="Andy.Llm" Version="2026.6.7-rc.38" />
-    <PackageReference Include="Andy.Tools" Version="2026.6.16-rc.69" />
+    <PackageReference Include="Andy.Tools" Version="2026.6.17-rc.75" />
     <PackageReference Include="Andy.Model" Version="2026.5.31-rc.8" />
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="JsonSchema.Net" Version="9.2.0" />
@@ -52,6 +52,7 @@
     <Compile Include="Widgets/MarkdownRenderingTests.cs" />
     <Compile Include="Widgets/MarkdownRendererItemMeasureTests.cs" />
     <Compile Include="Widgets/PermissionsManagerTests.cs" />
+    <Compile Include="Widgets/UserBubbleItemTests.cs" />
     <!-- Token counter tests -->
     <Compile Include="Widgets/TokenCounterTests.cs" />
     <Compile Include="Widgets/ContextStatusBarTests.cs" />
