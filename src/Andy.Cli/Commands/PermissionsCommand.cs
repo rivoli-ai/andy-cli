@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Andy.Cli.Services;
 using Andy.Permissions.Model;
 using Andy.Permissions.Store;
 using Microsoft.Extensions.DependencyInjection;
@@ -38,6 +39,8 @@ public class PermissionsCommand : ICommand
             "allow" => await SetRuleAsync(args, PermissionOutcome.Allow, cancellationToken),
             "ask" => await SetRuleAsync(args, PermissionOutcome.Ask, cancellationToken),
             "deny" => await SetRuleAsync(args, PermissionOutcome.Deny, cancellationToken),
+            "remove" or "rm" or "delete" or "del" => RemoveRule(args),
+            "clear" => ClearScope(args),
             "path" or "paths" or "where" => ShowPaths(),
             "help" or "?" or "-h" or "--help" => Help(),
             _ => CommandResult.Failure($"Unknown subcommand: {sub}. Use 'permissions help' for usage."),
@@ -77,7 +80,7 @@ public class PermissionsCommand : ICommand
             sb.AppendLine();
         }
 
-        sb.AppendLine("Modify:  permissions allow|ask|deny <tool[(specifier)]> [--scope user|project|local]");
+        sb.AppendLine("Modify:  permissions allow|ask|deny|remove <tool[(specifier)]> [--scope user|project|local]");
         return CommandResult.CreateSuccess(sb.ToString().TrimEnd());
     }
 
@@ -112,6 +115,48 @@ public class PermissionsCommand : ICommand
             $"{outcome} {tool}({specifier}) written to the {scope} layer. Run 'permissions list' to verify.");
     }
 
+    private CommandResult RemoveRule(string[] args)
+    {
+        var positional = args.Skip(1).Where(a => !a.StartsWith("-")).ToArray();
+        if (positional.Length == 0)
+            return CommandResult.Failure("Usage: permissions remove <tool[(specifier)]> [--scope user|project|local]");
+        if (!TryParseScope(args, out var scope, out var scopeError))
+            return CommandResult.Failure(scopeError);
+
+        var (tool, specifier) = ParseSpec(positional[0]);
+        var rule = $"{tool}({specifier})";
+        var path = PermissionRuleFile.PathForScope(scope, Directory.GetCurrentDirectory());
+
+        var file = PermissionRuleFile.Load(path);
+        if (!file.Remove(rule))
+            return CommandResult.CreateSuccess($"No rule {rule} found in the {scope} layer.\n  ({path})");
+        try
+        {
+            file.Save(path);
+        }
+        catch (Exception ex)
+        {
+            return CommandResult.Failure($"Failed to update {path}: {ex.Message}");
+        }
+        return CommandResult.CreateSuccess($"Removed {rule} from the {scope} layer. Run 'permissions list' to verify.");
+    }
+
+    private CommandResult ClearScope(string[] args)
+    {
+        if (!TryParseScope(args, out var scope, out var scopeError))
+            return CommandResult.Failure(scopeError);
+        var path = PermissionRuleFile.PathForScope(scope, Directory.GetCurrentDirectory());
+        try
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch (Exception ex)
+        {
+            return CommandResult.Failure($"Failed to clear {path}: {ex.Message}");
+        }
+        return CommandResult.CreateSuccess($"Cleared all rules in the {scope} layer.\n  ({path})");
+    }
+
     private CommandResult ShowPaths()
     {
         var opts = new PermissionStoreOptions().WithProjectDirectory(Directory.GetCurrentDirectory());
@@ -136,15 +181,17 @@ public class PermissionsCommand : ICommand
         sb.AppendLine("  permissions allow <tool[(specifier)]> [--scope S]   Persist an Allow rule");
         sb.AppendLine("  permissions ask   <tool[(specifier)]> [--scope S]   Persist an Ask (prompt) rule");
         sb.AppendLine("  permissions deny  <tool[(specifier)]> [--scope S]   Persist a Deny rule");
+        sb.AppendLine("  permissions remove <tool[(specifier)]> [--scope S]  Delete a rule from a layer file");
+        sb.AppendLine("  permissions clear [--scope S]                       Delete ALL rules in a layer file");
         sb.AppendLine("  permissions path                                    Show the rule file locations");
         sb.AppendLine("  permissions help                                    Show this help");
         sb.AppendLine();
-        sb.AppendLine("Scope (S): user (default), project, or local.");
+        sb.AppendLine("Scope (S): user (default), project, or local. Builtin/Session/Injected rules");
+        sb.AppendLine("are not file-backed and cannot be edited here.");
         sb.AppendLine("Specifier defaults to * (any args). Examples:");
         sb.AppendLine("  permissions allow execute_command(*)");
         sb.AppendLine("  permissions deny  write_file --scope project");
-        sb.AppendLine();
-        sb.AppendLine("To remove a rule, edit the file shown by 'permissions path'.");
+        sb.AppendLine("  permissions remove execute_command(*)");
         return CommandResult.CreateSuccess(sb.ToString().TrimEnd());
     }
 

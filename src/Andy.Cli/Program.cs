@@ -390,6 +390,7 @@ class Program
             var modelCommand = new ModelCommand(serviceProvider);
             var toolsCommand = new ToolsCommand(serviceProvider);
             var permissionsCommand = new PermissionsCommand(serviceProvider);
+            var permissionsManager = new Andy.Cli.Widgets.PermissionsManager(Directory.GetCurrentDirectory());
             var themeCommand = new ThemeCommand(themeMemory);
             var commandPalette = new CommandPalette();
 
@@ -981,6 +982,23 @@ class Program
                         return;
                     }
 
+                    // Interactive permissions manager owns all keys while open.
+                    if (permissionsManager.IsOpen)
+                    {
+                        switch (k.Key)
+                        {
+                            case ConsoleKey.Escape: permissionsManager.Close(); return;
+                            case ConsoleKey.UpArrow: permissionsManager.MoveSelection(-1); return;
+                            case ConsoleKey.DownArrow: permissionsManager.MoveSelection(1); return;
+                            case ConsoleKey.Enter:
+                            case ConsoleKey.Spacebar: permissionsManager.CycleSelectedOutcome(); return;
+                            case ConsoleKey.Delete: permissionsManager.DeleteSelected(); return;
+                        }
+                        if (k.KeyChar is 'd' or 'D') { permissionsManager.DeleteSelected(); return; }
+                        if (k.KeyChar is 'r' or 'R') { permissionsManager.Reload(); return; }
+                        return; // swallow any other key while the manager is open
+                    }
+
                     if (k.Key == ConsoleKey.Escape)
                     {
                         // If command palette is open, close it first
@@ -1236,6 +1254,12 @@ class Program
                                 }
                                 else if (commandName == "permissions" || commandName == "perms" || commandName == "perm")
                                 {
+                                    // No args -> open the interactive manager; subcommands run the command.
+                                    if (args.Length == 0 || args[0].Equals("manage", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        permissionsManager.Open();
+                                        return;
+                                    }
                                     feed.AddUserMessage(cmd);
                                     var result = await permissionsCommand.ExecuteAsync(args);
                                     // Fence the output so the layered rule list stays aligned (monospace).
@@ -1675,6 +1699,7 @@ class Program
                 // main surface — otherwise the feed bleeds through the palette.
                 var overlayB = new DL.DisplayListBuilder();
                 commandPalette.Render(new L.Rect(0, 0, viewport.Width, viewport.Height), baseDl, overlayB);
+                permissionsManager.Render(new L.Rect(0, 0, viewport.Width, viewport.Height), baseDl, overlayB);
 
                 var overlay = new DL.DisplayListBuilder();
                 hud.ViewportCols = viewport.Width; hud.ViewportRows = viewport.Height;

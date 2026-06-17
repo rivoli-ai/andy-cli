@@ -51,6 +51,7 @@
     <!-- Markdown rendering tests -->
     <Compile Include="Widgets/MarkdownRenderingTests.cs" />
     <Compile Include="Widgets/MarkdownRendererItemMeasureTests.cs" />
+    <Compile Include="Widgets/PermissionsManagerTests.cs" />
     <!-- Token counter tests -->
     <Compile Include="Widgets/TokenCounterTests.cs" />
     <Compile Include="Widgets/ContextStatusBarTests.cs" />
@@ -141,6 +142,7 @@
     <Compile Include="Widgets/InlineCommandHelpTests.cs" />
     <!-- New unit tests for previously-uncovered correctness-critical logic -->
     <Compile Include="Services/JsonRepairServiceTests.cs" />
+    <Compile Include="Services/PermissionRuleFileTests.cs" />
   </ItemGroup>
 
   <ItemGroup>
