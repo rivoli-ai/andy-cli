@@ -14,6 +14,7 @@ public static class SystemPrompts
     {
         return new SystemPromptBuilder()
             .WithCoreMandates()
+            .WithResponseFormatting()
             .WithWorkflowGuidelines()
             .WithEnvironment(
                 platform: GetPlatformName(),
@@ -32,6 +33,7 @@ public static class SystemPrompts
     {
         return new SystemPromptBuilder()
             .WithCoreMandates()
+            .WithResponseFormatting()
             .WithWorkflowGuidelines()
             .WithEnvironment(
                 platform: GetPlatformName(),

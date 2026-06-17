@@ -58,8 +58,8 @@ namespace Andy.Cli.Themes
         public DL.Rgb24 Error { get; set; } = new DL.Rgb24(255, 80, 80);
         public DL.Rgb24 Info { get; set; } = new DL.Rgb24(100, 200, 255);
 
-        // Special colors
-        public DL.Rgb24 Heading { get; set; } = new DL.Rgb24(200, 200, 80);
+        // Special colors. Heading is the distinct dark-orange used for markdown headers in the feed.
+        public DL.Rgb24 Heading { get; set; } = new DL.Rgb24(215, 125, 40);
         public DL.Rgb24 Code { get; set; } = new DL.Rgb24(180, 180, 180);
         public DL.Rgb24 Ghost { get; set; } = new DL.Rgb24(100, 100, 100);
 
@@ -160,7 +160,7 @@ namespace Andy.Cli.Themes
             Error = new DL.Rgb24(190, 30, 30),
             Info = new DL.Rgb24(20, 110, 180),
 
-            Heading = new DL.Rgb24(140, 110, 0),
+            Heading = new DL.Rgb24(180, 85, 10),
             Code = new DL.Rgb24(70, 70, 70),
             Ghost = new DL.Rgb24(160, 160, 160),
             SyntaxKeyword = new DL.Rgb24(0, 0, 255),
@@ -232,7 +232,9 @@ namespace Andy.Cli.Themes
                 Error = C(TS.ThemeToken.Error),
                 Info = C(TS.ThemeToken.Info),
 
-                Heading = C(TS.ThemeToken.Accent),
+                // Distinct dark orange for markdown headers (kept off the accent, which is also used
+                // for links/emphasis, so headers read as headers across imported palettes).
+                Heading = new DL.Rgb24(215, 125, 40),
                 Code = C(TS.ThemeToken.SyntaxPreproc),
                 Ghost = C(TS.ThemeToken.ForegroundMuted),
                 SyntaxKeyword = C(TS.ThemeToken.SyntaxKeyword),

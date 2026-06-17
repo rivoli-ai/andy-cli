@@ -981,9 +981,13 @@ namespace Andy.Cli.Widgets
                     continue;
                 }
 
+                // Headers must not carry trailing punctuation (colons/semicolons) - strip it so
+                // titles render clean regardless of what the model emitted.
+                var line = IsHeading(raw) ? StripHeadingTrailingPunctuation(raw) : raw;
+
                 // Ensure a blank line before a heading (unless it starts the content).
-                if (IsHeading(raw) && outp.Count > 0 && outp[^1].Length != 0) outp.Add("");
-                outp.Add(raw);
+                if (IsHeading(line) && outp.Count > 0 && outp[^1].Length != 0) outp.Add("");
+                outp.Add(line);
             }
 
             while (outp.Count > 0 && outp[^1].Length == 0) outp.RemoveAt(outp.Count - 1);
@@ -995,6 +999,16 @@ namespace Andy.Cli.Widgets
             var t = line.TrimStart();
             return t.StartsWith("# ") || t.StartsWith("## ") || t.StartsWith("### ")
                 || t.StartsWith("#### ") || t.StartsWith("##### ") || t.StartsWith("###### ");
+        }
+
+        /// <summary>Remove trailing ':' / ';' (and surrounding spaces) from a heading line.</summary>
+        internal static string StripHeadingTrailingPunctuation(string line)
+        {
+            var trimmed = line.TrimEnd();
+            int end = trimmed.Length;
+            while (end > 0 && (trimmed[end - 1] == ':' || trimmed[end - 1] == ';' || trimmed[end - 1] == ' '))
+                end--;
+            return trimmed.Substring(0, end);
         }
     }
 
@@ -1052,6 +1066,9 @@ namespace Andy.Cli.Widgets
             var theme = Themes.Theme.Current;
             if (theme.Background is { } mdBg)
                 r.SetColors(theme.Text, mdBg, theme.Accent);
+            // Headers in the feed get the distinct dark-orange heading color (the renderer leaves
+            // them at the accent otherwise, which reads the same as links/emphasis).
+            r.SetHeaderColors(theme.Heading, theme.Heading, theme.Heading);
             r.SetText(_md);
             return r;
         }
@@ -1636,6 +1653,7 @@ namespace Andy.Cli.Widgets
             var theme = Themes.Theme.Current;
             if (theme.Background is { } mdBg)
                 renderer.SetColors(theme.Text, mdBg, theme.Accent);
+            renderer.SetHeaderColors(theme.Heading, theme.Heading, theme.Heading);
             renderer.SetText(FeedMarkdown.Normalize(_content.ToString()));
             renderer.Render(new L.Rect(x, y, width, maxLines), baseDl, b);
 

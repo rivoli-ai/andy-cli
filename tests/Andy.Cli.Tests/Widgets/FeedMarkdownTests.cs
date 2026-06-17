@@ -56,4 +56,26 @@ public class FeedMarkdownTests
         Assert.Equal(string.Empty, FeedMarkdown.Normalize(""));
         Assert.Equal(string.Empty, FeedMarkdown.Normalize("\n\n\n"));
     }
+
+    [Theory]
+    [InlineData("## Summary:", "## Summary")]
+    [InlineData("### Details;", "### Details")]
+    [InlineData("# Title ;", "# Title")]
+    [InlineData("## Done ::;", "## Done")]
+    public void StripsTrailingColonAndSemicolonFromHeadings(string input, string expected)
+        => Assert.Equal(expected, FeedMarkdown.Normalize(input));
+
+    [Fact]
+    public void DoesNotStripPunctuationFromBodyLines()
+    {
+        // Only headings are stripped; ordinary text keeps its punctuation.
+        Assert.Equal("note: this stays;", FeedMarkdown.Normalize("note: this stays;"));
+    }
+
+    [Fact]
+    public void KeepsInternalHeadingColons()
+    {
+        // Only trailing punctuation is removed.
+        Assert.Equal("## A: B", FeedMarkdown.Normalize("## A: B"));
+    }
 }

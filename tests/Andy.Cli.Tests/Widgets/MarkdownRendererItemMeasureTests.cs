@@ -82,4 +82,25 @@ public class MarkdownRendererItemMeasureTests
         var textYs = ops.OfType<DL.TextRun>().Where(t => !string.IsNullOrEmpty(t.Content)).Select(t => t.Y).ToList();
         Assert.All(textYs, y => Assert.True(y >= 100 - 2, $"row {y} should not be above the shifted origin"));
     }
+
+    [Fact]
+    public void Render_ColorsHeadersWithThemeHeadingColor()
+    {
+        var heading = Andy.Cli.Themes.Theme.Current.Heading;
+        var item = new MarkdownRendererItem("# Title Line\n\nplain body line");
+
+        var b = new DL.DisplayListBuilder();
+        item.RenderSlice(0, 0, 80, 0, item.MeasureLineCount(80), new DL.DisplayListBuilder().Build(), b);
+        var runs = b.Build().Ops.OfType<DL.TextRun>().Where(r => !string.IsNullOrEmpty(r.Content)).ToList();
+
+        // Header row (y0) glyphs use the distinct heading color...
+        var headerRuns = runs.Where(r => r.Y == 0).ToList();
+        Assert.NotEmpty(headerRuns);
+        Assert.All(headerRuns, r => Assert.Equal(heading, r.Fg));
+
+        // ...while body text does not.
+        var bodyRuns = runs.Where(r => r.Y > 0).ToList();
+        Assert.NotEmpty(bodyRuns);
+        Assert.All(bodyRuns, r => Assert.NotEqual(heading, r.Fg));
+    }
 }

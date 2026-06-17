@@ -30,6 +30,19 @@ public class SystemPromptBuilder
         return this;
     }
 
+    public SystemPromptBuilder WithResponseFormatting()
+    {
+        _prompt.AppendLine("## Response Formatting");
+        _prompt.AppendLine();
+        _prompt.AppendLine("- Use clean GitHub-flavored markdown.");
+        _prompt.AppendLine("- Use ATX headers (`#`, `##`, `###`) for titles and subtitles. Do NOT add trailing punctuation after header text - no colons or semicolons. Write `## Summary`, never `## Summary:` or `## Summary;`.");
+        _prompt.AppendLine("- For emphasis labels inside lists, prefer `**Label**` followed by a space, not `**Label:**` or `**Label;**`.");
+        _prompt.AppendLine("- Do not use emojis or non-ASCII decorative characters.");
+        _prompt.AppendLine();
+
+        return this;
+    }
+
     public SystemPromptBuilder WithWorkflowGuidelines()
     {
         _prompt.AppendLine("## Workflow Guidelines");
