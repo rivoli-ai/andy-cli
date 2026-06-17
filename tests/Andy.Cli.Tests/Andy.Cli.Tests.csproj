@@ -130,6 +130,16 @@
     <Compile Include="Headless/HeadlessSweTaskTests.cs" />
     <!-- Interactive ProcessMessageAsync NRE reproduction (real model; skips without OPENROUTER_API_KEY) -->
     <Compile Include="Services/InteractiveAssistantReproTests.cs" />
+    <!-- Re-enabled deterministic unit tests (previously excluded during the csproj API migration) -->
+    <Compile Include="Services/ToolOutputLimitsTests.cs" />
+    <Compile Include="Services/CumulativeOutputTrackerTests.cs" />
+    <Compile Include="Services/ParameterMapperTests.cs" />
+    <Compile Include="Services/ContentPipeline/ContentPipelineTests.cs" />
+    <Compile Include="Services/ContentPipeline/TypeConversionTests.cs" />
+    <Compile Include="Services/ResponseFormattingTests.cs" />
+    <Compile Include="Widgets/InlineCommandHelpTests.cs" />
+    <!-- New unit tests for previously-uncovered correctness-critical logic -->
+    <Compile Include="Services/JsonRepairServiceTests.cs" />
   </ItemGroup>
 
   <ItemGroup>
