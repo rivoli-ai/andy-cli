@@ -112,6 +112,8 @@
     <Compile Include="Integration/ListDirectoryIntegrationTests.cs" />
     <!-- Andy.CodeIndex library in-process integration tests -->
     <Compile Include="Integration/CodeIndexLibraryIntegrationTests.cs" />
+    <!-- dataframe_* end-to-end scenario through the CLI tool stack + engine SimpleAgent -->
+    <Compile Include="Integration/DataFrameScenarioIntegrationTests.cs" />
     <!-- AQ1 headless config schema tests (rivoli-ai/andy-cli#46) -->
     <Compile Include="HeadlessConfig/HeadlessConfigSchemaTests.cs" />
     <!-- AQ2 headless runner tests (rivoli-ai/andy-cli#47) -->
