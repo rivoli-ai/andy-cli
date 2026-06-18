@@ -535,7 +535,9 @@ namespace Andy.Cli.Services
 
         public Task<ToolExecutionResult> ExecuteAsync(ToolExecutionRequest request)
         {
-            if (request?.Context != null)
+            ArgumentNullException.ThrowIfNull(request);
+
+            if (request.Context != null)
             {
                 GrantGatedCapabilities(request.Context);
             }
