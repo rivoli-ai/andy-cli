@@ -77,4 +77,24 @@ public class FeedViewScrollClampTests
 
         Assert.Equal(0, offset);
     }
+
+    // Regression for rivoli-ai/andy-cli#122: PageUp/PageDown must move exactly one page (not 2x the
+    // viewport), so no page is skipped. PageUp/PageDown use the int.MaxValue/MinValue "one page"
+    // sentinels; one page == pageSize lines, consecutive pages are contiguous, and up-then-down
+    // round-trips to the same offset.
+    [Fact]
+    public void PageSentinel_MovesExactlyOnePage_AndDoesNotSkip()
+    {
+        var feed = FeedWithLines(100);
+        const int page = Height - 5; // matches the CLI's page step (viewport.Height - 5)
+
+        int afterFirst = feed.ScrollLines(int.MaxValue, page);   // PageUp once
+        Assert.Equal(page, afterFirst);                          // exactly one page, not 2x
+
+        int afterSecond = feed.ScrollLines(int.MaxValue, page);  // PageUp again
+        Assert.Equal(2 * page, afterSecond);                     // contiguous — no page skipped
+
+        int afterDown = feed.ScrollLines(int.MinValue, page);    // PageDown once
+        Assert.Equal(page, afterDown);                           // returns to the previous page
+    }
 }
