@@ -1440,9 +1440,13 @@ class Program
                         return;
                     }
 
-                    // PageUp/PageDown always scrolls the feed
-                    if (k.Key == ConsoleKey.PageUp) feed.ScrollLines(+2 * Math.Max(1, viewport.Height - 5), Math.Max(1, viewport.Height - 5));
-                    if (k.Key == ConsoleKey.PageDown) feed.ScrollLines(-2 * Math.Max(1, viewport.Height - 5), Math.Max(1, viewport.Height - 5));
+                    // PageUp/PageDown always scrolls the feed by exactly one page (a few lines of
+                    // overlap kept for context). int.MaxValue/MinValue are FeedView's "one page"
+                    // sentinels — using them keeps the page-step in one place so the view can't skip
+                    // pages (previously this scrolled 2x the viewport, skipping a page per keypress).
+                    int feedPage = Math.Max(1, viewport.Height - 5);
+                    if (k.Key == ConsoleKey.PageUp) feed.ScrollLines(int.MaxValue, feedPage);
+                    if (k.Key == ConsoleKey.PageDown) feed.ScrollLines(int.MinValue, feedPage);
                 }
                 if (rawInput != null)
                 {
