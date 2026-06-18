@@ -1169,7 +1169,16 @@ class Program
                     }
 
                     // Avoid mapping regular alphanumeric keys to actions
+                    var textBeforeKey = prompt.Text;
                     var submitted = prompt.OnKey(k);
+                    // If the keystroke edited the prompt text (typing, paste, backspace,
+                    // delete, etc.), snap the feed back to the bottom where the prompt
+                    // lives. Pure navigation/scroll keys (arrows, Home/End, PgUp/PgDn,
+                    // wheel) do not change the text and therefore do not yank the view.
+                    if (!ReferenceEquals(submitted, null) || !string.Equals(prompt.Text, textBeforeKey, StringComparison.Ordinal))
+                    {
+                        feed.SnapToBottom();
+                    }
                     if (submitted is string cmd && !string.IsNullOrWhiteSpace(cmd) && !isProcessingMessage)
                     {
                         // Check for slash commands

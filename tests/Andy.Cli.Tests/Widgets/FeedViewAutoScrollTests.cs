@@ -182,6 +182,59 @@ public class FeedViewAutoScrollTests
     }
 
     [Fact]
+    public void SnapToBottom_WhenScrolledUp_ResetsOffsetAndReenablesAutoScroll()
+    {
+        var feed = new FeedView();
+        AddLines(feed, 100);
+        Render(feed);
+
+        feed.ScrollLines(20, Height); // user scrolled up reading history
+        Render(feed);
+        Assert.True(feed.ScrollOffset > FeedView.PinnedToBottomThresholdLines);
+        Assert.False(feed.IsAutoScrollEnabled);
+
+        // Simulates the user starting to type into the prompt.
+        feed.SnapToBottom();
+
+        Assert.Equal(0, feed.ScrollOffset);
+        Assert.True(feed.IsAutoScrollEnabled);
+    }
+
+    [Fact]
+    public void SnapToBottom_ThenAppend_FollowsNewContent()
+    {
+        var feed = new FeedView();
+        AddLines(feed, 100);
+        Render(feed);
+
+        feed.ScrollLines(20, Height);
+        Render(feed);
+        Assert.False(feed.IsAutoScrollEnabled);
+
+        feed.SnapToBottom();
+
+        // After snapping back, newly appended content follows the tail.
+        AddLines(feed, 25, startIndex: 100);
+        Render(feed);
+        Assert.Equal(0, feed.ScrollOffset);
+        Assert.True(feed.IsAutoScrollEnabled);
+    }
+
+    [Fact]
+    public void SnapToBottom_WhenAlreadyAtBottom_StaysAtBottom()
+    {
+        var feed = new FeedView();
+        AddLines(feed, 100);
+        Render(feed);
+        Assert.Equal(0, feed.ScrollOffset);
+
+        feed.SnapToBottom();
+
+        Assert.Equal(0, feed.ScrollOffset);
+        Assert.True(feed.IsAutoScrollEnabled);
+    }
+
+    [Fact]
     public void Clear_ResetsToAutoScrollAtBottom()
     {
         var feed = new FeedView();
