@@ -41,11 +41,17 @@ namespace Andy.Cli.Themes
         public DL.Rgb24 TextBright { get; set; } = new DL.Rgb24(255, 255, 255);
 
         // Color used for the text the user types into the prompt input.
-        // Kept distinct from the accent (Primary) color so it stays a
-        // high-contrast, easily readable body-text color on the prompt
-        // background across themes. Defaults to a near-white tone suited to
-        // the dark theme; light theme overrides it with a near-black tone.
-        public DL.Rgb24 PromptText { get; set; } = new DL.Rgb24(235, 235, 235);
+        //
+        // null = use the terminal's own DEFAULT foreground color (emitted as the
+        // ANSI SGR 39 sequence). This is the only choice that is guaranteed to be
+        // readable regardless of the user's actual terminal background, which the
+        // application cannot reliably detect. Because the prompt background is also
+        // transparent (PromptBackground = null -> SGR 49, the terminal default
+        // background), forcing an explicit RGB foreground risks unreadable text
+        // (e.g. near-black text on a dark terminal under the light theme). Leaving
+        // both unset lets the terminal's own fg/bg pair apply, which is inherently
+        // legible. Both themes therefore default this to null.
+        public DL.Rgb24? PromptText { get; set; } = null;
 
         // Accent colors
         public DL.Rgb24 Primary { get; set; } = new DL.Rgb24(150, 200, 255);
@@ -149,7 +155,10 @@ namespace Andy.Cli.Themes
             Text = new DL.Rgb24(40, 40, 40),
             TextDim = new DL.Rgb24(110, 110, 110),
             TextBright = new DL.Rgb24(0, 0, 0),
-            PromptText = new DL.Rgb24(25, 25, 25),
+            // PromptText intentionally left null (inherits the base default): the
+            // prompt uses the terminal's own default foreground so it stays
+            // readable even when a light theme is used in a dark terminal.
+            PromptText = null,
 
             Primary = new DL.Rgb24(30, 90, 170),
             Secondary = new DL.Rgb24(140, 110, 0),
