@@ -2350,13 +2350,15 @@ namespace Andy.Cli.Widgets
             {
                 // Completed: result summary line, then details, then (expanded) the full
                 // multi-line result preview.
+                // Always emit exactly one result line so every completed tool renders with the
+                // same structure (header + result). When a tool produces no summary (e.g. an empty
+                // directory listing), fall back to a uniform "done"/"failed" so no tool "skips a line".
                 string summary = BuildResultSummary();
-                if (!string.IsNullOrEmpty(summary))
-                {
-                    string text = "  L  " + (!_isSuccess ? "Error: " : "") + summary;
-                    foreach (var w in WrapDetail(text, width, expanded))
-                        plan.Add((w, LineKind.Result));
-                }
+                string resultText = string.IsNullOrEmpty(summary)
+                    ? "  L  " + (_isSuccess ? "done" : "failed")
+                    : "  L  " + (!_isSuccess ? "Error: " : "") + summary;
+                foreach (var w in WrapDetail(resultText, width, expanded))
+                    plan.Add((w, LineKind.Result));
 
                 // Additional details (skip first; it usually feeds the summary).
                 int detailCap = expanded ? int.MaxValue : 3;

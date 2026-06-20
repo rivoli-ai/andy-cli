@@ -156,6 +156,26 @@ namespace Andy.Cli.Tests.Widgets
         }
 
         [Fact]
+        public void RunningToolItem_CompletedWithNoResult_StillRendersUniformResultLine()
+        {
+            // Consistency: a completed tool with no summary (e.g. an empty directory listing) must
+            // still render a result line ("done"), not skip it — so every tool has the same shape.
+            ToolOutputView.Expanded = false;
+            var noResult = new RunningToolItem("list_1", "list_directory");
+            noResult.SetComplete(true, "0.5s");
+            // no SetResult call -> empty summary
+
+            int measured = noResult.MeasureLineCount(Width);
+            Assert.Equal(measured, CountRenderedRows(noResult, Width));
+            Assert.True(measured >= 2, "completed tool should reserve a header + a result row");
+
+            var probe = new DL.DisplayListBuilder();
+            noResult.RenderSlice(0, 0, Width, 0, measured, new DL.DisplayListBuilder().Build(), probe);
+            var text = string.Concat(probe.Build().Ops.OfType<DL.TextRun>().Select(r => r.Content));
+            Assert.Contains("done", text);
+        }
+
+        [Fact]
         public void Toggle_FlipsState()
         {
             ToolOutputView.Expanded = false;
