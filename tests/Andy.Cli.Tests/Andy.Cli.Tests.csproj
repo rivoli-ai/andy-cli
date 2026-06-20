@@ -58,6 +58,7 @@
     <Compile Include="Widgets/TableItemTests.cs" />
     <Compile Include="Widgets/PermissionsManagerTests.cs" />
     <Compile Include="Widgets/UserBubbleItemTests.cs" />
+    <Compile Include="Widgets/FooterHintsTests.cs" />
     <!-- Token counter tests -->
     <Compile Include="Widgets/TokenCounterTests.cs" />
     <Compile Include="Widgets/ContextStatusBarTests.cs" />
@@ -98,6 +99,7 @@
     <Compile Include="Input/TerminalInputParserTests.cs" />
     <!-- Mouse reporting enable/disable tests -->
     <Compile Include="Input/MouseReportingTests.cs" />
+    <Compile Include="Input/MouseDefaultRegressionTests.cs" />
     <!-- Code indexing tests -->
     <Compile Include="Tools/CodeIndexToolTests.cs" />
     <!-- Tool spinner completion + concurrency regression tests -->
