@@ -843,6 +843,20 @@ namespace Andy.Cli.Widgets
             return cell.Trim();
         }
 
+        /// <summary>
+        /// Split one markdown table row into its cells, preserving EMPTY cells. Only the optional
+        /// leading/trailing pipe is stripped; interior empty cells (e.g. "| a |  | c |") are kept so
+        /// columns stay aligned. Using Split with RemoveEmptyEntries instead dropped empty cells and
+        /// shifted every following column left.
+        /// </summary>
+        internal static List<string> SplitTableCells(string line)
+        {
+            var s = line.Trim();
+            if (s.StartsWith("|")) s = s.Substring(1);
+            if (s.EndsWith("|")) s = s.Substring(0, s.Length - 1);
+            return s.Split('|').Select(CleanCellContent).ToList();
+        }
+
         private static List<MarkdownPart> SplitMarkdownWithTables(string md)
         {
             var parts = new List<MarkdownPart>();
@@ -858,10 +872,8 @@ namespace Andy.Cli.Widgets
                     var headerLine = lines[i];
                     var separatorLine = lines[i + 1];
 
-                    // Extract headers
-                    var headers = headerLine.Split('|', StringSplitOptions.RemoveEmptyEntries)
-                        .Select(h => CleanCellContent(h))
-                        .ToList();
+                    // Extract headers (empty cells preserved so columns stay aligned)
+                    var headers = SplitTableCells(headerLine);
 
                     if (headers.Count > 0)
                     {
@@ -871,9 +883,7 @@ namespace Andy.Cli.Widgets
 
                         while (i < lines.Length && lines[i].Contains('|'))
                         {
-                            var cells = lines[i].Split('|', StringSplitOptions.RemoveEmptyEntries)
-                                .Select(c => CleanCellContent(c))
-                                .ToArray();
+                            var cells = SplitTableCells(lines[i]).ToArray();
 
                             if (cells.Length > 0)
                             {
