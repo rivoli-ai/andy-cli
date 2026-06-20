@@ -39,6 +39,7 @@
     <Compile Include="Themes/ThemeSwitchingTests.cs" />
     <Compile Include="Themes/PopularThemesTests.cs" />
     <Compile Include="Services/ProviderDetectionServiceTests.cs" />
+    <Compile Include="Services/ParameterMapperReplaceTextTests.cs" />
     <Compile Include="Services/ToolOutputFormattingTests.cs" />
     <Compile Include="Services/SystemPromptBuilderTests.cs" />
     <Compile Include="Configuration/ProviderExtraBodyTests.cs" />
@@ -117,6 +118,7 @@
     <Compile Include="Integration/MultiTurnToolCallContextTests.cs" />
     <!-- Bash tool (execute_command) integration tests -->
     <Compile Include="Integration/ExecuteCommandToolIntegrationTests.cs" />
+    <Compile Include="Integration/ReplaceTextParameterIntegrationTests.cs" />
     <Compile Include="Integration/PermissionSessionBroadeningIntegrationTests.cs" />
     <!-- list_directory tool integration tests -->
     <Compile Include="Integration/ListDirectoryIntegrationTests.cs" />
