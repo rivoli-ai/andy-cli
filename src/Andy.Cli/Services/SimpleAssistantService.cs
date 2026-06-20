@@ -80,6 +80,8 @@ public class SimpleAssistantService : IDisposable
 
         _lastIntermediateText = text;
         _feed.AddMarkdownRich(text.Trim());
+        // Blank line so each mid-turn model message is separated from the tools/text around it.
+        _feed.AddItem(new Andy.Cli.Widgets.SpacerItem(1));
     }
 
     /// <summary>
@@ -531,12 +533,8 @@ public class SimpleAssistantService : IDisposable
             _logger?.LogDebug("Success={Success}, Response.Length={Length}, StopReason={StopReason}",
                 result.Success, result.Response?.Length ?? 0, result.StopReason);
 
-            // Add blank line after tools if they were executed
-            // Use SpacerItem since both pipeline and AddMarkdownRich filter out empty content
-            if (toolsWereExecuted)
-            {
-                _feed.AddItem(new Andy.Cli.Widgets.SpacerItem(1));
-            }
+            // Each tool already emits its own trailing blank line (AddToolExecutionStart), so the
+            // last tool is separated from the response without adding another spacer here.
 
             // Add response to pipeline. On the turn-limit path the engine returns the FULL
             // conversation history (raw tool payloads, embedded CRLFs and all) as the response;

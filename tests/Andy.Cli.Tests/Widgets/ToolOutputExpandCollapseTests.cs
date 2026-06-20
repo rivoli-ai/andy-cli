@@ -176,6 +176,43 @@ namespace Andy.Cli.Tests.Widgets
         }
 
         [Fact]
+        public void RunningToolItem_Completed_DrawsGreenOrRedDotMarker()
+        {
+            var ok = new RunningToolItem("read_file_1", "read_file");
+            ok.SetComplete(true, "0.1s");
+            var okDot = RenderAndFindDot(ok);
+            Assert.NotNull(okDot);
+            Assert.Equal(new DL.Rgb24(0, 200, 0), okDot!.Value.Fg!.Value);
+
+            var fail = new RunningToolItem("exec_1", "execute_command");
+            fail.SetComplete(false, "0.1s");
+            var failDot = RenderAndFindDot(fail);
+            Assert.NotNull(failDot);
+            Assert.Equal(new DL.Rgb24(200, 0, 0), failDot!.Value.Fg!.Value);
+        }
+
+        private static DL.TextRun? RenderAndFindDot(RunningToolItem item)
+        {
+            var b = new DL.DisplayListBuilder();
+            item.RenderSlice(0, 0, Width, 0, item.MeasureLineCount(Width), new DL.DisplayListBuilder().Build(), b);
+            foreach (var op in b.Build().Ops)
+                if (op is DL.TextRun tr && tr.Content == "●")
+                    return tr;
+            return null;
+        }
+
+        [Fact]
+        public void AddToolExecutionStart_AppendsTrailingSpacer()
+        {
+            var feed = new FeedView();
+            feed.AddToolExecutionStart("t_1", "read_file");
+            var items = feed.GetItemsForTesting();
+            Assert.True(items.Count >= 2);
+            Assert.IsType<RunningToolItem>(items[items.Count - 2]);
+            Assert.IsType<SpacerItem>(items[items.Count - 1]);
+        }
+
+        [Fact]
         public void Toggle_FlipsState()
         {
             ToolOutputView.Expanded = false;

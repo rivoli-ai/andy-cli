@@ -191,6 +191,8 @@ namespace Andy.Cli.Widgets
                 item.SetParameters(parameters);
             }
             AddItem(item);
+            // Blank line after every tool so consecutive tools are visually separated.
+            AddItem(new SpacerItem(1));
         }
 
         /// <summary>Add detail to a running tool execution.</summary>
@@ -1712,9 +1714,8 @@ namespace Andy.Cli.Widgets
             }
         }
 
-        // ASCII-only status marker (CLAUDE.md mandates ASCII-only UI). [ok] / [x] read
-        // clearly in monochrome terminals and keep success/failure visually distinct.
-        private string StatusMarker => _isSuccess ? "[ok]" : "[x]";
+        // Status marker: a filled dot, colored green/red at draw time by success/failure.
+        private string StatusMarker => "●";
 
         private void EnsurePlan(int width)
         {
@@ -1839,7 +1840,17 @@ namespace Andy.Cli.Widgets
                 switch (role)
                 {
                     case Role.Header:
-                        b.DrawText(new DL.TextRun(x, row, t, cyan, null, DL.CellAttrFlags.Bold));
+                        // Leading status dot in green/red; the tool id in the tool-name color.
+                        if (t.StartsWith("● ", StringComparison.Ordinal))
+                        {
+                            var dotColor = _isSuccess ? new DL.Rgb24(0, 200, 0) : new DL.Rgb24(200, 0, 0);
+                            b.DrawText(new DL.TextRun(x, row, "●", dotColor, null, DL.CellAttrFlags.Bold));
+                            b.DrawText(new DL.TextRun(x + 1, row, t.Substring(1), cyan, null, DL.CellAttrFlags.Bold));
+                        }
+                        else
+                        {
+                            b.DrawText(new DL.TextRun(x, row, t, cyan, null, DL.CellAttrFlags.Bold));
+                        }
                         break;
                     case Role.Param:
                         b.DrawText(new DL.TextRun(x, row, t, dim, null, DL.CellAttrFlags.None));
@@ -2486,16 +2497,15 @@ namespace Andy.Cli.Widgets
                     }
                     else
                     {
-                        // ASCII-only completion marker (CLAUDE.md mandates ASCII-only UI).
-                        // "[ok]" / "[x]" replace the previous non-ASCII circle glyph while
-                        // keeping the success/failure color coding.
+                        // Completion marker: a filled dot colored green (success) / red (failure),
+                        // orange for a successful-with-warning result.
                         var symbolColor = _isSuccess ? green : red;
                         if (_isSuccess && !string.IsNullOrEmpty(_result) &&
                             (_result.Contains("warning", StringComparison.OrdinalIgnoreCase) ||
                              _result.Contains("partial", StringComparison.OrdinalIgnoreCase)))
                             symbolColor = orange;
 
-                        var marker = _isSuccess ? "[ok]" : "[x]";
+                        const string marker = "●"; // green/red status dot
                         b.DrawText(new DL.TextRun(x, row, marker, symbolColor, null, DL.CellAttrFlags.None));
 
                         var paramDisplay = GetParameterDisplay();
