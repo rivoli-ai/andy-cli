@@ -21,6 +21,19 @@ public class UsageTrackingLlmProviderTests
         Usage = usage
     };
 
+    private static LlmResponse ResponseWith(string content, bool withToolCalls)
+    {
+        var msg = new Message
+        {
+            Role = Role.Assistant,
+            Content = content,
+            ToolCalls = withToolCalls
+                ? new List<ToolCall> { new ToolCall { Id = "call_1", Name = "read_file", ArgumentsJson = "{}" } }
+                : new List<ToolCall>()
+        };
+        return new LlmResponse { AssistantMessage = msg };
+    }
+
     private sealed class FakeProvider : ILlmProvider
     {
         private readonly LlmResponse _response;
@@ -111,6 +124,68 @@ public class UsageTrackingLlmProviderTests
         // Should complete normally despite the throwing callback.
         var response = await sut.CompleteAsync(Req());
         Assert.Equal("hi", response.Content);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_WithToolCalls_ReportsIntermediateText()
+    {
+        var captured = new List<string>();
+        var inner = new FakeProvider(ResponseWith("I'll first read the file...", withToolCalls: true));
+        var sut = new UsageTrackingLlmProvider(inner, _ => { }, captured.Add);
+
+        await sut.CompleteAsync(Req());
+
+        var text = Assert.Single(captured);
+        Assert.Equal("I'll first read the file...", text);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_NoToolCalls_DoesNotReportIntermediateText()
+    {
+        // A response with no tool calls is the final answer; it is rendered by the end-of-turn
+        // path, so it must NOT be surfaced as intermediate text (would double-render it).
+        var captured = new List<string>();
+        var inner = new FakeProvider(ResponseWith("Here is the final answer.", withToolCalls: false));
+        var sut = new UsageTrackingLlmProvider(inner, _ => { }, captured.Add);
+
+        await sut.CompleteAsync(Req());
+
+        Assert.Empty(captured);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_EmptyContentWithToolCalls_DoesNotReportIntermediateText()
+    {
+        var captured = new List<string>();
+        var inner = new FakeProvider(ResponseWith("   ", withToolCalls: true));
+        var sut = new UsageTrackingLlmProvider(inner, _ => { }, captured.Add);
+
+        await sut.CompleteAsync(Req());
+
+        Assert.Empty(captured);
+    }
+
+    [Fact]
+    public async Task IntermediateTextCallbackException_DoesNotPropagate()
+    {
+        var inner = new FakeProvider(ResponseWith("narration", withToolCalls: true));
+        var sut = new UsageTrackingLlmProvider(
+            inner, _ => { }, _ => throw new InvalidOperationException("boom"));
+
+        // Should complete normally despite the throwing intermediate-text callback.
+        var response = await sut.CompleteAsync(Req());
+        Assert.Equal("narration", response.Content);
+    }
+
+    [Fact]
+    public async Task NoIntermediateCallback_DoesNotThrow_WithToolCalls()
+    {
+        // The legacy 3-arg constructor leaves the intermediate-text callback null.
+        var inner = new FakeProvider(ResponseWith("narration", withToolCalls: true));
+        var sut = new UsageTrackingLlmProvider(inner, _ => { });
+
+        var response = await sut.CompleteAsync(Req());
+        Assert.Equal("narration", response.Content);
     }
 
     [Fact]

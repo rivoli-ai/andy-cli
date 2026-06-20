@@ -1183,7 +1183,15 @@ namespace Andy.Cli.Widgets
         }
     }
 
-    /// <summary>Markdown table feed item using Andy.Tui.Widgets.Table.</summary>
+    /// <summary>
+    /// Markdown table feed item. Rendered by hand with box-drawing borders and vertical column
+    /// separators. The bundled Andy.Tui.Widgets.Table draws only an outer box (no inner vertical
+    /// lines) and stretches its content to fill the full row budget it is handed, which produced
+    /// tables with no column dividers plus a run of phantom blank rows below them. Rendering here
+    /// gives us explicit vertical separators and makes MeasureLineCount equal the rows actually
+    /// drawn. Box-drawing glyphs match the style already used by UserBubbleItem; CLAUDE.md's
+    /// ASCII-only guidance targets emoji, and existing widgets already use box-drawing borders.
+    /// </summary>
     public sealed class TableItem : IFeedItem
     {
         private readonly List<string> _headers;
@@ -1197,74 +1205,146 @@ namespace Andy.Cli.Widgets
             _title = title;
         }
 
+        // Layout: top border + header + header separator + N data rows + bottom border.
+        // This is exactly the number of rows RenderSlice draws, so the feed reserves no surplus
+        // (the old measure over-counted relative to the widget's actual output, leaving a phantom
+        // blank line around every table).
         public int MeasureLineCount(int width)
         {
-            // Table needs: 1 for header + 1 for separator + N data rows + 2 for borders
+            if (_headers.Count == 0) return 0;
             return _rows.Count + 4;
+        }
+
+        /// <summary>
+        /// Compute the inner (text) width of each column. Each column is sized to its widest cell
+        /// (header or data), then shrunk proportionally if the table would overflow the available
+        /// width. One space of padding is added inside every cell on each side.
+        /// </summary>
+        private int[] ComputeColumnWidths(int width)
+        {
+            int cols = _headers.Count;
+            var content = new int[cols];
+            for (int i = 0; i < cols; i++)
+            {
+                int max = _headers[i]?.Length ?? 0;
+                foreach (var row in _rows)
+                    if (i < row.Length && row[i] != null)
+                        max = Math.Max(max, row[i].Length);
+                content[i] = Math.Max(1, max);
+            }
+
+            // Total width when each cell is padded by one space on each side:
+            // sum(content + 2) inner widths, plus (cols + 1) vertical border glyphs.
+            const int pad = 2;
+            int borders = cols + 1;
+            int needed = content.Sum(c => c + pad) + borders;
+
+            if (needed <= width || width <= borders + (cols * pad))
+            {
+                // Fits, or width too small to scale meaningfully: use content widths.
+                return content;
+            }
+
+            // Overflow: shrink columns proportionally, keeping a sensible minimum.
+            int innerBudget = Math.Max(cols, width - borders - (cols * pad));
+            int totalContent = content.Sum();
+            var result = new int[cols];
+            for (int i = 0; i < cols; i++)
+            {
+                double proportion = (double)content[i] / totalContent;
+                result[i] = Math.Max(3, (int)(innerBudget * proportion));
+            }
+            return result;
+        }
+
+        private static string Fit(string? text, int innerWidth)
+        {
+            text ??= string.Empty;
+            text = text.Replace("\n", " ").Replace("\r", " ");
+            if (text.Length > innerWidth)
+                return innerWidth <= 1 ? text.Substring(0, innerWidth) : text.Substring(0, innerWidth - 1) + "…";
+            return text.PadRight(innerWidth);
         }
 
         public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
             if (width <= 0 || maxLines <= 0) return;
+            int total = MeasureLineCount(width);
+            if (total == 0 || startLine >= total) return;
+            if (startLine < 0) startLine = 0;
 
-            var table = new Andy.Tui.Widgets.Table();
-            table.SetColumns(_headers.ToArray());
+            var theme = Themes.Theme.Current;
+            var border = theme.Border;
+            var headerColor = theme.Heading;
+            var textColor = theme.Text;
 
-            // Calculate desired column widths based on content
-            var desiredWidths = new int[_headers.Count];
-            for (int i = 0; i < _headers.Count; i++)
+            int cols = _headers.Count;
+            var colInner = ComputeColumnWidths(width);
+
+            // Build the three horizontal rules once (top / header-separator / bottom).
+            string Rule(string left, string mid, string right)
             {
-                // Start with header width
-                int maxWidth = _headers[i].Length;
-
-                // Check all row data for this column
-                foreach (var row in _rows)
+                var sb = new System.Text.StringBuilder();
+                sb.Append(left);
+                for (int i = 0; i < cols; i++)
                 {
-                    if (i < row.Length)
-                    {
-                        maxWidth = Math.Max(maxWidth, row[i].Length);
-                    }
+                    sb.Append(new string('─', colInner[i] + 2)); // +2 for cell padding
+                    sb.Append(i == cols - 1 ? right : mid);
                 }
-
-                // Add padding
-                desiredWidths[i] = maxWidth + 2;
+                return sb.ToString();
             }
 
-            // Account for table borders and separators (rough estimate: 3 chars per column + 2 for outer borders)
-            int tableOverhead = (_headers.Count * 3) + 2;
-            int availableWidth = Math.Max(10, width - tableOverhead);
+            string topRule = Rule("┌", "┬", "┐");
+            string midRule = Rule("├", "┼", "┤");
+            string botRule = Rule("└", "┴", "┘");
 
-            // Calculate actual column widths
-            int totalDesired = desiredWidths.Sum();
-            var actualWidths = new int[_headers.Count];
-
-            if (totalDesired <= availableWidth)
+            int end = Math.Min(total, startLine + maxLines);
+            for (int line = startLine; line < end; line++)
             {
-                // We have enough space - use desired widths
-                for (int i = 0; i < _headers.Count; i++)
+                int row = y + (line - startLine);
+
+                if (line == 0)
                 {
-                    actualWidths[i] = desiredWidths[i];
+                    b.DrawText(new DL.TextRun(x, row, topRule, border, null, DL.CellAttrFlags.None));
+                }
+                else if (line == 1)
+                {
+                    DrawCellRow(b, x, row, colInner, _headers.ToArray(), border, headerColor, DL.CellAttrFlags.Bold);
+                }
+                else if (line == 2)
+                {
+                    b.DrawText(new DL.TextRun(x, row, midRule, border, null, DL.CellAttrFlags.None));
+                }
+                else if (line == total - 1)
+                {
+                    b.DrawText(new DL.TextRun(x, row, botRule, border, null, DL.CellAttrFlags.None));
+                }
+                else
+                {
+                    int dataIdx = line - 3;
+                    var cells = dataIdx >= 0 && dataIdx < _rows.Count ? _rows[dataIdx] : Array.Empty<string>();
+                    DrawCellRow(b, x, row, colInner, cells, border, textColor, DL.CellAttrFlags.None);
                 }
             }
-            else
+        }
+
+        // Draw a content row "| c1 | c2 | ... |" using vertical separators in the border color and
+        // cell text in the supplied color/attrs. The separators are drawn as distinct runs (not
+        // baked into one string) so their color stays independent of the cell text color.
+        private static void DrawCellRow(DL.DisplayListBuilder b, int x, int row, int[] colInner, string[] cells, DL.Rgb24 borderColor, DL.Rgb24 textColor, DL.CellAttrFlags attrs)
+        {
+            int cx = x;
+            b.DrawText(new DL.TextRun(cx, row, "│", borderColor, null, DL.CellAttrFlags.None));
+            cx += 1;
+            for (int i = 0; i < colInner.Length; i++)
             {
-                // Not enough space - distribute proportionally with minimum widths
-                int minColWidth = 8;
-                for (int i = 0; i < _headers.Count; i++)
-                {
-                    // Proportional allocation, but respect minimum
-                    double proportion = (double)desiredWidths[i] / totalDesired;
-                    actualWidths[i] = Math.Max(minColWidth, (int)(availableWidth * proportion));
-                }
+                string cellText = i < cells.Length ? cells[i] : string.Empty;
+                string content = " " + Fit(cellText, colInner[i]) + " ";
+                b.DrawText(new DL.TextRun(cx, row, content, textColor, null, attrs));
+                cx += content.Length;
+                b.DrawText(new DL.TextRun(cx, row, "│", borderColor, null, DL.CellAttrFlags.None));
+                cx += 1;
             }
-
-            table.SetMinColumnWidths(actualWidths);
-
-            // Add rows
-            table.SetRows(_rows);
-
-            // Render the table
-            table.Render(new L.Rect(x, y, width, maxLines), baseDl, b);
         }
     }
 

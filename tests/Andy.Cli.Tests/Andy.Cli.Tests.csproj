@@ -51,6 +51,8 @@
     <!-- Markdown rendering tests -->
     <Compile Include="Widgets/MarkdownRenderingTests.cs" />
     <Compile Include="Widgets/MarkdownRendererItemMeasureTests.cs" />
+    <!-- Table rendering tests (measure==rendered, vertical separators) -->
+    <Compile Include="Widgets/TableItemTests.cs" />
     <Compile Include="Widgets/PermissionsManagerTests.cs" />
     <Compile Include="Widgets/UserBubbleItemTests.cs" />
     <!-- Token counter tests -->
@@ -60,6 +62,7 @@
     <Compile Include="Widgets/ProcessingIndicatorStatsTests.cs" />
     <Compile Include="Services/ContextWindowTests.cs" />
     <Compile Include="Services/UsageTrackingLlmProviderTests.cs" />
+    <Compile Include="Services/IntermediateAssistantTextTests.cs" />
     <!-- KeyHintsBar tests -->
     <Compile Include="Widgets/KeyHintsBarTests.cs" />
     <!-- Tool output expand/collapse (Ctrl+O) view-toggle tests -->
@@ -149,6 +152,7 @@
     <Compile Include="Services/JsonRepairServiceTests.cs" />
     <Compile Include="Services/PermissionRuleFileTests.cs" />
     <Compile Include="Services/ToolCatalogDataFrameTests.cs" />
+    <Compile Include="Services/ToolResultDisplayTest.cs" />
   </ItemGroup>
 
   <ItemGroup>

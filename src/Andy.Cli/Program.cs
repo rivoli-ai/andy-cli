@@ -1744,6 +1744,7 @@ class Program
                 hints.Render((viewport.Width, viewport.Height - 1), baseDl, wb, reservedRightWidth);
 
                 // Render the context status bar on the bottom row of the viewport
+                contextStatusBar.SetLiveStats(aiService?.LiveStats);
                 contextStatusBar.Render(viewport, baseDl, wb);
 
                 // Render command palette (if open) into a SEPARATE builder. Overlays

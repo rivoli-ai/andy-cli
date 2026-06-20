@@ -16,6 +16,7 @@ namespace Andy.Cli.Services
     {
         private readonly IToolExecutor _innerExecutor;
         private readonly ILogger<UiUpdatingToolExecutor>? _logger;
+        private readonly IToolRegistry? _toolRegistry;
         private readonly ToolCallLoopDetector _loopDetector = new();
 
         public event EventHandler<ToolExecutionStartedEventArgs>? ExecutionStarted
@@ -36,10 +37,11 @@ namespace Andy.Cli.Services
             remove { _innerExecutor.SecurityViolation -= value; }
         }
 
-        public UiUpdatingToolExecutor(IToolExecutor innerExecutor, ILogger<UiUpdatingToolExecutor>? logger = null)
+        public UiUpdatingToolExecutor(IToolExecutor innerExecutor, ILogger<UiUpdatingToolExecutor>? logger = null, IToolRegistry? toolRegistry = null)
         {
             _innerExecutor = innerExecutor;
             _logger = logger;
+            _toolRegistry = toolRegistry;
         }
 
         public async Task<ToolExecutionResult> ExecuteAsync(string toolId, Dictionary<string, object?> parameters, ToolExecutionContext? context = null)
@@ -136,7 +138,27 @@ namespace Andy.Cli.Services
             // Time it so the UI can show the tool's real duration the moment it returns, rather
             // than the whole-turn elapsed measured later by SimpleAssistantService.
             var toolStopwatch = System.Diagnostics.Stopwatch.StartNew();
-            var result = await _innerExecutor.ExecuteAsync(toolId, parameters ?? new Dictionary<string, object?>(), context);
+            // Coerce parameter values to the types the tool declares before dispatching. Models
+            // routinely pass an array-typed parameter as a bare scalar (e.g. file_patterns="*.cs"
+            // instead of ["*.cs"]); without this the framework validator rejects the call with a
+            // type-mismatch error that has nothing to do with what the tool actually does. This is
+            // value-only coercion - it never renames parameters - so it cannot mis-route a call.
+            var dispatchParameters = parameters ?? new Dictionary<string, object?>();
+            var toolMetadata = _toolRegistry?.GetTool(toolId)?.Metadata;
+            if (toolMetadata != null)
+            {
+                try
+                {
+                    dispatchParameters = ParameterMapper.NormalizeParameterTypes(dispatchParameters, toolMetadata);
+                }
+                catch (Exception ex)
+                {
+                    // Normalization is best-effort; never let it block execution.
+                    _logger?.LogWarning(ex, "[UI_EXECUTOR] Parameter normalization failed for {ToolId}; dispatching as-is", toolId);
+                }
+            }
+
+            var result = await _innerExecutor.ExecuteAsync(toolId, dispatchParameters, context);
             toolStopwatch.Stop();
 
             // Track completion and update UI with result
@@ -422,12 +444,18 @@ namespace Andy.Cli.Services
                 }
                 else if (!result.IsSuccessful)
                 {
-                    // For failed operations, try to extract detailed error information
-                    resultMessage = result.Message ?? "";
+                    // For failed operations, the reason lives in ErrorMessage, not Message.
+                    // ToolResult.Failure(...) and the inner ToolExecutor's validation failures
+                    // populate ErrorMessage and leave Message null, so reading Message here used
+                    // to discard the real reason and fall through to the generic "Operation failed"
+                    // fallback below. Prefer ErrorMessage, then Message.
+                    resultMessage = !string.IsNullOrEmpty(result.ErrorMessage)
+                        ? result.ErrorMessage
+                        : (result.Message ?? "");
 
                     // Log the raw error data for debugging
-                    _logger?.LogError("[UI_EXECUTOR] Tool {ToolId} failed. Message: '{Message}', Data type: {DataType}, Data: {Data}",
-                        toolId, result.Message, result.Data?.GetType().Name ?? "null", result.Data);
+                    _logger?.LogError("[UI_EXECUTOR] Tool {ToolId} failed. ErrorMessage: '{ErrorMessage}', Message: '{Message}', Data type: {DataType}, Data: {Data}",
+                        toolId, result.ErrorMessage, result.Message, result.Data?.GetType().Name ?? "null", result.Data);
 
                     // If no message but we have data, try to extract error details
                     if (string.IsNullOrEmpty(resultMessage) && result.Data != null)

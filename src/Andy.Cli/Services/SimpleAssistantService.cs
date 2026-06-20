@@ -61,6 +61,38 @@ public class SimpleAssistantService : IDisposable
         _tokenCounter?.AddTokens(usage.PromptTokens, usage.CompletionTokens);
     }
 
+    // Tracks the last intermediate narration we rendered for the in-flight turn, so a model that
+    // repeats the same preamble verbatim across consecutive round-trips doesn't spam the feed.
+    private string? _lastIntermediateText;
+
+    /// <summary>
+    /// Receives the model's intermediate narration text for a round-trip that also issued tool
+    /// calls (fired by <see cref="UsageTrackingLlmProvider"/> while the turn is still running).
+    /// Renders it into the feed BEFORE the tool executions it precedes, so the user sees the
+    /// model's "I'll first read the file..." reasoning live instead of only the final answer at the
+    /// end of the turn. The final answer (a round-trip with no tool calls) is never delivered here,
+    /// so it is not double-rendered. Consecutive identical narration is de-duplicated.
+    /// </summary>
+    private void OnIntermediateAssistantText(string text)
+    {
+        if (!ShouldRenderIntermediateText(text, _lastIntermediateText))
+            return;
+
+        _lastIntermediateText = text;
+        _feed.AddMarkdownRich(text.Trim());
+    }
+
+    /// <summary>
+    /// True when intermediate narration should be rendered: non-empty and not an exact (trimmed)
+    /// repeat of the previously rendered narration for this turn.
+    /// </summary>
+    internal static bool ShouldRenderIntermediateText(string? text, string? previous)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+        return !string.Equals(text.Trim(), previous?.Trim(), StringComparison.Ordinal);
+    }
+
     public SimpleAssistantService(
         ILlmProvider llmProvider,
         IToolRegistry toolRegistry,
@@ -99,12 +131,16 @@ public class SimpleAssistantService : IDisposable
         InstrumentationHub.Instance.SetSystemPrompt(systemPrompt);
 
         // Wrap the tool executor to update UI when tools execute
-        var uiExecutor = new UiUpdatingToolExecutor(toolExecutor, loggerFactory?.CreateLogger<UiUpdatingToolExecutor>());
+        var uiExecutor = new UiUpdatingToolExecutor(toolExecutor, loggerFactory?.CreateLogger<UiUpdatingToolExecutor>(), toolRegistry);
 
         // Wrap the LLM provider so each round-trip's REAL token usage flows into the live turn
-        // stats (thinking row) and the session token counter, replacing char/4 estimates.
+        // stats (thinking row) and the session token counter, replacing char/4 estimates. The same
+        // wrapper also surfaces the model's intermediate narration text (the "I'll first read the
+        // file..." narration the model emits alongside tool calls) into the feed as the turn
+        // progresses, since SimpleAgent itself is non-streaming and only returns the final answer.
         var usageTrackingProvider = new UsageTrackingLlmProvider(
-            llmProvider, OnLlmUsage, loggerFactory?.CreateLogger<UsageTrackingLlmProvider>());
+            llmProvider, OnLlmUsage, OnIntermediateAssistantText,
+            loggerFactory?.CreateLogger<UsageTrackingLlmProvider>());
 
         // Create the SimpleAgent
         _agent = new SimpleAgent(
@@ -214,6 +250,9 @@ public class SimpleAssistantService : IDisposable
             var startTime = DateTime.UtcNow;
             _liveStats.Begin(startTime);
             _turnHadRealUsage = false;
+            // Reset per-turn de-dup state so this turn's first narration is never suppressed by a
+            // coincidental match with the previous turn's last narration.
+            _lastIntermediateText = null;
 
             // Show processing indicator (renders live elapsed/operations/context stats) while
             // waiting for the LLM response.
