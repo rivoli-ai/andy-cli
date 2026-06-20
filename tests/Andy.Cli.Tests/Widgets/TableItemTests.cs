@@ -119,4 +119,30 @@ public class TableItemTests
         Assert.All(ys, y => Assert.InRange(y, 100, 101));
         Assert.True(total >= 5);
     }
+
+    // --- Cell parsing: empty cells must be preserved so columns stay aligned ---
+
+    [Fact]
+    public void SplitTableCells_PreservesEmptyInteriorCell()
+    {
+        Assert.Equal(new[] { "a", "", "c" }, FeedView.SplitTableCells("| a |  | c |").ToArray());
+    }
+
+    [Fact]
+    public void SplitTableCells_StripsOuterPipesOnly()
+    {
+        Assert.Equal(new[] { "H1", "H2", "H3" }, FeedView.SplitTableCells("| H1 | H2 | H3 |").ToArray());
+    }
+
+    [Fact]
+    public void SplitTableCells_HandlesRowWithoutOuterPipes()
+    {
+        Assert.Equal(new[] { "a", "b", "c" }, FeedView.SplitTableCells("a | b | c").ToArray());
+    }
+
+    [Fact]
+    public void SplitTableCells_TrailingEmptyCellPreserved()
+    {
+        Assert.Equal(new[] { "a", "b", "" }, FeedView.SplitTableCells("| a | b |  |").ToArray());
+    }
 }
