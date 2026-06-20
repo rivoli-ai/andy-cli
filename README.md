@@ -18,10 +18,15 @@ Command line AI code assistant powered by .NET 8
 ## Features
 
 - **Interactive TUI** - Modern terminal interface with real-time streaming responses
-- **Multi-Provider Support** - Works with OpenAI, Cerebras, Azure OpenAI, and Ollama
+- **Multi-Provider Support** - Works with OpenRouter, OpenAI, Anthropic, Cerebras, Groq, Google Gemini, Azure OpenAI, and Ollama
 - **Smart Provider Detection** - Automatically selects the best available LLM provider
-- **Tool Execution** - File operations, code search, bash commands, and more
-- **Context-Aware** - Maintains conversation history with intelligent context management
+- **Tool Execution** - File operations, code and text search, shell commands (execute_command), code indexing (code_index), git_diff, dataframe tools, http_request, and MCP tools
+- **Permission Management** - Interactive permission manager (/permissions) and permission layers for controlling tool access
+- **UI Themes** - Switchable terminal UI themes (/theme)
+- **Code Indexing** - Index a codebase for fast code-aware search
+- **Headless Agent Runtime** - Non-interactive agent runtime with structured exit codes
+- **ACP Server Mode** - Run as an Agent Client Protocol server for editor integrations
+- **Observability** - Instrumentation and a performance HUD; crash logging for diagnostics
 - **Performance Optimized** - Efficient streaming and rendering with Andy.Tui framework
 
 ## Installation
@@ -35,7 +40,12 @@ dotnet run --project src/Andy.Cli
 
 ### Automatic Provider Detection
 
-Andy CLI automatically detects and selects the best available LLM provider based on your environment variables. The detection follows this priority order:
+By default no provider is pinned (the `DefaultProvider` setting in
+`src/Andy.Cli/appsettings.json` is empty), so Andy CLI automatically detects
+and selects the best available LLM provider based on your environment
+variables. Configured providers include OpenRouter, OpenAI, Anthropic,
+Cerebras, Groq, Google Gemini, Azure OpenAI, and Ollama. The detection
+considers providers in roughly this order:
 
 1. **OpenAI** - Requires `OPENAI_API_KEY` (highest priority for reliability)
 2. **Cerebras** - Requires `CEREBRAS_API_KEY` (fast inference)
@@ -51,11 +61,13 @@ Andy CLI automatically detects and selects the best available LLM provider based
 See Andy.Llm library documentation.
 
 - `OPENAI_API_KEY` - OpenAI API key
+- `OPENROUTER_API_KEY` - OpenRouter API key
+- `ANTHROPIC_API_KEY` - Anthropic (Claude) API key
+- `CEREBRAS_API_KEY` - Cerebras API key
+- `GROQ_API_KEY` - Groq API key
+- `GOOGLE_API_KEY` - Google Gemini API key
 - `AZURE_OPENAI_API_KEY` - Azure OpenAI API key
 - `AZURE_OPENAI_ENDPOINT` - Azure OpenAI endpoint URL
-- `CEREBRAS_API_KEY` - Cerebras API key
-- `ANTHROPIC_API_KEY` - Anthropic (Claude) API key
-- `GOOGLE_API_KEY` - Google Gemini API key
 - `OLLAMA_API_BASE` - Custom Ollama endpoint (default: http://localhost:11434)
 
 #### Provider Control
@@ -100,7 +112,10 @@ dotnet run --project src/Andy.Cli
 #### Keyboard Shortcuts
 
 - `Ctrl+P` - Open command palette
+- `Ctrl+]` - Toggle scroll mode (Feed vs Prompt History)
+- `Ctrl+O` - Expand/collapse tool output detail
 - `F2` - Toggle performance HUD
+- `F3` - Toggle mouse capture (off by default so native text selection works; on enables mouse-wheel scroll)
 - `ESC` - Exit application
 - `Up/Down` - Scroll through chat history
 - `Page Up/Down` - Fast scroll
@@ -115,6 +130,8 @@ dotnet run --project src/Andy.Cli
 - `/model detect` - Show provider detection diagnostics
 - `/tools list` - List available tools
 - `/tools info <tool_name>` - Show details for a tool
+- `/permissions` - View and edit tool permissions (aliases: `perms`, `perm`)
+- `/theme` - List and switch the UI theme (alias: `themes`)
 - `/clear` - Clear conversation history
 - `/help` - Show help information
 
@@ -131,16 +148,50 @@ dotnet run --project src/Andy.Cli -- tools list
 dotnet run --project src/Andy.Cli -- tools info <tool_name>
 ```
 
+### Version
+
+```bash
+# Print the version and exit (--version, -v, or version)
+dotnet run --project src/Andy.Cli -- --version
+```
+
+### Headless Agent Runtime
+
+Run the agent non-interactively from a config file. The headless runtime
+returns structured exit codes (see the `HeadlessExitCode` enum: `Success`,
+`ConfigError`, `AgentFailure`, `Timeout`, and others) so it can be scripted
+in CI and automation. See `docs/headless-runtime.md` for full details.
+
+```bash
+dotnet run --project src/Andy.Cli -- run --headless --config <path>
+```
+
+### ACP Server Mode
+
+Run as an Agent Client Protocol (ACP) server for editor integrations:
+
+```bash
+dotnet run --project src/Andy.Cli -- --acp
+```
+
 ## Development
 
 ### Architecture
 
-Andy CLI is built on a modular architecture using:
-- **Andy.Engine** - Core AI agent engine with tool execution
+The interactive assistant is implemented by `SimpleAssistantService`
+(`src/Andy.Cli/Services/SimpleAssistantService.cs`), which wraps `SimpleAgent`
+from the Andy.Engine NuGet package (`SimpleAgent` lives in the package, not in
+this repository). The application is built on a set of Andy.* NuGet packages:
+
+- **Andy.Engine** - Agent loop and tool execution (provides `SimpleAgent`)
 - **Andy.Llm** - LLM provider abstractions and implementations
-- **Andy.Tools** - Extensible tool framework for file operations, code search, etc.
+- **Andy.Tools** + **Andy.Tools.Data** - Tool framework, including dataframe tools
 - **Andy.Tui** - High-performance terminal UI framework
 - **Andy.Model** - Shared models and abstractions
+- **Andy.Permissions** - Permission engine for tool access control
+- **Andy.MCP** - Model Context Protocol (MCP) tool support
+- **Andy.Acp.Core** - Agent Client Protocol (ACP) server
+- **Andy.CodeIndex.Infrastructure** - Code indexing
 
 ### Project Structure
 

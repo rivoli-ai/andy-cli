@@ -60,8 +60,7 @@ When completing a set of tasks or phase milestones:
 ### Code Quality Standards
 
 - Always write test in the tests/ assemblies for new code or code changes in the src/ directory
-- Run `dotnet format` before committing to ensure consistent formatting
-- Use the pre-commit hooks: `./scripts/setup-git-hooks.sh` (Linux/macOS) or `./scripts/setup-git-hooks.ps1` (Windows)
+- Run `dotnet format` before committing to keep formatting consistent (there is no git-hook setup script; the only script in `scripts/` is `build-release.sh`)
 - Ensure all tests pass: `dotnet test`
 - Generate coverage reports for significant changes
 
@@ -81,45 +80,9 @@ When completing a set of tasks or phase milestones:
 - Update local development setup guide when adding new tools or processes
 - Maintain conversion plan progress tracking for transparency
 
-## Rendering System Architecture Issues
+## Rendering System
 
-### Current Problems (2025-08-11)
-
-The rendering system has fundamental architectural problems that cause erratic output:
-
-1. **Dual Rendering Approaches**: VirtualDomRenderer uses both:
-   - `RenderElement` method for positioning and z-ordering
-   - Visitor pattern (`Accept(this)`) for node-specific rendering
-   - These approaches conflict, causing double-rendering and positioning issues
-
-2. **Inconsistent Node Handling**:
-   - FragmentNode: Special handling in `RenderElement` but empty `VisitFragment`
-   - ClippingNode: Complex setup in `VisitClipping` but also processed by normal flow
-   - TextNode: Only handled via visitor pattern
-   - ElementNode: Handled by both approaches
-
-3. **API Inconsistency**:
-   - Some components use `Children.Add()` (not possible - readonly)
-   - Others use `AddChild()` method  
-   - Collection initializer syntax conflicts with fluent methods
-
-### Required Fixes
-
-1. **Unify Rendering**: Choose ONE approach - either visitor OR element-based
-2. **Fix Node Processing**: Each node type should have ONE clear rendering path
-3. **Consistent APIs**: All components should use same pattern for adding children
-4. **Proper Clipping**: Implement clipping in the unified rendering approach
-
-### Detailed Rendering Diagnostics
-
-The comprehensive logging system captures:
-- Layout calculations and constraints
-- Virtual DOM tree construction and diffing  
-- Rendering operations and positioning
-- Focus management and state changes
-- Performance metrics and timing
-
-Use `ComprehensiveLoggingInitializer.Initialize(isTestMode: true)` in tests to enable detailed rendering logs for debugging.
+The UI renders through the Andy.Tui DisplayList and widgets (for example `DL.DisplayListBuilder` and `DL.TextRun`); feed items implement the `IFeedItem` measure/render contract in `src/Andy.Cli/Widgets/FeedView.cs`.
 
 ## Notes
 
