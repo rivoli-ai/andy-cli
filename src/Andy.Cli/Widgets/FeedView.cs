@@ -1103,9 +1103,11 @@ namespace Andy.Cli.Widgets
                     case DL.TextRun tr:
                         if ((tr.Attrs & UnderlineMask) != DL.CellAttrFlags.None)
                         {
-                            // Drop the underline bits, add Bold, and recolor to the link color so
-                            // emphasized/link text still stands out without any underline.
-                            var attrs = (tr.Attrs & ~UnderlineMask) | DL.CellAttrFlags.Bold;
+                            // Drop the underline bits and recolor to the link color WITHOUT adding
+                            // bold: emphasis and links stand out by COLOR, not weight, so the feed
+                            // isn't flooded with bold. Genuine **bold** runs have no Underline flag
+                            // and pass through unchanged below, staying bold.
+                            var attrs = tr.Attrs & ~UnderlineMask;
                             var run = new DL.TextRun(tr.X, tr.Y, tr.Content, linkColor, tr.Bg, attrs);
                             target.DrawText(run);
                         }

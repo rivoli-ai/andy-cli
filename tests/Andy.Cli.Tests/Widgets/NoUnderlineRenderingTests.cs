@@ -38,19 +38,21 @@ public class NoUnderlineRenderingTests
     }
 
     [Fact]
-    public void MarkdownEmphasis_IsRenderedBoldWithLinkColor_InsteadOfUnderlined()
+    public void MarkdownEmphasis_IsRenderedInAccentColor_NotBold_NotUnderlined()
     {
         // The bundled renderer maps *emphasis* to the Underline attribute. After post-processing
-        // those runs must be Bold (no underline) and recolored to the theme accent (link) color.
+        // those runs are recolored to the theme accent (link) color WITHOUT bold - emphasis/links
+        // stand out by color, not weight, so the feed isn't flooded with bold.
         var accent = Andy.Cli.Themes.Theme.Current.Accent;
         var runs = RenderMarkdown("Some text with *emphasized words here* in the middle.");
 
-        var emphasized = runs.Where(r => r.Attrs.HasFlag(DL.CellAttrFlags.Bold)).ToList();
-        Assert.NotEmpty(emphasized);
-        Assert.All(emphasized, r =>
+        // The converted (formerly underlined) runs are the ones now in the accent color.
+        var accented = runs.Where(r => r.Fg.HasValue && r.Fg.Value.Equals(accent)).ToList();
+        Assert.NotEmpty(accented);
+        Assert.All(accented, r =>
         {
             Assert.Equal(DL.CellAttrFlags.None, r.Attrs & UnderlineMask);
-            Assert.Equal(accent, r.Fg);
+            Assert.False(r.Attrs.HasFlag(DL.CellAttrFlags.Bold), "emphasis should be color-only, not bold");
         });
     }
 
