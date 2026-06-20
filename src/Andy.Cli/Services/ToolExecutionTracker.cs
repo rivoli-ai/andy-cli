@@ -281,6 +281,19 @@ public class ToolExecutionTracker
                 return $"Wrote {fileName}";
             }
         }
+        // For shell commands, surface the ACTUAL output so the feed shows what the command
+        // produced (collapsed: first line; expanded: full), not just a status/line count.
+        else if (toolName.Contains("execute_command", StringComparison.OrdinalIgnoreCase) ||
+                 toolName.Contains("bash", StringComparison.OrdinalIgnoreCase))
+        {
+            if (resultData is Dictionary<string, object?> d)
+            {
+                var output = (d.TryGetValue("output", out var o) ? o?.ToString() : null)
+                          ?? (d.TryGetValue("stdout", out var so) ? so?.ToString() : null);
+                if (!string.IsNullOrWhiteSpace(output))
+                    return output!.TrimEnd();
+            }
+        }
 
         return fallbackResult;
     }

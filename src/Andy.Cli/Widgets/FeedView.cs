@@ -767,17 +767,20 @@ namespace Andy.Cli.Widgets
 
                     if (resultData is Dictionary<string, object?> resultDict)
                     {
-                        if (resultDict.TryGetValue("exit_code", out var exitCode))
+                        // Prefer the actual command output so the feed shows what ran (collapsed:
+                        // first line; expanded: full). Fall back to an exit-code status only when
+                        // there is no output to show.
+                        var output = (resultDict.TryGetValue("output", out var o) ? o?.ToString() : null)
+                                  ?? (resultDict.TryGetValue("stdout", out var so) ? so?.ToString() : null);
+                        if (!string.IsNullOrWhiteSpace(output))
+                        {
+                            resultSummary = output!.TrimEnd();
+                        }
+                        else if (resultDict.TryGetValue("exit_code", out var exitCode))
                         {
                             resultSummary = exitCode?.ToString() == "0"
                                 ? $"Executed {cmdName} successfully"
                                 : $"Executed {cmdName} (exit code: {exitCode})";
-                        }
-                        else if (resultDict.TryGetValue("output", out var output) && output != null)
-                        {
-                            var outputStr = output.ToString() ?? "";
-                            var lines = outputStr.Split('\n').Length;
-                            resultSummary = $"Executed {cmdName} ({lines} lines output)";
                         }
                     }
 
@@ -2633,15 +2636,11 @@ namespace Andy.Cli.Widgets
             }
             else if (_toolName.Contains("bash") || _toolName.Contains("command"))
             {
-                if (!string.IsNullOrEmpty(_result))
-                {
-                    // Check if this is an error result (failed execution)
-                    if (!_isSuccess)
-                        return FirstLine(_result);
-                    var lines = _result.Split('\n').Length;
-                    return $"Command executed ({lines} lines output)";
-                }
-                return "Command executed";
+                // Show the actual command output (collapsed: first non-empty line; the full output
+                // is shown in the expanded view). A bare line count hid what the command produced.
+                if (!string.IsNullOrWhiteSpace(_result))
+                    return FirstNonEmptyLine(_result);
+                return _isSuccess ? "done" : "failed";
             }
             else if (!string.IsNullOrEmpty(_result))
             {
@@ -2738,6 +2737,15 @@ namespace Andy.Cli.Widgets
             int budget = Math.Max(40, _availableWidth - 6);
             if (line.Length > budget) line = line.Substring(0, Math.Max(0, budget - 3)) + "...";
             return line.Trim();
+        }
+
+        // First line that has visible content (commands sometimes emit a leading blank line).
+        private string FirstNonEmptyLine(string s)
+        {
+            foreach (var raw in s.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'))
+                if (!string.IsNullOrWhiteSpace(raw))
+                    return FirstLine(raw);
+            return FirstLine(s);
         }
 
         private string GetParameterDisplay()

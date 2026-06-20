@@ -213,6 +213,45 @@ namespace Andy.Cli.Tests.Widgets
         }
 
         [Fact]
+        public void RunningToolItem_Command_ShowsActualOutput_NotLineCount()
+        {
+            ToolOutputView.Expanded = false;
+            var item = new RunningToolItem("execute_command_1", "execute_command");
+            item.SetComplete(true, "0.2s");
+            item.SetResult("first output line\nsecond line\nthird line");
+
+            var b = new DL.DisplayListBuilder();
+            item.RenderSlice(0, 0, 80, 0, item.MeasureLineCount(80), new DL.DisplayListBuilder().Build(), b);
+            var text = string.Concat(b.Build().Ops.OfType<DL.TextRun>().Select(r => r.Content));
+
+            Assert.Contains("first output line", text);   // shows the actual command output...
+            Assert.DoesNotContain("lines output", text);   // ...not a "(N lines output)" count
+        }
+
+        [Fact]
+        public void RunningToolItem_Command_ExpandedShowsMoreOutputThanCollapsed()
+        {
+            var output = string.Join("\n", Enumerable.Range(1, 8).Select(i => $"output line {i}"));
+
+            // ToolOutputView.Expanded is read at MeasureLineCount time, so measure each item while
+            // the global flag matches the mode under test.
+            ToolOutputView.Expanded = false;
+            var collapsed = new RunningToolItem("execute_command_1", "execute_command");
+            collapsed.SetComplete(true, "0.1s");
+            collapsed.SetResult(output);
+            int collapsedRows = collapsed.MeasureLineCount(80);
+
+            ToolOutputView.Expanded = true;
+            var expanded = new RunningToolItem("execute_command_2", "execute_command");
+            expanded.SetComplete(true, "0.1s");
+            expanded.SetResult(output);
+            int expandedRows = expanded.MeasureLineCount(80);
+
+            Assert.True(expandedRows > collapsedRows,
+                $"expanded ({expandedRows}) command output should show more rows than collapsed ({collapsedRows})");
+        }
+
+        [Fact]
         public void Toggle_FlipsState()
         {
             ToolOutputView.Expanded = false;
