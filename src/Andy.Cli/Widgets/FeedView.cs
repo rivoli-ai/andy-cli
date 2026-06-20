@@ -1071,6 +1071,74 @@ namespace Andy.Cli.Widgets
         }
     }
 
+    /// <summary>
+    /// Deterministic post-processing for markdown/link output that strips the Underline cell
+    /// attribute the bundled Andy.Tui renderer emits for emphasized text and OSC8 links, replacing
+    /// it with Bold and a distinct link color. The renderer (and the Link widget) underline by
+    /// default and expose no toggle, so we render into a throwaway builder and replay its ops into
+    /// the real builder, transforming TextRuns as we go. All other ops and attributes are preserved
+    /// exactly. This runs per frame for visible items, so the work is a single linear pass.
+    /// </summary>
+    internal static class MarkdownLinkStyle
+    {
+        /// <summary>
+        /// Run <paramref name="render"/> against a temporary DisplayListBuilder, then copy the
+        /// resulting ops into <paramref name="target"/>, converting any TextRun carrying the
+        /// Underline (or DoubleUnderline) flag into Bold and recoloring it to <paramref name="linkColor"/>.
+        /// </summary>
+        public static void RenderWithoutUnderline(DL.DisplayListBuilder target, DL.Rgb24 linkColor, Action<DL.DisplayListBuilder> render)
+        {
+            var temp = new DL.DisplayListBuilder();
+            render(temp);
+            CopyOps(temp.Build(), target, linkColor);
+        }
+
+        private static void CopyOps(DL.DisplayList list, DL.DisplayListBuilder target, DL.Rgb24 linkColor)
+        {
+            const DL.CellAttrFlags UnderlineMask = DL.CellAttrFlags.Underline | DL.CellAttrFlags.DoubleUnderline;
+            foreach (var op in list.Ops)
+            {
+                switch (op)
+                {
+                    case DL.TextRun tr:
+                        if ((tr.Attrs & UnderlineMask) != DL.CellAttrFlags.None)
+                        {
+                            // Drop the underline bits, add Bold, and recolor to the link color so
+                            // emphasized/link text still stands out without any underline.
+                            var attrs = (tr.Attrs & ~UnderlineMask) | DL.CellAttrFlags.Bold;
+                            var run = new DL.TextRun(tr.X, tr.Y, tr.Content, linkColor, tr.Bg, attrs);
+                            target.DrawText(run);
+                        }
+                        else
+                        {
+                            var run = tr;
+                            target.DrawText(run);
+                        }
+                        break;
+                    case DL.Rect rect:
+                        var rectCopy = rect;
+                        target.DrawRect(rectCopy);
+                        break;
+                    case DL.Border border:
+                        var borderCopy = border;
+                        target.DrawBorder(borderCopy);
+                        break;
+                    case DL.ClipPush clip:
+                        var clipCopy = clip;
+                        target.PushClip(clipCopy);
+                        break;
+                    case DL.LayerPush layer:
+                        var layerCopy = layer;
+                        target.PushLayer(layerCopy);
+                        break;
+                    case DL.Pop:
+                        target.Pop();
+                        break;
+                }
+            }
+        }
+    }
+
     /// <summary>Markdown feed item that uses Andy.Tui.Widgets.MarkdownRenderer for improved inline formatting.</summary>
     public sealed class MarkdownRendererItem : IFeedItem
     {
@@ -1172,7 +1240,11 @@ namespace Andy.Cli.Widgets
             // reserved line up with the rows drawn — no slicing by raw line index, no blank surplus.
             int total = MeasureLineCount(width);
             b.PushClip(new DL.ClipPush(x, y, width, maxLines));
-            BuildRenderer().Render(new L.Rect(x, y - startLine, width, total), baseDl, b);
+            // Render into a throwaway builder, then replay its ops with the Underline attribute
+            // (used by the bundled renderer for emphasized text) converted to Bold + link color.
+            var linkColor = Themes.Theme.Current.Accent;
+            MarkdownLinkStyle.RenderWithoutUnderline(b, linkColor, temp =>
+                BuildRenderer().Render(new L.Rect(x, y - startLine, width, total), baseDl, temp));
             b.Pop();
         }
 
@@ -1188,7 +1260,11 @@ namespace Andy.Cli.Widgets
             link.SetUrl(url);
             link.SetText(label);
             link.EnableOsc8(true);
-            link.Render(new L.Rect(x, y, Math.Max(1, width), 1), baseDl, b);
+            // The Link widget renders its text Bold+Underline; convert the underline to a bold
+            // link color so it matches the rest of the no-underline styling.
+            var linkColor = Themes.Theme.Current.Accent;
+            MarkdownLinkStyle.RenderWithoutUnderline(b, linkColor, temp =>
+                link.Render(new L.Rect(x, y, Math.Max(1, width), 1), baseDl, temp));
             return true;
         }
     }
@@ -1877,7 +1953,10 @@ namespace Andy.Cli.Widgets
                 renderer.SetColors(theme.Text, mdBg, theme.Accent);
             renderer.SetHeaderColors(theme.Heading, theme.Heading, theme.Heading);
             renderer.SetText(FeedMarkdown.Normalize(_content.ToString()));
-            renderer.Render(new L.Rect(x, y, width, maxLines), baseDl, b);
+            // Convert the renderer's Underline (emphasis) attribute to Bold + link color so the
+            // streaming view matches the finalized markdown: bold, distinct color, no underline.
+            MarkdownLinkStyle.RenderWithoutUnderline(b, theme.Accent, temp =>
+                renderer.Render(new L.Rect(x, y, width, maxLines), baseDl, temp));
 
             // Don't show cursor at all - it's distracting and ugly
             // Cursor should only appear when user is actually typing in an input field

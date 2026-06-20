@@ -131,8 +131,9 @@ namespace Andy.Cli.Widgets
                 // Check if the text contains a URL - render with special color
                 if (txt.Contains("http://") || txt.Contains("https://"))
                 {
-                    // Use cyan color and underline for URLs
-                    b.DrawText(new DL.TextRun(cx, y, txt, new DL.Rgb24(100, 200, 255), theme.KeyHintsBackground, DL.CellAttrFlags.Underline));
+                    // Use the theme accent color and bold for URLs (no underline; the
+                    // bold + distinct color reads as a link without the visual noise).
+                    b.DrawText(new DL.TextRun(cx, y, txt, theme.Accent, theme.KeyHintsBackground, DL.CellAttrFlags.Bold));
                 }
                 else
                 {
