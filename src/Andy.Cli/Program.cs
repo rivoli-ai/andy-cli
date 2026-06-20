@@ -460,7 +460,8 @@ class Program
                     currentModel,
                     currentProvider,
                     tokenCounter,
-                    loggerFactory);
+                    loggerFactory,
+                    extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, currentProvider));
 
                 var providerUrl = GetProviderUrl(currentProvider);
 
@@ -569,7 +570,8 @@ class Program
                                         newModel,
                                         newProvider,
                                         tokenCounter,
-                                        loggerFactory);
+                                        loggerFactory,
+                                        extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, newProvider));
                                 }
 
                                 feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
@@ -1276,7 +1278,8 @@ class Program
                                                     newModel,
                                                     newProvider,
                                                     tokenCounter,
-                                                    loggerFactory);
+                                                    loggerFactory,
+                                                    extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, newProvider));
                                             }
 
                                             feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
