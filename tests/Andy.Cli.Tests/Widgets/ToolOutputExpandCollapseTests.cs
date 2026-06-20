@@ -260,5 +260,38 @@ namespace Andy.Cli.Tests.Widgets
             Assert.False(ToolOutputView.Toggle());
             Assert.False(ToolOutputView.Expanded);
         }
+
+        [Fact]
+        public void RunningToolItem_Command_Collapsed_ShowsUpToFiveOutputLines()
+        {
+            // #135: a multi-line command result should preview several lines collapsed (not just
+            // one), capped at CollapsedResultPreviewLines (5), with a "+N more" hint for the rest.
+            ToolOutputView.Expanded = false;
+            var output = string.Join("\n", Enumerable.Range(1, 8).Select(i => $"output line {i}"));
+            var item = new RunningToolItem("execute_command_1", "execute_command");
+            item.SetComplete(true, "0.1s");
+            item.SetResult(output);
+
+            var b = new DL.DisplayListBuilder();
+            item.RenderSlice(0, 0, 80, 0, item.MeasureLineCount(80), new DL.DisplayListBuilder().Build(), b);
+            var text = string.Concat(b.Build().Ops.OfType<DL.TextRun>().Select(r => r.Content));
+
+            Assert.Contains("output line 1", text);
+            Assert.Contains("output line 5", text);     // multiple lines, not just the first
+            Assert.DoesNotContain("output line 6", text); // capped at 5
+            Assert.Contains("more lines", text);          // remainder hinted
+        }
+
+        [Fact]
+        public void RunningToolItem_Command_Collapsed_MeasureMatchesRenderedRows_MultiLine()
+        {
+            // The multi-line collapsed preview must still satisfy the IFeedItem contract.
+            ToolOutputView.Expanded = false;
+            var item = new RunningToolItem("execute_command_1", "execute_command");
+            item.SetComplete(true, "0.1s");
+            item.SetResult(string.Join("\n", Enumerable.Range(1, 8).Select(i => $"line {i}")));
+
+            Assert.Equal(item.MeasureLineCount(60), CountRenderedRows(item, 60));
+        }
     }
 }

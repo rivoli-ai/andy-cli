@@ -2353,6 +2353,9 @@ namespace Andy.Cli.Widgets
 
         // How many result lines the expanded preview shows at most.
         private const int ExpandedResultPreviewLines = 20;
+        // How many result lines the COLLAPSED preview shows for raw-output tools (shell commands,
+        // git_diff). A single summary line hid what the command produced; show a few lines instead.
+        private const int CollapsedResultPreviewLines = 5;
 
         // Line-plan classification. The plan is the single source of truth shared by
         // MeasureLineCount and RenderSlice so the reserved row count always equals the
@@ -2405,40 +2408,74 @@ namespace Andy.Cli.Widgets
             }
             else
             {
-                // Completed: result summary line, then details, then (expanded) the full
-                // multi-line result preview.
-                // Always emit exactly one result line so every completed tool renders with the
-                // same structure (header + result). When a tool produces no summary (e.g. an empty
-                // directory listing), fall back to a uniform "done"/"failed" so no tool "skips a line".
-                string summary = BuildResultSummary();
-                string resultText = string.IsNullOrEmpty(summary)
-                    ? "  L  " + (_isSuccess ? "done" : "failed")
-                    : "  L  " + (!_isSuccess ? "Error: " : "") + summary;
-                foreach (var w in WrapDetail(resultText, width, expanded))
-                    plan.Add((w, LineKind.Result));
+                // Completed. For tools whose result IS raw textual output (shell commands,
+                // git_diff), preview several lines directly - collapsed up to
+                // CollapsedResultPreviewLines, expanded up to ExpandedResultPreviewLines - so a
+                // one-line summary no longer hides what the command produced. Other tools keep
+                // their concise tool-specific summary line (full output only when expanded).
+                bool rawOutputTool = _toolName.Contains("bash") || _toolName.Contains("command")
+                                     || _toolName.Contains("git_diff");
 
-                // Additional details (skip first; it usually feeds the summary).
-                int detailCap = expanded ? int.MaxValue : 3;
-                for (int i = 1; i < _details.Count && (i <= detailCap); i++)
-                    foreach (var w in WrapDetail("    " + _details[i], width, expanded))
-                        plan.Add((w, LineKind.Detail));
-
-                if (expanded && !string.IsNullOrWhiteSpace(_result))
+                if (rawOutputTool && !string.IsNullOrWhiteSpace(_result))
                 {
-                    plan.Add(("  Output:", LineKind.Dim));
-                    var lines = _result!.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+                    var lines = _result!.Replace("\r\n", "\n").Replace('\r', '\n')
+                        .Split('\n')
+                        .Where(l => !string.IsNullOrWhiteSpace(l))
+                        .ToList();
+                    int cap = expanded ? ExpandedResultPreviewLines : CollapsedResultPreviewLines;
                     int emitted = 0;
-                    foreach (var rl in lines)
+                    for (int li = 0; li < lines.Count && emitted < cap; li++)
                     {
-                        if (emitted >= ExpandedResultPreviewLines) break;
-                        foreach (var w in TextWrap.Wrap("    " + rl, Math.Max(1, width)))
+                        // First line carries the "L" marker (and the error prefix on failure);
+                        // continuation lines align under it.
+                        string prefix = emitted == 0
+                            ? "  L  " + (!_isSuccess ? "Error: " : "")
+                            : "     ";
+                        foreach (var w in WrapDetail(prefix + lines[li], width, expanded))
                         {
-                            plan.Add((w, LineKind.Detail));
-                            if (++emitted >= ExpandedResultPreviewLines) break;
+                            plan.Add((w, emitted == 0 ? LineKind.Result : LineKind.Detail));
+                            if (++emitted >= cap) break;
                         }
                     }
-                    if (lines.Length > emitted)
-                        plan.Add(($"    ... (+{lines.Length - emitted} more lines)", LineKind.Dim));
+                    if (lines.Count > emitted)
+                        plan.Add(($"     ... (+{lines.Count - emitted} more lines)", LineKind.Dim));
+                }
+                else
+                {
+                    // Always emit exactly one result line so every completed tool renders with the
+                    // same structure (header + result). When a tool produces no summary (e.g. an
+                    // empty directory listing), fall back to a uniform "done"/"failed" so no tool
+                    // "skips a line".
+                    string summary = BuildResultSummary();
+                    string resultText = string.IsNullOrEmpty(summary)
+                        ? "  L  " + (_isSuccess ? "done" : "failed")
+                        : "  L  " + (!_isSuccess ? "Error: " : "") + summary;
+                    foreach (var w in WrapDetail(resultText, width, expanded))
+                        plan.Add((w, LineKind.Result));
+
+                    // Additional details (skip first; it usually feeds the summary).
+                    int detailCap = expanded ? int.MaxValue : 3;
+                    for (int i = 1; i < _details.Count && (i <= detailCap); i++)
+                        foreach (var w in WrapDetail("    " + _details[i], width, expanded))
+                            plan.Add((w, LineKind.Detail));
+
+                    if (expanded && !string.IsNullOrWhiteSpace(_result))
+                    {
+                        plan.Add(("  Output:", LineKind.Dim));
+                        var lines = _result!.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+                        int emitted = 0;
+                        foreach (var rl in lines)
+                        {
+                            if (emitted >= ExpandedResultPreviewLines) break;
+                            foreach (var w in TextWrap.Wrap("    " + rl, Math.Max(1, width)))
+                            {
+                                plan.Add((w, LineKind.Detail));
+                                if (++emitted >= ExpandedResultPreviewLines) break;
+                            }
+                        }
+                        if (lines.Length > emitted)
+                            plan.Add(($"    ... (+{lines.Length - emitted} more lines)", LineKind.Dim));
+                    }
                 }
             }
 

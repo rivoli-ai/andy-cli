@@ -283,19 +283,124 @@ public class ToolExecutionTracker
         }
         // For shell commands, surface the ACTUAL output so the feed shows what the command
         // produced (collapsed: first line; expanded: full), not just a status/line count.
+        // Include BOTH stdout and stderr, and the exit code on failure - otherwise a failing
+        // command (empty stdout, message on stderr) shows nothing useful.
         else if (toolName.Contains("execute_command", StringComparison.OrdinalIgnoreCase) ||
                  toolName.Contains("bash", StringComparison.OrdinalIgnoreCase))
         {
             if (resultData is Dictionary<string, object?> d)
             {
-                var output = (d.TryGetValue("output", out var o) ? o?.ToString() : null)
-                          ?? (d.TryGetValue("stdout", out var so) ? so?.ToString() : null);
-                if (!string.IsNullOrWhiteSpace(output))
-                    return output!.TrimEnd();
+                var combined = FormatCommandOutput(d);
+                if (!string.IsNullOrWhiteSpace(combined))
+                    return combined;
             }
+        }
+        // For git_diff, the tool returns its formatted diff as a plain string decorated with
+        // emoji/markdown. Strip the decoration (no-emoji rule), lead with the change stat so the
+        // collapsed view is informative, and keep the actual unified-diff hunks (de-duplicated).
+        else if (toolName.Contains("git_diff", StringComparison.OrdinalIgnoreCase))
+        {
+            var text = (resultData as string) ?? fallbackResult;
+            if (!string.IsNullOrWhiteSpace(text))
+                return CleanGitDiff(text!);
         }
 
         return fallbackResult;
+    }
+
+    /// <summary>
+    /// Builds a human-useful summary of a shell command result: exit code (on failure) followed by
+    /// stdout and stderr. Returns an empty string when the command produced no text at all.
+    /// </summary>
+    internal static string FormatCommandOutput(Dictionary<string, object?> d)
+    {
+        var stdout = ((d.TryGetValue("stdout", out var so) ? so?.ToString() : null)
+                   ?? (d.TryGetValue("output", out var o) ? o?.ToString() : null) ?? "").TrimEnd();
+        var stderr = ((d.TryGetValue("stderr", out var se) ? se?.ToString() : null) ?? "").TrimEnd();
+        int? exit = d.TryGetValue("exit_code", out var ec) && ec is int i ? i : (int?)null;
+
+        var parts = new List<string>();
+        if (exit.HasValue && exit.Value != 0)
+            parts.Add($"exit {exit.Value}");
+        if (!string.IsNullOrWhiteSpace(stdout))
+            parts.Add(stdout);
+        if (!string.IsNullOrWhiteSpace(stderr))
+            parts.Add((parts.Count > 0 ? "stderr: " : "") + stderr);
+
+        return string.Join("\n", parts).TrimEnd();
+    }
+
+    /// <summary>
+    /// Cleans the git_diff tool's formatted output for the feed: removes emoji and markdown bold
+    /// markers, promotes the change-statistic line ("N file(s) changed ...") to the front so the
+    /// collapsed view shows it, and appends the unified-diff hunks with duplicate file blocks
+    /// removed (the tool can emit the same file block twice).
+    /// </summary>
+    internal static string CleanGitDiff(string text)
+    {
+        var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
+
+        // Drop non-ASCII decoration (emoji glyphs) and markdown bold markers, line by line.
+        static string Strip(string s)
+        {
+            var sb = new System.Text.StringBuilder(s.Length);
+            foreach (var ch in s)
+                if (ch < 128) sb.Append(ch);
+            return sb.ToString().Replace("**", "").TrimEnd();
+        }
+
+        var lines = normalized.Split('\n');
+        string? statLine = null;
+        var body = new List<string>();
+        var seenBlocks = new HashSet<string>();
+        var currentBlock = new List<string>();
+        bool inFence = false;
+
+        void FlushBlock()
+        {
+            if (currentBlock.Count == 0) return;
+            var key = string.Join("\n", currentBlock);
+            if (seenBlocks.Add(key))
+                body.AddRange(currentBlock);
+            currentBlock.Clear();
+        }
+
+        foreach (var raw in lines)
+        {
+            var line = Strip(raw);
+            if (line.StartsWith("```"))
+            {
+                // Keep fences out of the de-dup key but bracket each diff block.
+                if (inFence) { FlushBlock(); }
+                inFence = !inFence;
+                continue;
+            }
+
+            // Capture the stat line ("1 file changed, 1 insertion(+)") for the front; skip the
+            // "Change Summary" header and empty decoration lines outside the diff body.
+            if (statLine == null &&
+                (line.Contains("file changed") || line.Contains("files changed")))
+            {
+                statLine = line.Replace("Total:", "").Trim();
+                continue;
+            }
+
+            if (inFence)
+                currentBlock.Add(line);
+        }
+        FlushBlock();
+
+        var result = new List<string>();
+        if (!string.IsNullOrWhiteSpace(statLine)) result.Add(statLine!);
+        // Trim leading/trailing blank lines from the diff body.
+        int start = 0, end = body.Count;
+        while (start < end && string.IsNullOrWhiteSpace(body[start])) start++;
+        while (end > start && string.IsNullOrWhiteSpace(body[end - 1])) end--;
+        for (int k = start; k < end; k++) result.Add(body[k]);
+
+        var joined = string.Join("\n", result).TrimEnd();
+        // Fall back to a fully-stripped version if we failed to recognize any structure.
+        return string.IsNullOrWhiteSpace(joined) ? Strip(normalized) : joined;
     }
 
     public class ToolExecutionInfo
