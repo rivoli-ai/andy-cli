@@ -235,6 +235,61 @@ public class ParameterMapperTests
     }
 
     [Fact]
+    public void NormalizeParameterTypes_CoercesBareStringToArray_ForSearchTextFilePatterns()
+    {
+        // Reproduces the real failure: the model passed file_patterns as a bare string "*.cs"
+        // instead of ["*.cs"], which the framework validator rejects with PARAMETER_TYPE_MISMATCH
+        // ("must be an array") before search_text ever runs.
+        var inputParams = new Dictionary<string, object?>
+        {
+            ["search_pattern"] = "transparent",
+            ["file_patterns"] = "*.cs"
+        };
+        var metadata = new ToolMetadata
+        {
+            Id = "search_text",
+            Parameters = new[]
+            {
+                new ToolParameter { Name = "search_pattern", Type = "string", Required = true },
+                new ToolParameter { Name = "file_patterns", Type = "array", Required = false }
+            }
+        };
+
+        var normalized = ParameterMapper.NormalizeParameterTypes(inputParams, metadata);
+
+        // file_patterns is now an array...
+        var filePatterns = normalized["file_patterns"];
+        Assert.IsType<string[]>(filePatterns);
+        Assert.Equal(new[] { "*.cs" }, (string[])filePatterns!);
+        // ...and the scalar string parameter is untouched.
+        Assert.Equal("transparent", normalized["search_pattern"]);
+    }
+
+    [Fact]
+    public void NormalizeParameterTypes_DoesNotRenameOrDropUnknownParameters()
+    {
+        // Value-only coercion must never rename or fuzzy-match parameter names.
+        var inputParams = new Dictionary<string, object?>
+        {
+            ["totally_unknown"] = "value"
+        };
+        var metadata = new ToolMetadata
+        {
+            Id = "search_text",
+            Parameters = new[]
+            {
+                new ToolParameter { Name = "search_pattern", Type = "string", Required = true }
+            }
+        };
+
+        var normalized = ParameterMapper.NormalizeParameterTypes(inputParams, metadata);
+
+        Assert.True(normalized.ContainsKey("totally_unknown"));
+        Assert.Equal("value", normalized["totally_unknown"]);
+        Assert.False(normalized.ContainsKey("search_pattern"));
+    }
+
+    [Fact]
     public void MapParameters_HandlesCommaSeparatedStringAsArray()
     {
         // Arrange

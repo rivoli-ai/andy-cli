@@ -131,7 +131,7 @@ public class SimpleAssistantService : IDisposable
         InstrumentationHub.Instance.SetSystemPrompt(systemPrompt);
 
         // Wrap the tool executor to update UI when tools execute
-        var uiExecutor = new UiUpdatingToolExecutor(toolExecutor, loggerFactory?.CreateLogger<UiUpdatingToolExecutor>());
+        var uiExecutor = new UiUpdatingToolExecutor(toolExecutor, loggerFactory?.CreateLogger<UiUpdatingToolExecutor>(), toolRegistry);
 
         // Wrap the LLM provider so each round-trip's REAL token usage flows into the live turn
         // stats (thinking row) and the session token counter, replacing char/4 estimates. The same

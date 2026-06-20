@@ -138,6 +138,34 @@ public static class ParameterMapper
     }
 
     /// <summary>
+    /// Coerces parameter VALUES to the types declared in the tool metadata, without renaming
+    /// parameters or fuzzy-matching names. This is the safe subset of <see cref="MapParameters"/>:
+    /// it only touches values for parameters whose names already match the tool's metadata.
+    ///
+    /// The motivating case is the common LLM mistake of passing an array-typed parameter as a
+    /// bare scalar (e.g. file_patterns="*.cs" instead of ["*.cs"]). The tool framework's
+    /// validator rejects that with PARAMETER_TYPE_MISMATCH ("must be an array") before the tool
+    /// ever runs, so the call fails for a reason that has nothing to do with the search itself.
+    /// </summary>
+    public static Dictionary<string, object?> NormalizeParameterTypes(
+        Dictionary<string, object?> inputParameters,
+        ToolMetadata toolMetadata)
+    {
+        var paramMetadata = toolMetadata.Parameters.ToDictionary(p => p.Name.ToLower(), p => p);
+        var result = new Dictionary<string, object?>(inputParameters.Count);
+        foreach (var kvp in inputParameters)
+        {
+            var value = kvp.Value;
+            if (value != null && paramMetadata.TryGetValue(kvp.Key.ToLower(), out var metadata))
+            {
+                value = ConvertParameterType(value, metadata);
+            }
+            result[kvp.Key] = value;
+        }
+        return result;
+    }
+
+    /// <summary>
     /// Converts a parameter value to the expected type
     /// </summary>
     private static object? ConvertParameterType(object? value, ToolParameter metadata)
