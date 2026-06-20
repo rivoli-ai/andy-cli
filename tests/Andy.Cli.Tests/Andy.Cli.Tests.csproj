@@ -58,6 +58,7 @@
     <Compile Include="Widgets/TableItemTests.cs" />
     <Compile Include="Widgets/PermissionsManagerTests.cs" />
     <Compile Include="Widgets/UserBubbleItemTests.cs" />
+    <Compile Include="Widgets/FooterHintsTests.cs" />
     <!-- Token counter tests -->
     <Compile Include="Widgets/TokenCounterTests.cs" />
     <Compile Include="Widgets/ContextStatusBarTests.cs" />

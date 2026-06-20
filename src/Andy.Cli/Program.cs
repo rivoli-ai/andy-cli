@@ -212,10 +212,10 @@ class Program
 
         // Switch the terminal into raw byte mode for keyboard decoding. Returns
         // null (and we fall back to Console.ReadKey) when input is redirected or
-        // stty is unavailable. Mouse reporting starts OFF so the terminal's
-        // native click-drag text selection keeps working; the user can toggle
-        // mouse-wheel capture on with F3 (PageUp/PageDown scroll either way).
-        var rawInput = RawTerminalInput.TryStart(enableMouse: false);
+        // stty is unavailable. Mouse reporting starts ON so the mouse wheel scrolls
+        // the feed out of the box; the user can toggle it off with F3 to restore the
+        // terminal's native click-drag text selection (PageUp/PageDown scroll either way).
+        var rawInput = RawTerminalInput.TryStart(enableMouse: true);
 
         try
         {
@@ -253,15 +253,9 @@ class Program
             // hints are refreshed (initial render, mode switches, and the Ctrl+O toggle).
             void UpdateHints()
             {
-                string toolHint = ToolOutputView.Expanded ? "Collapse output" : "Expand output";
-                if (scrollMode == ScrollMode.PromptHistory)
-                {
-                    hints.SetHints(new[] { ("Ctrl+]", "Feed Mode"), ("↑/↓", "Navigate"), ("PgUp/PgDn", "Scroll"), ("Ctrl+O", toolHint), ("ESC", "Quit") });
-                }
-                else
-                {
-                    hints.SetHints(new[] { ("Ctrl+P", "Commands"), ("PgUp/PgDn", "Scroll"), ("Ctrl+O", toolHint), ("F2", "Toggle HUD"), ("ESC", "Quit"), ("", "http://localhost:5555") });
-                }
+                bool mouseOn = rawInput?.MouseEnabled ?? false;
+                hints.SetHints(FooterHints.Build(
+                    scrollMode == ScrollMode.PromptHistory, ToolOutputView.Expanded, mouseOn));
             }
 
             UpdateHints();
@@ -1037,11 +1031,11 @@ class Program
                     }
                     if (k.Key == ConsoleKey.F2) { hud.Enabled = !hud.Enabled; return; }
 
-                    // F3 toggles mouse capture. Mouse capture is off by default
-                    // so the terminal's native click-drag text selection works;
-                    // turning it on enables mouse-wheel scrolling of the feed at
-                    // the cost of suppressing native selection. Wheel scrolling
-                    // is also available via PageUp/PageDown regardless.
+                    // F3 toggles mouse capture. Mouse capture is ON by default so the
+                    // mouse wheel scrolls the feed; turning it off restores the terminal's
+                    // native click-drag text selection. Wheel scrolling is also available
+                    // via PageUp/PageDown regardless. The footer Mouse On/Off indicator
+                    // reflects the current state, so refresh the hints after toggling.
                     if (k.Key == ConsoleKey.F3)
                     {
                         if (rawInput == null)
@@ -1054,6 +1048,7 @@ class Program
                             toast.Show(on
                                 ? "Mouse capture ON (wheel scrolls; native text selection disabled)"
                                 : "Mouse capture OFF (native text selection enabled)", 120);
+                            UpdateHints();
                         }
                         return;
                     }
