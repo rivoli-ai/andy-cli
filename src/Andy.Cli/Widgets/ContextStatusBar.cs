@@ -14,7 +14,7 @@ namespace Andy.Cli.Widgets
 
     /// <summary>
     /// Persistent status bar at the bottom of the screen showing context usage metrics,
-    /// model information, and conversation state.
+    /// live per-turn token counts, model information, and conversation state.
     /// </summary>
     public sealed class ContextStatusBar
     {
@@ -24,6 +24,9 @@ namespace Andy.Cli.Widgets
         private int _turnCount;
         private string _modelName = string.Empty;
         private string _providerName = string.Empty;
+
+        // Live per-turn stats (set every frame from the render loop while a turn is active).
+        private TurnStats? _liveStats;
 
         // Foreground/accent colors. The row background always follows the active theme's
         // status-line background so the bar stays consistent across theme switches.
@@ -47,6 +50,13 @@ namespace Andy.Cli.Widgets
             _maxTokens = maxTokens;
             _turnCount = turnCount;
         }
+
+        /// <summary>
+        /// Update the live per-turn stats reference. Called every frame from the render loop
+        /// so the status bar shows real-time input/output token counts while the turn is
+        /// in flight. Pass <c>null</c> when idle.
+        /// </summary>
+        public void SetLiveStats(TurnStats? stats) => _liveStats = stats;
 
         /// <summary>
         /// Update model and provider information.
@@ -86,6 +96,25 @@ namespace Andy.Cli.Widgets
             if (_maxTokens <= 0) return string.Empty;
             double pct = (double)TotalTokens / _maxTokens * 100;
             return $"({pct:F1}%)";
+        }
+
+        /// <summary>
+        /// Format the live per-turn token counter for display.
+        /// Returns e.g. "2.1K in / 480 out" while a turn is in progress,
+        /// or empty string when idle.
+        /// </summary>
+        private string FormatLiveTurnTokens()
+        {
+            if (_liveStats == null || !_liveStats.IsActive) return string.Empty;
+
+            var stats = _liveStats;
+            var parts = new System.Collections.Generic.List<string>();
+            if (stats.InputTokens > 0)
+                parts.Add($"{TokenFormat.Short(stats.InputTokens)} in");
+            if (stats.OutputTokens > 0)
+                parts.Add($"{TokenFormat.Short(stats.OutputTokens)} out");
+            if (parts.Count == 0) return string.Empty;
+            return string.Join(" \u2192 ", parts);
         }
 
         /// <summary>
@@ -133,6 +162,7 @@ namespace Andy.Cli.Widgets
             string usageStr = FormatUsage();
             string percentageStr = FormatPercentage();
             string turnsStr = FormatTurns();
+            string liveTokensStr = FormatLiveTurnTokens();
 
             // Left side: Model info
             int x = 1;
@@ -150,29 +180,48 @@ namespace Andy.Cli.Widgets
                 x += providerPart.Length;
             }
 
-            // Right side: Context usage. Percentage is omitted (empty) when the window is unknown.
-            string rightSection = string.IsNullOrEmpty(percentageStr)
-                ? $"{usageStr} {turnsStr}"
-                : $"{usageStr} {percentageStr} {turnsStr}";
+            // Build right-side content: live tokens (during turn) or cumulative usage + turns (idle)
+            string rightSection;
+            if (!string.IsNullOrEmpty(liveTokensStr))
+            {
+                // During a turn: show live per-turn in/out tokens
+                rightSection = liveTokensStr;
+            }
+            else
+            {
+                // Idle: show cumulative usage + turns
+                rightSection = string.IsNullOrEmpty(percentageStr)
+                    ? $"{usageStr} {turnsStr}"
+                    : $"{usageStr} {percentageStr} {turnsStr}";
+            }
+
             int rightX = width - rightSection.Length - 2;
             if (rightX > x + 2)
             {
                 // Draw separator
                 b.DrawText(new DL.TextRun(rightX - 2, y, " | ", _dimFg, bg, DL.CellAttrFlags.None));
 
-                // Draw usage
-                b.DrawText(new DL.TextRun(rightX, y, usageStr, _fg, bg, DL.CellAttrFlags.None));
-                int cursor = rightX + usageStr.Length;
-
-                // Draw percentage with color based on usage level (only when known)
-                if (!string.IsNullOrEmpty(percentageStr))
+                if (!string.IsNullOrEmpty(liveTokensStr))
                 {
-                    b.DrawText(new DL.TextRun(cursor, y, $" {percentageStr}", LevelColor(), bg, DL.CellAttrFlags.Bold));
-                    cursor += percentageStr.Length + 1;
+                    // Live turn tokens: accent-colored, bold, with subtle background emphasis
+                    b.DrawText(new DL.TextRun(rightX, y, liveTokensStr, _accent, bg, DL.CellAttrFlags.Bold));
                 }
+                else
+                {
+                    // Cumulative usage
+                    b.DrawText(new DL.TextRun(rightX, y, usageStr, _fg, bg, DL.CellAttrFlags.None));
+                    int cursor = rightX + usageStr.Length;
 
-                // Draw turns
-                b.DrawText(new DL.TextRun(cursor, y, $" {turnsStr}", _dimFg, bg, DL.CellAttrFlags.None));
+                    // Draw percentage with color based on usage level (only when known)
+                    if (!string.IsNullOrEmpty(percentageStr))
+                    {
+                        b.DrawText(new DL.TextRun(cursor, y, $" {percentageStr}", LevelColor(), bg, DL.CellAttrFlags.Bold));
+                        cursor += percentageStr.Length + 1;
+                    }
+
+                    // Draw turns
+                    b.DrawText(new DL.TextRun(cursor, y, $" {turnsStr}", _dimFg, bg, DL.CellAttrFlags.None));
+                }
             }
 
             b.Pop();
@@ -199,7 +248,7 @@ namespace Andy.Cli.Widgets
         {
             if (string.IsNullOrEmpty(name)) return string.Empty;
             var slashIndex = name.LastIndexOf('/');
-            if (slashIndex >= 0 && slashIndex < name.Length - 1)
+            if (slashIndex > 0 && slashIndex < name.Length - 1)
             {
                 name = name.Substring(slashIndex + 1);
             }

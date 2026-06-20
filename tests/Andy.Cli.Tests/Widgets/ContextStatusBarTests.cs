@@ -167,4 +167,160 @@ public class ContextStatusBarTests
         var dl = Render(bar, width: 10);
         Assert.Empty(dl.Ops);
     }
+
+    // --- Live per-turn token display --------------------------------------------
+
+    [Fact]
+    public void SetLiveStats_Null_ShowsCumulativeUsage()
+    {
+        // When no live stats are set, the status bar shows cumulative totals.
+        var bar = Bar(15_000, 5_000, 200_000, 4, "gpt-4o", "openai");
+        bar.SetLiveStats(null);
+        var dl = Render(bar);
+
+        Assert.True(HasRunContaining(dl, "20.0K / 200.0K"));
+        Assert.False(HasRunContaining(dl, " in "));
+        Assert.False(HasRunContaining(dl, " out"));
+    }
+
+    [Fact]
+    public void SetLiveStats_Idle_ShowsCumulativeUsage()
+    {
+        // When stats are set but the turn is not active, still shows cumulative totals.
+        var stats = new TurnStats();
+        stats.Begin(System.DateTime.UtcNow);
+        stats.SetInputTokens(2000);
+        stats.SetOutputTokens(500);
+        stats.End(); // turn finished
+
+        var bar = Bar(15_000, 5_000, 200_000, 4, "gpt-4o", "openai");
+        bar.SetLiveStats(stats);
+        var dl = Render(bar);
+
+        // Idle turn: cumulative usage shown, not live per-turn tokens.
+        Assert.True(HasRunContaining(dl, "20.0K / 200.0K"));
+        Assert.False(HasRunContaining(dl, " in "));
+        Assert.False(HasRunContaining(dl, " out"));
+    }
+
+    [Fact]
+    public void SetLiveStats_ActiveTurn_ShowsLiveTokens()
+    {
+        // When stats are set and the turn is active, the right side shows live in/out tokens.
+        var stats = new TurnStats();
+        stats.Begin(System.DateTime.UtcNow);
+        stats.SetInputTokens(2500);
+        stats.AddOutputTokens(600);
+
+        var bar = Bar(15_000, 5_000, 200_000, 4, "gpt-4o", "openai");
+        bar.SetLiveStats(stats);
+        var dl = Render(bar);
+
+        // Live per-turn tokens should be rendered (accent-colored, bold).
+        Assert.True(HasRunContaining(dl, " in"));
+        Assert.True(HasRunContaining(dl, " out"));
+
+        // Cumulative usage should NOT be shown during an active turn.
+        Assert.False(HasRunContaining(dl, "20.0K / 200.0K"));
+    }
+
+    [Fact]
+    public void SetLiveStats_ActiveTurn_WithZeroTokens_ShowsNothing()
+    {
+        // Active turn but both token counts are zero: no live token string rendered,
+        // so cumulative usage is shown as a fallback.
+        var stats = new TurnStats();
+        stats.Begin(System.DateTime.UtcNow);
+        stats.IncrementOperations(); // one tool call but no tokens yet
+
+        var bar = Bar(15_000, 5_000, 200_000, 4, "gpt-4o", "openai");
+        bar.SetLiveStats(stats);
+        var dl = Render(bar);
+
+        // No live tokens yet, so cumulative usage is shown.
+        Assert.True(HasRunContaining(dl, "20.0K / 200.0K"));
+    }
+
+    [Fact]
+    public void SetLiveStats_ActiveTurn_ShowsOnlyInputTokens()
+    {
+        // Active turn with only input tokens set (no output yet).
+        var stats = new TurnStats();
+        stats.Begin(System.DateTime.UtcNow);
+        stats.SetInputTokens(3200);
+
+        var bar = Bar(15_000, 5_000, 200_000, 4, "gpt-4o", "openai");
+        bar.SetLiveStats(stats);
+        var dl = Render(bar);
+
+        // Only input token shown; no output token since it's zero.
+        Assert.True(HasRunContaining(dl, " in"));
+        Assert.False(HasRunContaining(dl, " out"));
+    }
+
+    [Fact]
+    public void SetLiveStats_ActiveTurn_ShowsOnlyOutputTokens()
+    {
+        // Active turn with only output tokens set (input is zero, e.g. mid-stream).
+        var stats = new TurnStats();
+        stats.Begin(System.DateTime.UtcNow);
+        stats.AddOutputTokens(120);
+
+        var bar = Bar(15_000, 5_000, 200_000, 4, "gpt-4o", "openai");
+        bar.SetLiveStats(stats);
+        var dl = Render(bar);
+
+        // Only output token shown; no input token since it's zero.
+        Assert.False(HasRunContaining(dl, " in"));
+        Assert.True(HasRunContaining(dl, " out"));
+    }
+
+    [Fact]
+    public void SetLiveStats_TokenCountsAccumulateAcrossRoundTrips()
+    {
+        // Simulate multiple round-trips within a turn: output tokens accumulate via AddOutputTokens.
+        var stats = new TurnStats();
+        stats.Begin(System.DateTime.UtcNow);
+        stats.SetInputTokens(4000);
+        stats.AddOutputTokens(150); // first round-trip
+        stats.AddOutputTokens(200); // second round-trip
+
+        var bar = Bar(15_000, 5_000, 200_000, 4, "gpt-4o", "openai");
+        bar.SetLiveStats(stats);
+        var dl = Render(bar);
+
+        // 350 output tokens total; should be rendered as compact format.
+        Assert.True(HasRunContaining(dl, " out"));
+    }
+
+    [Fact]
+    public void SetLiveStats_CanBeUpdatedEachFrame()
+    {
+        // Verifying that SetLiveStats can be called repeatedly (render-loop pattern)
+        // and the bar reflects the latest stats reference.
+        var bar = Bar(15_000, 5_000, 200_000, 4, "gpt-4o", "openai");
+
+        // Frame 1: no live stats
+        bar.SetLiveStats(null);
+        var dl1 = Render(bar);
+        Assert.True(HasRunContaining(dl1, "20.0K / 200.0K"));
+
+        // Frame 2: active turn
+        var stats = new TurnStats();
+        stats.Begin(System.DateTime.UtcNow);
+        stats.SetInputTokens(2000);
+        stats.AddOutputTokens(500);
+        bar.SetLiveStats(stats);
+        var dl2 = Render(bar);
+        Assert.True(HasRunContaining(dl2, " in"));
+        Assert.True(HasRunContaining(dl2, " out"));
+        Assert.False(HasRunContaining(dl2, "20.0K / 200.0K"));
+
+        // Frame 3: turn finished
+        stats.End();
+        bar.SetLiveStats(stats);
+        var dl3 = Render(bar);
+        // Back to cumulative since turn is no longer active.
+        Assert.True(HasRunContaining(dl3, "20.0K / 200.0K"));
+    }
 }
