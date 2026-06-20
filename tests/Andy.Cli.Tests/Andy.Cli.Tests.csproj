@@ -62,6 +62,7 @@
     <Compile Include="Widgets/ProcessingIndicatorStatsTests.cs" />
     <Compile Include="Services/ContextWindowTests.cs" />
     <Compile Include="Services/UsageTrackingLlmProviderTests.cs" />
+    <Compile Include="Services/IntermediateAssistantTextTests.cs" />
     <!-- KeyHintsBar tests -->
     <Compile Include="Widgets/KeyHintsBarTests.cs" />
     <!-- PromptLine color/style tests -->
