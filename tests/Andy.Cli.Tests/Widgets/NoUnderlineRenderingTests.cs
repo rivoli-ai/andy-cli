@@ -38,22 +38,30 @@ public class NoUnderlineRenderingTests
     }
 
     [Fact]
-    public void MarkdownEmphasis_IsRenderedInAccentColor_NotBold_NotUnderlined()
+    public void MarkdownEmphasis_IsNotBoldOrUnderlined()
     {
-        // The bundled renderer maps *emphasis* to the Underline attribute. After post-processing
-        // those runs are recolored to the theme accent (link) color WITHOUT bold - emphasis/links
-        // stand out by color, not weight, so the feed isn't flooded with bold.
-        var accent = Andy.Cli.Themes.Theme.Current.Accent;
+        // The renderer (Andy.Tui >= 2026.6.20-rc.64) renders *emphasis* as plain text - no
+        // underline and no bold. Confirm an emphasis line produces no underlined or bold runs.
         var runs = RenderMarkdown("Some text with *emphasized words here* in the middle.");
-
-        // The converted (formerly underlined) runs are the ones now in the accent color.
-        var accented = runs.Where(r => r.Fg.HasValue && r.Fg.Value.Equals(accent)).ToList();
-        Assert.NotEmpty(accented);
-        Assert.All(accented, r =>
+        Assert.NotEmpty(runs);
+        Assert.All(runs, r =>
         {
             Assert.Equal(DL.CellAttrFlags.None, r.Attrs & UnderlineMask);
-            Assert.False(r.Attrs.HasFlag(DL.CellAttrFlags.Bold), "emphasis should be color-only, not bold");
+            Assert.False(r.Attrs.HasFlag(DL.CellAttrFlags.Bold), "emphasis should not be bold");
         });
+    }
+
+    [Fact]
+    public void MarkdownStrong_BoldsOnlyTheMarkedText_NotTheWholeLine()
+    {
+        // Regression guard for the andy-tui bold-span fix: only the text between **...** is bold;
+        // surrounding text on the same line is not (it used to bold the whole line / leak).
+        var runs = RenderMarkdown("alpha **beta** gamma");
+        var bold = string.Concat(runs
+            .Where(r => r.Attrs.HasFlag(DL.CellAttrFlags.Bold))
+            .OrderBy(r => r.Y).ThenBy(r => r.X)
+            .Select(r => r.Content));
+        Assert.Equal("beta", bold);
     }
 
     [Fact]

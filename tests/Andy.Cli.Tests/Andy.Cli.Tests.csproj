@@ -8,9 +8,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Andy.Llm" Version="2026.6.7-rc.38" />
-    <PackageReference Include="Andy.Tools" Version="2026.6.17-rc.75" />
-    <PackageReference Include="Andy.Model" Version="2026.5.31-rc.8" />
+    <PackageReference Include="Andy.Llm" Version="2026.6.20-rc.42" />
+    <PackageReference Include="Andy.Tools" Version="2026.6.20-rc.77" />
+    <PackageReference Include="Andy.Model" Version="2026.6.20-rc.10" />
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="JsonSchema.Net" Version="9.2.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.0" />
@@ -40,6 +40,7 @@
     <Compile Include="Themes/PopularThemesTests.cs" />
     <Compile Include="Services/ProviderDetectionServiceTests.cs" />
     <Compile Include="Services/SystemPromptBuilderTests.cs" />
+    <Compile Include="Configuration/ProviderExtraBodyTests.cs" />
     <Compile Include="Services/SystemPromptsTests.cs" />
     <Compile Include="Services/MarkdownContentProcessorTests.cs" />
     <Compile Include="ModelCommandProviderSwitchTests.cs" />

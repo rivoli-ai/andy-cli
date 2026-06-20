@@ -103,7 +103,8 @@ public class SimpleAssistantService : IDisposable
         string modelName,
         string providerName,
         TokenCounter? tokenCounter = null,
-        ILoggerFactory? loggerFactory = null)
+        ILoggerFactory? loggerFactory = null,
+        IReadOnlyDictionary<string, object?>? extraBody = null)
     {
         _feed = feed;
         _tokenCounter = tokenCounter;
@@ -151,7 +152,10 @@ public class SimpleAssistantService : IDisposable
             uiExecutor,  // Use the wrapped executor
             systemPrompt,
             maxTurns: MaxAgentTurns,
-            logger: loggerFactory?.CreateLogger<SimpleAgent>()
+            logger: loggerFactory?.CreateLogger<SimpleAgent>(),
+            // Provider-specific request fields (e.g. OpenRouter `provider` routing) resolved from the
+            // selected provider's config; flow through the engine to the LLM provider.
+            extraBody: extraBody
         );
 
         // Subscribe to agent events for UI updates
@@ -471,19 +475,13 @@ public class SimpleAssistantService : IDisposable
                     {
                         _logger?.LogWarning("[TOOL_COMPLETE] No execution info found for {ToolName}", baseToolName);
 
-                        // DEBUG: Write to file what's happening
-                        try
-                        {
-                            var debugInfo = $"[{DateTime.Now:HH:mm:ss.fff}] NO RESULT for {baseToolName}:\n";
-                            debugInfo += $"  executionInfo was null: {executionInfo == null}\n";
-                            if (executionInfo != null)
-                            {
-                                debugInfo += $"  Result: '{executionInfo.Result}'\n";
-                                debugInfo += $"  ResultData type: {executionInfo.ResultData?.GetType().Name ?? "null"}\n";
-                            }
-                            System.IO.File.AppendAllText("/tmp/tool_complete_debug.txt", debugInfo + "\n");
-                        }
-                        catch { }
+                        // Log diagnostic info for missing tool results
+                        _logger?.LogDebug(
+                            "[TOOL_COMPLETE] No result for {ToolName}: executionInfo={ExecutionInfoNull}, Result='{Result}', ResultData type={ResultDataType}",
+                            baseToolName,
+                            executionInfo == null,
+                            executionInfo?.Result ?? "(null)",
+                            executionInfo?.ResultData?.GetType().Name ?? "null");
 
                         // Don't show anything generic - leave it empty or show the actual status
                         resultSummary = isSuccess ? "" : "Failed";
