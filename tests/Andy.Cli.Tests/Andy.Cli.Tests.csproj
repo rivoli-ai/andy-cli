@@ -65,6 +65,8 @@
     <Compile Include="Services/IntermediateAssistantTextTests.cs" />
     <!-- KeyHintsBar tests -->
     <Compile Include="Widgets/KeyHintsBarTests.cs" />
+    <!-- No-underline rendering tests (markdown emphasis/links rendered Bold+color, not underlined) -->
+    <Compile Include="Widgets/NoUnderlineRenderingTests.cs" />
     <!-- Tool output expand/collapse (Ctrl+O) view-toggle tests -->
     <Compile Include="Widgets/ToolOutputExpandCollapseTests.cs" />
     <!-- PromptLine color/style tests -->
