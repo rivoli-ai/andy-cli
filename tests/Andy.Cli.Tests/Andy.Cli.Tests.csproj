@@ -118,6 +118,7 @@
     <Compile Include="Integration/MultiTurnToolCallContextTests.cs" />
     <!-- Bash tool (execute_command) integration tests -->
     <Compile Include="Integration/ExecuteCommandToolIntegrationTests.cs" />
+    <Compile Include="Integration/CodeIndexStructureIntegrationTests.cs" />
     <Compile Include="Integration/ReplaceTextParameterIntegrationTests.cs" />
     <Compile Include="Integration/PermissionSessionBroadeningIntegrationTests.cs" />
     <!-- list_directory tool integration tests -->

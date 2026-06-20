@@ -201,10 +201,49 @@ public class CodeIndexTool : ToolBase
             structure = FilterStructureByScope(structure, scope);
         }
 
+        // Build a COMPACT, useful structure view. The raw ProjectStructure repeats every file's
+        // absolute path in each namespace AND in a separate top-level Files list (~60KB for a
+        // mid-size repo), which overflowed the model's tool-output budget and got truncated - so
+        // the model never saw the real structure. Instead emit counts, a directory-level rollup
+        // (the "directory view"), and per-namespace class/interface NAMES (short and high-value),
+        // with no long repeated paths.
+        var root = structure.RootPath ?? Directory.GetCurrentDirectory();
+        string Rel(string p)
+        {
+            try { return Path.GetRelativePath(root, p); } catch { return p; }
+        }
+
+        int totalClasses = structure.Namespaces.Sum(n => n.Classes.Count);
+        int totalInterfaces = structure.Namespaces.Sum(n => n.Interfaces.Count);
+
+        var directories = structure.Files
+            .Select(f =>
+            {
+                var dir = Path.GetDirectoryName(Rel(f.Path));
+                return string.IsNullOrEmpty(dir) ? "." : dir!;
+            })
+            .GroupBy(d => d)
+            .OrderBy(g => g.Key)
+            .Select(g => new Dictionary<string, object?> { ["path"] = g.Key, ["files"] = g.Count() })
+            .ToList();
+
         return new Dictionary<string, object?>
         {
             ["scope"] = scope,
-            ["structure"] = structure
+            ["root"] = root,
+            ["summary"] = $"{structure.Namespaces.Count} namespaces, {structure.Files.Count} files, " +
+                          $"{totalClasses} classes, {totalInterfaces} interfaces",
+            ["namespace_count"] = structure.Namespaces.Count,
+            ["file_count"] = structure.Files.Count,
+            ["class_count"] = totalClasses,
+            ["interface_count"] = totalInterfaces,
+            ["directories"] = directories,
+            ["namespaces"] = structure.Namespaces.Select(n => new Dictionary<string, object?>
+            {
+                ["name"] = n.Name,
+                ["classes"] = n.Classes,
+                ["interfaces"] = n.Interfaces,
+            }).ToList(),
         };
     }
 

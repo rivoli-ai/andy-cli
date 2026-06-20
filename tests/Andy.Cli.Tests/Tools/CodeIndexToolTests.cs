@@ -279,7 +279,13 @@ namespace Andy.Cli.Widgets
             var data = resultDict!["data"] as Dictionary<string, object?>;
 
             Assert.NotNull(data);
-            Assert.True(data.ContainsKey("structure"));
+            // The structure query now returns a compact view (counts + directory rollup +
+            // namespace/class names) instead of dumping the full ProjectStructure with repeated
+            // absolute paths, so it fits the model's tool-output budget.
+            Assert.True(data!.ContainsKey("namespaces"));
+            Assert.True(data.ContainsKey("namespace_count"));
+            Assert.True(data.ContainsKey("file_count"));
+            Assert.True(data.ContainsKey("directories"));
         }
         finally
         {
