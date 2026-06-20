@@ -39,6 +39,7 @@
     <Compile Include="Themes/ThemeSwitchingTests.cs" />
     <Compile Include="Themes/PopularThemesTests.cs" />
     <Compile Include="Services/ProviderDetectionServiceTests.cs" />
+    <Compile Include="Services/ToolOutputFormattingTests.cs" />
     <Compile Include="Services/SystemPromptBuilderTests.cs" />
     <Compile Include="Configuration/ProviderExtraBodyTests.cs" />
     <Compile Include="Services/SystemPromptsTests.cs" />
