@@ -20,12 +20,33 @@ namespace Andy.Cli.Services
     {
         private readonly ILlmProvider _inner;
         private readonly Action<LlmUsage> _onUsage;
+        private readonly Action<string>? _onIntermediateText;
         private readonly ILogger? _logger;
 
         public UsageTrackingLlmProvider(ILlmProvider inner, Action<LlmUsage> onUsage, ILogger? logger = null)
+            : this(inner, onUsage, onIntermediateText: null, logger)
+        {
+        }
+
+        /// <param name="onIntermediateText">
+        /// Optional callback invoked with the assistant's narration text for any round-trip that
+        /// ALSO issues tool calls - i.e. text the model emitted before/between tool executions while
+        /// the turn is still in progress. The engine (SimpleAgent) is non-streaming and only returns
+        /// the FINAL answer from ProcessMessageAsync, but it calls this provider once per round-trip,
+        /// so this decorator is the only place the CLI can observe that intermediate text live.
+        /// Responses with NO tool calls are the final answer and are intentionally skipped here;
+        /// they reach the feed through the normal end-of-turn render path, so this avoids showing the
+        /// final answer twice. Never fires for empty/whitespace content.
+        /// </param>
+        public UsageTrackingLlmProvider(
+            ILlmProvider inner,
+            Action<LlmUsage> onUsage,
+            Action<string>? onIntermediateText,
+            ILogger? logger = null)
         {
             _inner = inner ?? throw new ArgumentNullException(nameof(inner));
             _onUsage = onUsage ?? throw new ArgumentNullException(nameof(onUsage));
+            _onIntermediateText = onIntermediateText;
             _logger = logger;
         }
 
@@ -42,6 +63,7 @@ namespace Andy.Cli.Services
             var response = await _inner.CompleteAsync(request, cancellationToken);
             if (response.Usage != null)
                 Report(response.Usage);
+            ReportIntermediateText(response);
             return response;
         }
 
@@ -68,6 +90,30 @@ namespace Andy.Cli.Services
             catch (Exception ex)
             {
                 _logger?.LogWarning(ex, "Usage callback threw; ignoring");
+            }
+        }
+
+        // Surface narration text for round-trips that ALSO issue tool calls (intermediate steps).
+        // A response with no tool calls is the final answer and is rendered by the end-of-turn path,
+        // so skipping it here prevents showing the final answer twice. Like usage reporting, this is
+        // a display side effect and must never disrupt the LLM call.
+        private void ReportIntermediateText(LlmResponse response)
+        {
+            if (_onIntermediateText == null)
+                return;
+            if (!response.HasToolCalls)
+                return;
+            var text = response.Content;
+            if (string.IsNullOrWhiteSpace(text))
+                return;
+
+            try
+            {
+                _onIntermediateText(text);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Intermediate-text callback threw; ignoring");
             }
         }
     }
