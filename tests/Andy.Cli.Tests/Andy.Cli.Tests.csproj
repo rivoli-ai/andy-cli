@@ -147,6 +147,7 @@
     <Compile Include="Services/JsonRepairServiceTests.cs" />
     <Compile Include="Services/PermissionRuleFileTests.cs" />
     <Compile Include="Services/ToolCatalogDataFrameTests.cs" />
+    <Compile Include="Services/ToolResultDisplayTest.cs" />
   </ItemGroup>
 
   <ItemGroup>
