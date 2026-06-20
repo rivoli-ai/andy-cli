@@ -51,6 +51,8 @@
     <!-- Markdown rendering tests -->
     <Compile Include="Widgets/MarkdownRenderingTests.cs" />
     <Compile Include="Widgets/MarkdownRendererItemMeasureTests.cs" />
+    <!-- Table rendering tests (measure==rendered, vertical separators) -->
+    <Compile Include="Widgets/TableItemTests.cs" />
     <Compile Include="Widgets/PermissionsManagerTests.cs" />
     <Compile Include="Widgets/UserBubbleItemTests.cs" />
     <!-- Token counter tests -->
