@@ -51,12 +51,28 @@ public class UserBubbleItemTests
 
         var b = new DL.DisplayListBuilder();
         item.RenderSlice(0, 0, width, 0, item.MeasureLineCount(width), new DL.DisplayListBuilder().Build(), b);
-        // Body content is drawn at column 2 on rows below the label (Y >= 2).
+        // Body text uses the message text color (220,220,220); label is a different color and
+        // borders another. Reconstruct the message from the body runs in reading order.
+        var bodyColor = new DL.Rgb24(220, 220, 220);
         var reconstructed = string.Concat(b.Build().Ops.OfType<DL.TextRun>()
-            .Where(r => r.X == 2 && r.Y >= 2)
-            .OrderBy(r => r.Y)
+            .Where(r => r.Fg.HasValue && r.Fg.Value.Equals(bodyColor))
+            .OrderBy(r => r.Y).ThenBy(r => r.X)
             .Select(r => r.Content));
         Assert.Equal(longPath, reconstructed);
+    }
+
+    [Fact]
+    public void Label_IsInline_OnTheSameRowAsTheMessageStart()
+    {
+        var item = new UserBubbleItem("hello world", 3);
+        var b = new DL.DisplayListBuilder();
+        item.RenderSlice(0, 0, 60, 0, item.MeasureLineCount(60), new DL.DisplayListBuilder().Build(), b);
+        var runs = b.Build().Ops.OfType<DL.TextRun>().Where(r => !string.IsNullOrEmpty(r.Content)).ToList();
+
+        var label = runs.First(r => r.Content.Contains("You (#3)"));
+        var firstText = runs.First(r => r.Content.Contains("hello"));
+        Assert.Equal(label.Y, firstText.Y);   // message starts on the SAME row as the label
+        Assert.True(firstText.X > label.X);    // immediately after the label
     }
 
     [Fact]
