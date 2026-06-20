@@ -73,6 +73,38 @@ public static class ParameterMapper
             ["dir"] = "path",
             ["folder"] = "path",
             ["name"] = "path"
+        },
+        // The Replace Text tool's parameters are search_pattern / replacement_text / target_path,
+        // but models routinely call it with the names from their own file-edit tools
+        // (old_string/new_string, find/replace, etc.). Without these aliases the required
+        // parameters arrive null, the permission prompt shows "Replace None ''", and the edit fails.
+        ["replace_text"] = new Dictionary<string, string>
+        {
+            ["old_string"] = "search_pattern",
+            ["old_str"] = "search_pattern",
+            ["old_text"] = "search_pattern",
+            ["old"] = "search_pattern",
+            ["find"] = "search_pattern",
+            ["search"] = "search_pattern",
+            ["search_string"] = "search_pattern",
+            ["search_text"] = "search_pattern",
+            ["pattern"] = "search_pattern",
+            ["query"] = "search_pattern",
+            ["new_string"] = "replacement_text",
+            ["new_str"] = "replacement_text",
+            ["new_text"] = "replacement_text",
+            ["new"] = "replacement_text",
+            ["replace"] = "replacement_text",
+            ["replacement"] = "replacement_text",
+            ["replace_with"] = "replacement_text",
+            ["replacement_string"] = "replacement_text",
+            ["replace_text"] = "replacement_text",
+            ["file_path"] = "target_path",
+            ["path"] = "target_path",
+            ["filepath"] = "target_path",
+            ["filename"] = "target_path",
+            ["file"] = "target_path",
+            ["target_file"] = "target_path"
         }
     };
 
@@ -161,6 +193,56 @@ public static class ParameterMapper
                 value = ConvertParameterType(value, metadata);
             }
             result[kvp.Key] = value;
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Renames input parameters using ONLY exact name matches and the curated, per-tool alias
+    /// table (<see cref="ToolParameterMappings"/>), then coerces values to the declared types.
+    /// Unlike <see cref="MapParameters"/> this deliberately performs NO fuzzy/Levenshtein matching,
+    /// so it cannot mis-route a call to the wrong parameter - every rename is hand-vetted. This is
+    /// the live-dispatch path: it lets the model use familiar names (e.g. old_string/new_string for
+    /// replace_text) while staying as safe as the value-only <see cref="NormalizeParameterTypes"/>.
+    /// </summary>
+    public static Dictionary<string, object?> MapAndNormalize(
+        string toolId,
+        Dictionary<string, object?> inputParameters,
+        ToolMetadata toolMetadata)
+    {
+        var expectedParams = toolMetadata.Parameters.ToDictionary(p => p.Name.ToLower(), p => p.Name);
+        var paramMetadata = toolMetadata.Parameters.ToDictionary(p => p.Name.ToLower(), p => p);
+        var hasToolMapping = ToolParameterMappings.TryGetValue(toolId, out var mappings);
+
+        var result = new Dictionary<string, object?>(inputParameters.Count);
+        foreach (var kvp in inputParameters)
+        {
+            var name = kvp.Key;
+            var value = kvp.Value;
+            string finalName = name;
+
+            if (expectedParams.TryGetValue(name.ToLower(), out var exact))
+            {
+                finalName = exact;
+            }
+            else if (hasToolMapping &&
+                     mappings!.TryGetValue(name.ToLower(), out var mapped) &&
+                     expectedParams.TryGetValue(mapped.ToLower(), out var mappedExact))
+            {
+                finalName = mappedExact;
+            }
+            // No fuzzy fallback: unrecognized names pass through unchanged.
+
+            if (value != null && paramMetadata.TryGetValue(finalName.ToLower(), out var metadata))
+            {
+                value = ConvertParameterType(value, metadata);
+            }
+
+            // If a curated alias collides with a value already set (e.g. the model sent both the
+            // canonical name and an alias), keep the first non-null value rather than clobbering.
+            if (result.TryGetValue(finalName, out var existing) && existing != null && value == null)
+                continue;
+            result[finalName] = value;
         }
         return result;
     }

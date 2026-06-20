@@ -138,18 +138,21 @@ namespace Andy.Cli.Services
             // Time it so the UI can show the tool's real duration the moment it returns, rather
             // than the whole-turn elapsed measured later by SimpleAssistantService.
             var toolStopwatch = System.Diagnostics.Stopwatch.StartNew();
-            // Coerce parameter values to the types the tool declares before dispatching. Models
-            // routinely pass an array-typed parameter as a bare scalar (e.g. file_patterns="*.cs"
-            // instead of ["*.cs"]); without this the framework validator rejects the call with a
-            // type-mismatch error that has nothing to do with what the tool actually does. This is
-            // value-only coercion - it never renames parameters - so it cannot mis-route a call.
+            // Map parameter names via the curated per-tool alias table and coerce values to the
+            // types the tool declares before dispatching. Models routinely (a) call a tool with
+            // names from a different tool family (e.g. old_string/new_string for replace_text,
+            // whose real parameters are search_pattern/replacement_text) and (b) pass an
+            // array-typed parameter as a bare scalar (file_patterns="*.cs" instead of ["*.cs"]).
+            // Either makes the framework validator reject the call for a reason unrelated to what
+            // the tool does. Mapping uses ONLY exact + hand-vetted aliases (no fuzzy guessing), so
+            // it cannot mis-route a call.
             var dispatchParameters = parameters ?? new Dictionary<string, object?>();
             var toolMetadata = _toolRegistry?.GetTool(toolId)?.Metadata;
             if (toolMetadata != null)
             {
                 try
                 {
-                    dispatchParameters = ParameterMapper.NormalizeParameterTypes(dispatchParameters, toolMetadata);
+                    dispatchParameters = ParameterMapper.MapAndNormalize(toolId, dispatchParameters, toolMetadata);
                 }
                 catch (Exception ex)
                 {
