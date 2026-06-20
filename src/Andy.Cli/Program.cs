@@ -212,10 +212,12 @@ class Program
 
         // Switch the terminal into raw byte mode for keyboard decoding. Returns
         // null (and we fall back to Console.ReadKey) when input is redirected or
-        // stty is unavailable. Mouse reporting starts OFF so the terminal's
-        // native click-drag text selection keeps working; the user can toggle
-        // mouse-wheel capture on with F3 (PageUp/PageDown scroll either way).
-        var rawInput = RawTerminalInput.TryStart(enableMouse: false);
+        // stty is unavailable. Mouse reporting uses TryStart's selection-safe default
+        // (OFF) so the terminal's native click-drag text selection and Cmd+A/Cmd+C keep
+        // working; the user opts into mouse-wheel capture with F3 (PageUp/PageDown scroll
+        // either way). The default is pinned by MouseDefaultRegressionTests - do not pass
+        // enableMouse:true here, that silently breaks text selection.
+        var rawInput = RawTerminalInput.TryStart();
 
         try
         {
@@ -253,15 +255,9 @@ class Program
             // hints are refreshed (initial render, mode switches, and the Ctrl+O toggle).
             void UpdateHints()
             {
-                string toolHint = ToolOutputView.Expanded ? "Collapse output" : "Expand output";
-                if (scrollMode == ScrollMode.PromptHistory)
-                {
-                    hints.SetHints(new[] { ("Ctrl+]", "Feed Mode"), ("↑/↓", "Navigate"), ("PgUp/PgDn", "Scroll"), ("Ctrl+O", toolHint), ("ESC", "Quit") });
-                }
-                else
-                {
-                    hints.SetHints(new[] { ("Ctrl+P", "Commands"), ("PgUp/PgDn", "Scroll"), ("Ctrl+O", toolHint), ("F2", "Toggle HUD"), ("ESC", "Quit"), ("", "http://localhost:5555") });
-                }
+                bool mouseOn = rawInput?.MouseEnabled ?? false;
+                hints.SetHints(FooterHints.Build(
+                    scrollMode == ScrollMode.PromptHistory, ToolOutputView.Expanded, mouseOn));
             }
 
             UpdateHints();
@@ -1054,6 +1050,8 @@ class Program
                             toast.Show(on
                                 ? "Mouse capture ON (wheel scrolls; native text selection disabled)"
                                 : "Mouse capture OFF (native text selection enabled)", 120);
+                            // Refresh the footer so the Mouse On/Off indicator matches the new state.
+                            UpdateHints();
                         }
                         return;
                     }
