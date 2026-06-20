@@ -7,6 +7,40 @@ using L = Andy.Tui.Layout;
 namespace Andy.Cli.Widgets
 {
     /// <summary>
+    /// Process-wide VIEW state for how much tool-execution detail the feed renders.
+    ///
+    /// This is a pure presentation toggle: it only changes how already-recorded tool
+    /// items (<see cref="ToolExecutionItem"/> / <see cref="RunningToolItem"/>) lay out
+    /// and draw on the next frame. It does NOT touch the assistant turn, the tool
+    /// executor, or any recorded data — flipping it while a turn is in flight is safe
+    /// and only reflows the display. The render loop runs continuously (~60fps) on the
+    /// UI thread and the assistant turn runs on a background Task, so toggling this flag
+    /// re-measures and re-renders existing items without affecting the running turn.
+    ///
+    /// Ctrl+O in Program.cs flips <see cref="Expanded"/>. Because feed items read this
+    /// flag at measure/render time (not at construction), the change applies retroactively
+    /// to every tool item on screen, both completed and in-flight.
+    /// </summary>
+    public static class ToolOutputView
+    {
+        // volatile: written on the UI/input thread, read on the render path (same thread
+        // today, but marked volatile to make the cross-thread-safe intent explicit and
+        // robust if rendering is ever moved off the input thread).
+        private static volatile bool _expanded;
+
+        /// <summary>True when tool items should render full parameters and a multi-line
+        /// result preview; false for the compact one/two-line summary.</summary>
+        public static bool Expanded
+        {
+            get => _expanded;
+            set => _expanded = value;
+        }
+
+        /// <summary>Flip expanded/collapsed and return the new state. Pure view toggle.</summary>
+        public static bool Toggle() => _expanded = !_expanded;
+    }
+
+    /// <summary>
     /// Scrollable stack of feed items (markdown, code blocks, tools, etc.).
     /// Supports bottom-follow, manual scrolling, and simple scroll-in animation for newly appended content.
     /// </summary>
@@ -1547,53 +1581,113 @@ namespace Andy.Cli.Widgets
     /// <summary>Tool execution display with dotted yellow line on the left side.</summary>
     public sealed class ToolExecutionItem : IFeedItem
     {
+        // How many result lines the expanded preview shows at most. Claude Code shows a
+        // larger multi-line preview; we cap it so a huge tool result cannot dominate the feed.
+        private const int ExpandedResultPreviewLines = 20;
+
         private readonly string _toolId;
         private readonly Dictionary<string, object?> _parameters = new();
         private readonly string? _result;
         private readonly bool _isSuccess;
-        private readonly string _headerLine;
-        private readonly string _paramLine = "";
-        private readonly string _resultLine = "";
+        private readonly string _resultSummary = "";
+
+        // A line plan is the single source of truth shared by MeasureLineCount and
+        // RenderSlice: each entry is (text, color-role) so the two never diverge (a
+        // mismatch would leave phantom blank rows — see the IFeedItem contract). The
+        // plan is rebuilt whenever the width or the expand/collapse mode changes.
+        private enum Role { Header, Param, ResultLabel, ResultBody, Dim }
+        private List<(string text, Role role)> _plan = new();
+        private int _planWidth = -1;
+        private bool _planExpanded;
 
         public ToolExecutionItem(string toolId, Dictionary<string, object?> parameters, string? result = null, bool isSuccess = true)
         {
             _toolId = toolId;
-            _parameters = parameters;
+            _parameters = parameters ?? new();
             _result = result;
             _isSuccess = isSuccess;
-            // Compact header (status + tool id)
-            var statusIcon = _isSuccess ? "✔" : "✖";
-            _headerLine = $"{statusIcon} {toolId}";
 
-            // Inline parameter summary (first 3 key=value)
-            if (_parameters?.Any() == true)
-            {
-                var pairs = _parameters.Take(3)
-                    .Select(kv => $"{kv.Key}={TruncateInline(kv.Value)}");
-                var more = _parameters.Count > 3 ? $", +{_parameters.Count - 3} more" : "";
-                _paramLine = string.Join(", ", pairs) + more;
-            }
-
-            // One-line result summary
+            // One-line result summary used in collapsed mode.
             if (!string.IsNullOrWhiteSpace(_result))
             {
                 if (_toolId == "list_directory" && _result!.Contains("\"items\""))
                 {
                     var (count, dirs) = TrySummarizeDirectoryItems(_result!);
-                    if (count >= 0)
-                    {
-                        _resultLine = $"{count} entries" + (dirs >= 0 ? $", {dirs} directories" : "");
-                    }
-                    else
-                    {
-                        _resultLine = FirstLine(_result!);
-                    }
+                    _resultSummary = count >= 0
+                        ? $"{count} entries" + (dirs >= 0 ? $", {dirs} directories" : "")
+                        : FirstLine(_result!);
                 }
                 else
                 {
-                    _resultLine = FirstLine(_result!);
+                    _resultSummary = FirstLine(_result!);
                 }
             }
+        }
+
+        // ASCII-only status marker (CLAUDE.md mandates ASCII-only UI). [ok] / [x] read
+        // clearly in monochrome terminals and keep success/failure visually distinct.
+        private string StatusMarker => _isSuccess ? "[ok]" : "[x]";
+
+        private void EnsurePlan(int width)
+        {
+            bool expanded = ToolOutputView.Expanded;
+            if (width == _planWidth && expanded == _planExpanded && _plan.Count > 0) return;
+
+            _planWidth = width;
+            _planExpanded = expanded;
+            var plan = new List<(string, Role)>();
+
+            // Header: status marker + tool id (always one line; truncated horizontally at draw).
+            plan.Add(($"{StatusMarker} {_toolId}", Role.Header));
+
+            if (!expanded)
+            {
+                // COLLAPSED: today's compact view — one inline param line + one result line.
+                if (_parameters.Count > 0)
+                {
+                    var pairs = _parameters.Take(3).Select(kv => $"{kv.Key}={TruncateInline(kv.Value)}");
+                    var more = _parameters.Count > 3 ? $", +{_parameters.Count - 3} more" : "";
+                    plan.Add((string.Join(", ", pairs) + more, Role.Param));
+                }
+                if (!string.IsNullOrEmpty(_resultSummary))
+                {
+                    plan.Add(("Result: " + _resultSummary, Role.ResultLabel));
+                }
+            }
+            else
+            {
+                // EXPANDED: full parameters (wrapped) + multi-line result preview.
+                if (_parameters.Count > 0)
+                {
+                    plan.Add(("Parameters:", Role.Dim));
+                    foreach (var kv in _parameters)
+                    {
+                        var value = (kv.Value?.ToString() ?? "null").Replace("\r\n", " ").Replace('\n', ' ').Replace('\r', ' ');
+                        foreach (var w in TextWrap.Wrap($"  {kv.Key} = {value}", Math.Max(1, width)))
+                            plan.Add((w, Role.Param));
+                    }
+                }
+                if (!string.IsNullOrWhiteSpace(_result))
+                {
+                    plan.Add(("Result:", Role.ResultLabel));
+                    var resultLines = _result!.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+                    int emitted = 0;
+                    foreach (var rl in resultLines)
+                    {
+                        if (emitted >= ExpandedResultPreviewLines) break;
+                        foreach (var w in TextWrap.Wrap("  " + rl, Math.Max(1, width)))
+                        {
+                            plan.Add((w, Role.ResultBody));
+                            if (++emitted >= ExpandedResultPreviewLines) break;
+                        }
+                    }
+                    int totalResultLines = resultLines.Length;
+                    if (totalResultLines > emitted)
+                        plan.Add(($"  ... (+{totalResultLines - emitted} more lines)", Role.Dim));
+                }
+            }
+
+            _plan = plan;
         }
 
         private static string TruncateInline(object? value)
@@ -1634,50 +1728,58 @@ namespace Andy.Cli.Widgets
 
         public int MeasureLineCount(int width)
         {
-            // Compact: up to 3 lines (header, params, result)
-            int lines = 1;
-            if (!string.IsNullOrEmpty(_paramLine)) lines++;
-            if (!string.IsNullOrEmpty(_resultLine)) lines++;
-            return lines;
+            if (width <= 0) return 1;
+            EnsurePlan(width);
+            return Math.Max(1, _plan.Count);
         }
 
         public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
             if (width <= 0 || maxLines <= 0) return;
+            EnsurePlan(width);
 
-            int row = y;
-            int drawn = 0;
             var theme = Themes.Theme.Current;
             var cyan = theme.ToolName;
             var dim = theme.TextDim;
-            var fg = _isSuccess ? theme.Success : theme.Error;
 
-            // Header (tool name highlighted)
-            if (drawn < maxLines && startLine <= 0)
+            int drawn = 0;
+            for (int i = startLine; i < _plan.Count && drawn < maxLines; i++)
             {
-                var t = _headerLine;
-                if (t.Length > width) t = t.Substring(0, Math.Max(0, width - 1));
-                b.DrawText(new DL.TextRun(x, row, t, cyan, null, DL.CellAttrFlags.Bold));
-                row++; drawn++;
-            }
-
-            // Inline parameters
-            if (!string.IsNullOrEmpty(_paramLine) && drawn < maxLines && startLine <= 1)
-            {
-                var t = _paramLine;
-                if (t.Length > width) t = t.Substring(0, Math.Max(0, width - 1)) + "…";
-                b.DrawText(new DL.TextRun(x, row, t, dim, null, DL.CellAttrFlags.None));
-                row++; drawn++;
-            }
-
-            // One-line result
-            if (!string.IsNullOrEmpty(_resultLine) && drawn < maxLines)
-            {
-                var label = "Result: ";
-                var space = Math.Max(0, width - label.Length);
-                var body = _resultLine.Length > space ? _resultLine.Substring(0, Math.Max(0, space - 1)) + "…" : _resultLine;
-                b.DrawText(new DL.TextRun(x, row, label, dim, null, DL.CellAttrFlags.None));
-                b.DrawText(new DL.TextRun(x + label.Length, row, body, theme.ToolResult, null, DL.CellAttrFlags.None));
+                var (text, role) = _plan[i];
+                int row = y + drawn;
+                var t = text.Length > width ? text.Substring(0, Math.Max(0, width - 1)) : text;
+                switch (role)
+                {
+                    case Role.Header:
+                        b.DrawText(new DL.TextRun(x, row, t, cyan, null, DL.CellAttrFlags.Bold));
+                        break;
+                    case Role.Param:
+                        b.DrawText(new DL.TextRun(x, row, t, dim, null, DL.CellAttrFlags.None));
+                        break;
+                    case Role.ResultLabel:
+                        // Collapsed mode emits a single "Result: <summary>" line. Draw the
+                        // label dim and the summary in the ToolResult theme color so the
+                        // result text stays visually distinct (and themeable).
+                        const string resultPrefix = "Result: ";
+                        if (t.StartsWith(resultPrefix, StringComparison.Ordinal) && width > resultPrefix.Length)
+                        {
+                            b.DrawText(new DL.TextRun(x, row, resultPrefix, dim, null, DL.CellAttrFlags.None));
+                            var body = t.Substring(resultPrefix.Length);
+                            b.DrawText(new DL.TextRun(x + resultPrefix.Length, row, body, theme.ToolResult, null, DL.CellAttrFlags.None));
+                        }
+                        else
+                        {
+                            b.DrawText(new DL.TextRun(x, row, t, dim, null, DL.CellAttrFlags.None));
+                        }
+                        break;
+                    case Role.ResultBody:
+                        b.DrawText(new DL.TextRun(x, row, t, theme.ToolResult, null, DL.CellAttrFlags.None));
+                        break;
+                    default:
+                        b.DrawText(new DL.TextRun(x, row, t, dim, null, DL.CellAttrFlags.None));
+                        break;
+                }
+                drawn++;
             }
         }
     }
@@ -1897,25 +1999,6 @@ namespace Andy.Cli.Widgets
         {
             _parameters = parameters;
 
-            // DEBUG: Write to a file what parameters we received
-            try
-            {
-                var debugPath = "/tmp/tool_params_debug.txt";
-                var debugInfo = $"[{DateTime.Now:HH:mm:ss.fff}] SetParameters called for {_toolName}:\n";
-                debugInfo += $"  Tool ID: {_toolId}\n";
-                debugInfo += $"  Parameter count: {parameters?.Count ?? 0}\n";
-                if (parameters != null)
-                {
-                    foreach (var p in parameters)
-                    {
-                        debugInfo += $"    {p.Key} = {p.Value}\n";
-                    }
-                }
-                debugInfo += "\n";
-                System.IO.File.AppendAllText(debugPath, debugInfo);
-            }
-            catch { }
-
             // Extract file path if present
             if (parameters != null)
             {
@@ -2122,27 +2205,151 @@ namespace Andy.Cli.Widgets
             }
         }
 
-        public int MeasureLineCount(int width)
+        // How many result lines the expanded preview shows at most.
+        private const int ExpandedResultPreviewLines = 20;
+
+        // Line-plan classification. The plan is the single source of truth shared by
+        // MeasureLineCount and RenderSlice so the reserved row count always equals the
+        // rows actually drawn (a mismatch causes phantom blank lines — see IFeedItem).
+        // The first line is special-cased at draw time so the spinner/elapsed clock can
+        // animate per frame without changing the row count.
+        private enum LineKind { HeaderRunning, HeaderDone, Status, Result, Detail, Dim }
+        private List<(string text, LineKind kind)> _plan = new();
+        private int _planWidth = -1;
+        private bool _planExpanded;
+        private bool _planComplete;
+
+        private void EnsurePlan(int width)
         {
+            bool expanded = ToolOutputView.Expanded;
+            // Re-plan whenever width, mode, or completion state changes. (Detail/result
+            // mutation also changes content, but those only arrive before completion and
+            // the running header line is rebuilt every frame, so this is sufficient.)
+            if (width == _planWidth && expanded == _planExpanded && _planComplete == _isComplete && _plan.Count > 0)
+                return;
+
+            _planWidth = width;
+            _planExpanded = expanded;
+            _planComplete = _isComplete;
+            var plan = new List<(string, LineKind)>();
+
+            // Header line text is rebuilt per-frame in RenderSlice (spinner/elapsed); here
+            // we only reserve the row.
+            plan.Add((string.Empty, _isComplete ? LineKind.HeaderDone : LineKind.Status));
+
             if (!_isComplete)
             {
-                // Running: spinner + details
-                return 2 + Math.Min(_details.Count, 2); // Show up to 2 detail lines
+                // Running: status row + a couple of param/detail rows (collapsed) or all
+                // params/details (expanded).
+                plan.Add((string.Empty, LineKind.Status)); // "Running... [elapsed]" row
+
+                var realParams = _parameters?.Where(p => !p.Key.StartsWith("__")).ToList() ?? new();
+                int paramCap = expanded ? int.MaxValue : 2;
+                foreach (var p in realParams.Take(paramCap))
+                {
+                    var value = TruncateValue(p.Value, expanded ? 200 : 20);
+                    foreach (var w in WrapDetail($"  {p.Key}: {value}", width, expanded))
+                        plan.Add((w, LineKind.Detail));
+                }
+
+                var details = expanded ? _details : _details.TakeLast(2).ToList();
+                foreach (var d in details)
+                    foreach (var w in WrapDetail("  " + d, width, expanded))
+                        plan.Add((w, LineKind.Detail));
             }
-
-            // Calculate lines based on content
-            int lines = 2; // Tool name + result summary
-
-            // Add lines for statistics if present
-            if (_linesAdded > 0 || _linesRemoved > 0)
+            else
             {
-                lines++; // Statistics line
+                // Completed: result summary line, then details, then (expanded) the full
+                // multi-line result preview.
+                string summary = BuildResultSummary();
+                if (!string.IsNullOrEmpty(summary))
+                {
+                    string text = "  L  " + (!_isSuccess ? "Error: " : "") + summary;
+                    foreach (var w in WrapDetail(text, width, expanded))
+                        plan.Add((w, LineKind.Result));
+                }
+
+                // Additional details (skip first; it usually feeds the summary).
+                int detailCap = expanded ? int.MaxValue : 3;
+                for (int i = 1; i < _details.Count && (i <= detailCap); i++)
+                    foreach (var w in WrapDetail("    " + _details[i], width, expanded))
+                        plan.Add((w, LineKind.Detail));
+
+                if (expanded && !string.IsNullOrWhiteSpace(_result))
+                {
+                    plan.Add(("  Output:", LineKind.Dim));
+                    var lines = _result!.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+                    int emitted = 0;
+                    foreach (var rl in lines)
+                    {
+                        if (emitted >= ExpandedResultPreviewLines) break;
+                        foreach (var w in TextWrap.Wrap("    " + rl, Math.Max(1, width)))
+                        {
+                            plan.Add((w, LineKind.Detail));
+                            if (++emitted >= ExpandedResultPreviewLines) break;
+                        }
+                    }
+                    if (lines.Length > emitted)
+                        plan.Add(($"    ... (+{lines.Length - emitted} more lines)", LineKind.Dim));
+                }
             }
 
-            // Add detail lines
-            lines += Math.Min(_details.Count, 3); // Show up to 3 detail lines when complete
+            _plan = plan;
+        }
 
-            return Math.Min(lines, 6); // Cap at 6 lines max
+        // In expanded mode wrap (never truncate); in collapsed mode keep the old
+        // single-line behavior (hard truncate the over-long line).
+        private static List<string> WrapDetail(string text, int width, bool expanded)
+        {
+            if (expanded) return TextWrap.Wrap(text, Math.Max(1, width));
+            if (text.Length > width - 2 && width > 5)
+                text = text.Substring(0, width - 5) + "...";
+            return new List<string> { text };
+        }
+
+        public int MeasureLineCount(int width)
+        {
+            if (width <= 0) return 1;
+            EnsurePlan(width);
+            return Math.Max(1, _plan.Count);
+        }
+
+        /// <summary>
+        /// Build the completed-tool result summary text (no marker/indent prefix). This
+        /// mirrors the tool-type-specific selection that previously lived inline in
+        /// RenderSlice; pulling it into a helper lets EnsurePlan reserve the right number
+        /// of rows for it.
+        /// </summary>
+        private string BuildResultSummary()
+        {
+            if (_toolName.Contains("Read") || _toolName.Contains("read_file"))
+            {
+                if (_linesAdded > 0)
+                {
+                    var s = $"Read {_linesAdded} lines";
+                    if (_parameters.ContainsKey("limit")) s += " (truncated)";
+                    return s;
+                }
+                return GetResultSummary();
+            }
+            if (_toolName.Contains("list_directory") || _toolName.Contains("ListDirectory"))
+                return _details.Any() ? _details.First() : GetResultSummary();
+            if (_toolName.Contains("code_index") || _toolName.Contains("CodeIndex") || _toolName.Contains("index"))
+                return _details.Any() ? _details.First() : GetResultSummary();
+            if (_toolName.Contains("Update") || _toolName.Contains("Edit") || _toolName.Contains("Write") ||
+                _toolName.Contains("update_file") || _toolName.Contains("edit_file"))
+            {
+                if (_linesAdded > 0 || _linesRemoved > 0)
+                {
+                    var s = $"Updated {GetShortPath(_filePath)}";
+                    if (_linesAdded > 0 && _linesRemoved > 0) s += $" with {_linesAdded} additions and {_linesRemoved} removals";
+                    else if (_linesAdded > 0) s += $" with {_linesAdded} additions";
+                    else if (_linesRemoved > 0) s += $" with {_linesRemoved} removals";
+                    return s;
+                }
+                return GetResultSummary();
+            }
+            return GetResultSummary();
         }
 
         public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
@@ -2153,258 +2360,82 @@ namespace Andy.Cli.Widgets
             // output) can use the entire feed width instead of a narrow hard-coded cap.
             _availableWidth = width;
 
-            int row = y;
-            int drawn = 0;
-
-            // Update animation frame
+            // Advance the spinner; the running header is rendered fresh each frame.
             _animationFrame = (_animationFrame + 1) % _spinnerFrames.Length;
+
+            EnsurePlan(width);
 
             // Colors
             var white = new DL.Rgb24(255, 255, 255);
             var dim = new DL.Rgb24(150, 150, 150);
             var dimmer = new DL.Rgb24(100, 100, 100);
+            var green = new DL.Rgb24(0, 200, 0);
+            var red = new DL.Rgb24(200, 0, 0);
+            var orange = new DL.Rgb24(255, 165, 0);
 
-            if (!_isComplete)
+            int drawn = 0;
+            for (int i = startLine; i < _plan.Count && drawn < maxLines; i++)
             {
-                // While running: show spinner with tool name
-                if (drawn < maxLines && startLine <= 0)
-                {
-                    var spinner = _spinnerFrames[_animationFrame];
-                    var toolDisplay = $"{spinner} {_toolName}";
+                int row = y + drawn;
+                var (text, kind) = _plan[i];
 
-                    // Show parameters in parentheses
-                    var paramDisplay = GetParameterDisplay();
-                    if (!string.IsNullOrEmpty(paramDisplay))
+                // The first reserved row (index 0) is the header and is composed live so
+                // the spinner / elapsed clock animate without changing the row count.
+                if (i == 0)
+                {
+                    if (!_isComplete)
                     {
-                        toolDisplay += $"({paramDisplay})";
+                        var spinner = _spinnerFrames[_animationFrame];
+                        var paramDisplay = GetParameterDisplay();
+                        var toolDisplay = $"{spinner} {_toolName}" + (string.IsNullOrEmpty(paramDisplay) ? "()" : $"({paramDisplay})");
+                        if (toolDisplay.Length > width) toolDisplay = toolDisplay.Substring(0, Math.Max(0, width - 1));
+                        b.DrawText(new DL.TextRun(x, row, toolDisplay, white, null, DL.CellAttrFlags.None));
                     }
                     else
                     {
-                        toolDisplay += "()";
-                    }
+                        // ASCII-only completion marker (CLAUDE.md mandates ASCII-only UI).
+                        // "[ok]" / "[x]" replace the previous non-ASCII circle glyph while
+                        // keeping the success/failure color coding.
+                        var symbolColor = _isSuccess ? green : red;
+                        if (_isSuccess && !string.IsNullOrEmpty(_result) &&
+                            (_result.Contains("warning", StringComparison.OrdinalIgnoreCase) ||
+                             _result.Contains("partial", StringComparison.OrdinalIgnoreCase)))
+                            symbolColor = orange;
 
-                    b.DrawText(new DL.TextRun(x, row, toolDisplay, white, null, DL.CellAttrFlags.None));
-                    row++; drawn++;
+                        var marker = _isSuccess ? "[ok]" : "[x]";
+                        b.DrawText(new DL.TextRun(x, row, marker, symbolColor, null, DL.CellAttrFlags.None));
+
+                        var paramDisplay = GetParameterDisplay();
+                        var toolDisplay = $" {_toolName}" + (string.IsNullOrEmpty(paramDisplay) ? "()" : $"({paramDisplay})");
+                        int tx = x + marker.Length;
+                        if (toolDisplay.Length > width - marker.Length) toolDisplay = toolDisplay.Substring(0, Math.Max(0, width - marker.Length - 1));
+                        b.DrawText(new DL.TextRun(tx, row, toolDisplay, white, null, DL.CellAttrFlags.None));
+                    }
+                    drawn++;
+                    continue;
                 }
 
-                // Indented progress indicator
-                if (drawn < maxLines && startLine <= 1)
+                // Index 1 of a running tool is the live "Running... [elapsed]" status row.
+                if (!_isComplete && i == 1)
                 {
                     var elapsed = DateTime.UtcNow - _startTime;
-                    var statusText = $"  ⎿  Running... [{FormatDuration(elapsed)}]";
+                    var statusText = $"  L  Running... [{FormatDuration(elapsed)}]";
+                    if (statusText.Length > width) statusText = statusText.Substring(0, Math.Max(0, width - 1));
                     b.DrawText(new DL.TextRun(x, row, statusText, dimmer, null, DL.CellAttrFlags.None));
-                    row++; drawn++;
+                    drawn++;
+                    continue;
                 }
 
-                // Show parameters during execution
-                if (_parameters != null && _parameters.Any() && drawn < maxLines)
+                var t = text.Length > width ? text.Substring(0, Math.Max(0, width - 1)) : text;
+                DL.Rgb24 color = kind switch
                 {
-                    foreach (var param in _parameters.Take(2))
-                    {
-                        if (drawn >= maxLines || startLine > drawn + 2) break;
-                        var paramText = $"      {param.Key}: {TruncateValue(param.Value, 20)}";
-                        if (paramText.Length > width - 2)
-                        {
-                            paramText = paramText.Substring(0, width - 5) + "...";
-                        }
-                        b.DrawText(new DL.TextRun(x, row, paramText, dimmer, null, DL.CellAttrFlags.None));
-                        row++; drawn++;
-                    }
-                }
-
-                // Show recent details during execution
-                var recentDetails = _details.TakeLast(2).ToList();
-                for (int i = 0; i < recentDetails.Count && drawn < maxLines; i++)
-                {
-                    if (startLine <= drawn + 2)
-                    {
-                        var detailText = $"      {recentDetails[i]}";
-                        if (detailText.Length > width - 2)
-                        {
-                            detailText = detailText.Substring(0, width - 5) + "...";
-                        }
-                        b.DrawText(new DL.TextRun(x, row, detailText, dimmer, null, DL.CellAttrFlags.None));
-                        row++; drawn++;
-                    }
-                }
-            }
-            else
-            {
-                // Completed: show in Claude's style with colored status dots
-                // Line 1: Tool name with colored symbol
-                if (drawn < maxLines && startLine <= 0)
-                {
-                    // Use colored dot based on success status
-                    var green = new DL.Rgb24(0, 200, 0);
-                    var red = new DL.Rgb24(200, 0, 0);
-                    var orange = new DL.Rgb24(255, 165, 0);
-
-                    var symbol = "⏺"; // Circle bullet like Claude uses
-                    var symbolColor = _isSuccess ? green : red;
-
-                    // Check for warnings (partial success cases)
-                    if (_isSuccess && !string.IsNullOrEmpty(_result) &&
-                        (_result.Contains("warning", StringComparison.OrdinalIgnoreCase) ||
-                         _result.Contains("partial", StringComparison.OrdinalIgnoreCase)))
-                    {
-                        symbolColor = orange;
-                    }
-
-                    // Draw the colored symbol separately
-                    b.DrawText(new DL.TextRun(x, row, symbol, symbolColor, null, DL.CellAttrFlags.None));
-
-                    // Then draw the tool name and parameters
-                    var toolDisplay = $" {_toolName}";
-
-                    // Show parameters in parentheses
-                    var paramDisplay = GetParameterDisplay();
-                    if (!string.IsNullOrEmpty(paramDisplay))
-                    {
-                        toolDisplay += $"({paramDisplay})";
-                    }
-                    else
-                    {
-                        toolDisplay += "()";
-                    }
-
-                    b.DrawText(new DL.TextRun(x + 2, row, toolDisplay, white, null, DL.CellAttrFlags.None));
-                    row++; drawn++;
-                }
-
-                // Line 2: Result summary with statistics (only show if we have something meaningful)
-                if (drawn < maxLines && startLine <= 1)
-                {
-                    string resultContent = "";
-
-                    // Add specific result based on tool type
-                    if (_toolName.Contains("Read") || _toolName.Contains("read_file"))
-                    {
-                        if (_linesAdded > 0)
-                        {
-                            resultContent = $"Read {_linesAdded} lines";
-                            if (_parameters.ContainsKey("limit"))
-                            {
-                                resultContent += " (truncated)";
-                            }
-                        }
-                        else
-                        {
-                            resultContent = GetResultSummary();
-                        }
-                    }
-                    else if (_toolName.Contains("list_directory") || _toolName.Contains("ListDirectory"))
-                    {
-                        // Show directory listing summary
-                        if (_details.Any())
-                        {
-                            resultContent = _details.First();
-                        }
-                        else
-                        {
-                            resultContent = GetResultSummary();
-                        }
-                    }
-                    else if (_toolName.Contains("code_index") || _toolName.Contains("CodeIndex") || _toolName.Contains("index"))
-                    {
-                        // Show code index summary
-                        if (_details.Any())
-                        {
-                            resultContent = _details.First();
-                        }
-                        else
-                        {
-                            resultContent = GetResultSummary(); // This returns empty string now, not generic message
-                        }
-                    }
-                    else if (_toolName.Contains("Update") || _toolName.Contains("Edit") || _toolName.Contains("Write") ||
-                             _toolName.Contains("update_file") || _toolName.Contains("edit_file"))
-                    {
-                        if (_linesAdded > 0 || _linesRemoved > 0)
-                        {
-                            resultContent = $"Updated {GetShortPath(_filePath)}";
-                            if (_linesAdded > 0 && _linesRemoved > 0)
-                            {
-                                resultContent += $" with {_linesAdded} additions and {_linesRemoved} removals";
-                            }
-                            else if (_linesAdded > 0)
-                            {
-                                resultContent += $" with {_linesAdded} additions";
-                            }
-                            else if (_linesRemoved > 0)
-                            {
-                                resultContent += $" with {_linesRemoved} removals";
-                            }
-                        }
-                        else
-                        {
-                            resultContent = GetResultSummary();
-                        }
-                    }
-                    else
-                    {
-                        resultContent = GetResultSummary();
-                    }
-
-                    // Only show the result line if we have actual content
-                    if (!string.IsNullOrEmpty(resultContent))
-                    {
-                        string resultText = "  ⎿  ";
-
-                        if (!_isSuccess)
-                        {
-                            resultText += "Error: ";
-                        }
-
-                        resultText += resultContent;
-
-                        if (resultText.Length > width - 2)
-                        {
-                            resultText = resultText.Substring(0, width - 5) + "...";
-                        }
-
-                        b.DrawText(new DL.TextRun(x, row, resultText, dim, null, DL.CellAttrFlags.None));
-                        row++; drawn++;
-                    }
-                }
-
-                // Show additional details after completion (skip the first one as it's in the summary)
-                for (int i = 1; i < _details.Count && i <= 3 && drawn < maxLines; i++)
-                {
-                    if (startLine <= drawn + 2)
-                    {
-                        var detailText = $"        {_details[i]}";
-                        if (detailText.Length > width - 2)
-                        {
-                            detailText = detailText.Substring(0, width - 5) + "...";
-                        }
-                        b.DrawText(new DL.TextRun(x, row, detailText, new DL.Rgb24(100, 100, 100), null, DL.CellAttrFlags.None));
-                        row++; drawn++;
-                    }
-                }
-
-                // Line 3+: Show code diff preview if applicable (for Update/Edit tools)
-                if ((_toolName.Contains("Update") || _toolName.Contains("Edit")) && drawn < maxLines && _result != null)
-                {
-                    // Show a few lines of the diff if available
-                    var lines = _result.Split('\n').Take(3);
-                    foreach (var line in lines)
-                    {
-                        if (drawn >= maxLines || startLine > drawn + 2) break;
-
-                        var diffLine = "        " + line.Trim();
-                        if (diffLine.Length > width - 2)
-                        {
-                            diffLine = diffLine.Substring(0, width - 5) + "...";
-                        }
-
-                        var lineColor = dimmer;
-                        if (line.StartsWith("+")) lineColor = new DL.Rgb24(100, 180, 100);
-                        else if (line.StartsWith("-")) lineColor = new DL.Rgb24(180, 100, 100);
-
-                        b.DrawText(new DL.TextRun(x, row, diffLine, lineColor, null, DL.CellAttrFlags.None));
-                        row++; drawn++;
-                    }
-                }
+                    LineKind.Result => dim,
+                    LineKind.Detail => dimmer,
+                    LineKind.Dim => dimmer,
+                    _ => dim,
+                };
+                b.DrawText(new DL.TextRun(x, row, t, color, null, DL.CellAttrFlags.None));
+                drawn++;
             }
         }
 
@@ -2567,24 +2598,6 @@ namespace Andy.Cli.Widgets
 
         private string GetParameterDisplay()
         {
-            // DEBUG: Log what parameters we have
-            try
-            {
-                var debugPath = "/tmp/tool_params_debug.txt";
-                var debugInfo = $"[{DateTime.Now:HH:mm:ss.fff}] GetParameterDisplay for {_toolName}:\n";
-                debugInfo += $"  _parameters is null? {_parameters == null}\n";
-                debugInfo += $"  _parameters count: {_parameters?.Count ?? 0}\n";
-                if (_parameters != null)
-                {
-                    foreach (var p in _parameters.Take(5))
-                    {
-                        debugInfo += $"    {p.Key} = {p.Value}\n";
-                    }
-                }
-                System.IO.File.AppendAllText(debugPath, debugInfo + "\n");
-            }
-            catch { }
-
             // Skip internal parameters starting with __
             var realParams = _parameters?.Where(p => !p.Key.StartsWith("__")).ToList();
 

@@ -247,7 +247,24 @@ class Program
             int historyIndex = -1; // -1 means not navigating history, showing current input
 
             var hints = new KeyHintsBar();
-            hints.SetHints(new[] { ("Ctrl+P", "Commands"), ("PgUp/PgDn", "Scroll"), ("F2", "Toggle HUD"), ("ESC", "Quit"), ("", "http://localhost:5555") });
+
+            // Rebuild the key-hints bar for the current scroll mode and tool-output state.
+            // Centralized so the Ctrl+O expand/collapse hint stays in sync wherever the
+            // hints are refreshed (initial render, mode switches, and the Ctrl+O toggle).
+            void UpdateHints()
+            {
+                string toolHint = ToolOutputView.Expanded ? "Collapse output" : "Expand output";
+                if (scrollMode == ScrollMode.PromptHistory)
+                {
+                    hints.SetHints(new[] { ("Ctrl+]", "Feed Mode"), ("↑/↓", "Navigate"), ("PgUp/PgDn", "Scroll"), ("Ctrl+O", toolHint), ("ESC", "Quit") });
+                }
+                else
+                {
+                    hints.SetHints(new[] { ("Ctrl+P", "Commands"), ("PgUp/PgDn", "Scroll"), ("Ctrl+O", toolHint), ("F2", "Toggle HUD"), ("ESC", "Quit"), ("", "http://localhost:5555") });
+                }
+            }
+
+            UpdateHints();
             var toast = new Toast(); // Don't show initial toast as it interferes with prompt
             var tokenCounter = new TokenCounter();
             var contextStatusBar = new ContextStatusBar();
@@ -726,6 +743,7 @@ class Program
                             "- **Ctrl+D**: Quit application\n" +
                             "- **F2**: Toggle HUD (performance overlay)\n" +
                             "- **F3**: Toggle mouse capture (off = native text selection; on = mouse-wheel scroll)\n" +
+                            "- **Ctrl+O**: Expand/collapse tool output detail (view-only; does not affect a running turn)\n" +
                             "- **ESC**: Quit application\n" +
                             "- **Page Up/Down**: Scroll chat history\n" +
                             "- **↑/↓**: Navigate multi-line text or prompt history (when in History mode)\n" +
@@ -1038,6 +1056,28 @@ class Program
                         return;
                     }
 
+                    // Ctrl+O toggles expand/collapse of tool-execution output detail.
+                    //
+                    // IMPORTANT: this is a PURE VIEW toggle. It only flips a shared
+                    // presentation flag (ToolOutputView.Expanded) that the feed's tool
+                    // items read at measure/render time. It does NOT cancel, pause, or
+                    // otherwise affect the in-flight assistant turn:
+                    //   - the assistant turn runs on a background Task,
+                    //   - the render loop runs continuously (~60fps) on this thread,
+                    //   - so flipping the flag simply re-measures and re-renders the
+                    //     already-recorded tool items on the next frame.
+                    // Both completed and still-running tool items pick up the new mode
+                    // because they consult the flag every frame rather than at creation.
+                    if (k.Key == ConsoleKey.O && (k.Modifiers & ConsoleModifiers.Control) != 0)
+                    {
+                        bool expanded = ToolOutputView.Toggle();
+                        toast.Show(expanded
+                            ? "Tool output: expanded (full params + result preview)"
+                            : "Tool output: collapsed (compact summary)", 90);
+                        UpdateHints();
+                        return;
+                    }
+
                     // Handle Ctrl+P / Cmd+P for command palette
                     if (k.Key == ConsoleKey.P && (k.Modifiers & ConsoleModifiers.Control) != 0)
                     {
@@ -1285,6 +1325,7 @@ class Program
                                         "- **Ctrl+D**: Quit application\n" +
                                         "- **F2**: Toggle HUD (performance overlay)\n" +
                             "- **F3**: Toggle mouse capture (off = native text selection; on = mouse-wheel scroll)\n" +
+                                        "- **Ctrl+O**: Expand/collapse tool output detail (view-only; does not affect a running turn)\n" +
                                         "- **ESC**: Quit application\n" +
                                         "- **Page Up/Down**: Scroll chat history\n" +
                                         "- **↑/↓**: Navigate multi-line text or prompt history (when in History mode)\n" +
@@ -1430,13 +1471,12 @@ class Program
                         if (scrollMode == ScrollMode.PromptHistory)
                         {
                             toast.Show($"Scroll mode: Prompt History ({promptHistory.Count} messages)", 90);
-                            hints.SetHints(new[] { ("Ctrl+]", "Feed Mode"), ("↑/↓", "Navigate"), ("PgUp/PgDn", "Scroll"), ("ESC", "Quit") });
                         }
                         else
                         {
                             toast.Show("Scroll mode: Feed", 90);
-                            hints.SetHints(new[] { ("Ctrl+]", "History Mode"), ("Ctrl+P", "Commands"), ("PgUp/PgDn", "Scroll"), ("ESC", "Quit"), ("", "http://localhost:5555") });
                         }
+                        UpdateHints();
                         return;
                     }
 

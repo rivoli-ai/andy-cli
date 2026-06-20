@@ -65,6 +65,8 @@
     <Compile Include="Services/IntermediateAssistantTextTests.cs" />
     <!-- KeyHintsBar tests -->
     <Compile Include="Widgets/KeyHintsBarTests.cs" />
+    <!-- Tool output expand/collapse (Ctrl+O) view-toggle tests -->
+    <Compile Include="Widgets/ToolOutputExpandCollapseTests.cs" />
     <!-- PromptLine color/style tests -->
     <Compile Include="Widgets/PromptLineColorTests.cs" />
     <!-- Command palette execution tests -->
