@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Andy.Tools.Core;
@@ -161,6 +162,11 @@ namespace Andy.Cli.Services
                 }
             }
 
+            // For file write/edit tools, snapshot the target file's current content BEFORE the call:
+            // the tool overwrites the file and returns neither the old nor new content, so a diff can
+            // only be reconstructed by capturing "before" here and reading "after" once it completes.
+            var diffCapture = TryCaptureBeforeWrite(toolId, dispatchParameters, context);
+
             var result = await _innerExecutor.ExecuteAsync(toolId, dispatchParameters, context);
             toolStopwatch.Stop();
 
@@ -268,86 +274,86 @@ namespace Andy.Cli.Services
 
                                     // Different result formats based on query type
                                     switch (queryType)
-                                {
-                                    case "structure":
-                                        // Structure query: show namespace and file counts
-                                        var scope = dataContent.GetValueOrDefault("scope")?.ToString() ?? "all";
-                                        var structure = dataContent.GetValueOrDefault("structure");
+                                    {
+                                        case "structure":
+                                            // Structure query: show namespace and file counts
+                                            var scope = dataContent.GetValueOrDefault("scope")?.ToString() ?? "all";
+                                            var structure = dataContent.GetValueOrDefault("structure");
 
-                                        // Handle ProjectStructure type directly
-                                        if (structure != null)
-                                        {
-                                            var structureType = structure.GetType();
-                                            var namespaceCount = 0;
-                                            var fileCount = 0;
-
-                                            // Try to get Namespaces property
-                                            var namespacesProp = structureType.GetProperty("Namespaces");
-                                            if (namespacesProp != null)
+                                            // Handle ProjectStructure type directly
+                                            if (structure != null)
                                             {
-                                                var namespaces = namespacesProp.GetValue(structure);
-                                                if (namespaces is System.Collections.IList nsList)
+                                                var structureType = structure.GetType();
+                                                var namespaceCount = 0;
+                                                var fileCount = 0;
+
+                                                // Try to get Namespaces property
+                                                var namespacesProp = structureType.GetProperty("Namespaces");
+                                                if (namespacesProp != null)
                                                 {
-                                                    namespaceCount = nsList.Count;
+                                                    var namespaces = namespacesProp.GetValue(structure);
+                                                    if (namespaces is System.Collections.IList nsList)
+                                                    {
+                                                        namespaceCount = nsList.Count;
+                                                    }
                                                 }
+
+                                                // Try to get Files property
+                                                var filesProp = structureType.GetProperty("Files");
+                                                if (filesProp != null)
+                                                {
+                                                    var files = filesProp.GetValue(structure);
+                                                    if (files is System.Collections.IList filesList)
+                                                    {
+                                                        fileCount = filesList.Count;
+                                                    }
+                                                }
+
+                                                resultMessage = $"Structure indexed: {namespaceCount} namespaces, {fileCount} files (scope: {scope})";
+                                            }
+                                            else
+                                            {
+                                                resultMessage = $"Structure indexed for scope: {scope}";
+                                            }
+                                            break;
+
+                                        case "symbols":
+                                            // Symbol search: show count and query pattern
+                                            var pattern = dataContent.GetValueOrDefault("query")?.ToString() ?? "*";
+                                            var symbolScope = dataContent.GetValueOrDefault("scope")?.ToString() ?? "all";
+                                            var count = 0;
+
+                                            if (dataContent.TryGetValue("count", out var countObj) && countObj != null)
+                                            {
+                                                count = Convert.ToInt32(countObj);
                                             }
 
-                                            // Try to get Files property
-                                            var filesProp = structureType.GetProperty("Files");
-                                            if (filesProp != null)
+                                            resultMessage = $"Found {count} symbols matching '{pattern}' (scope: {symbolScope})";
+                                            break;
+
+                                        case "references":
+                                            // Reference search: show count and symbol name
+                                            var symbol = dataContent.GetValueOrDefault("symbol")?.ToString() ?? "unknown";
+                                            var refScope = dataContent.GetValueOrDefault("scope")?.ToString() ?? "all";
+                                            var refCount = 0;
+
+                                            if (dataContent.TryGetValue("count", out var refCountObj) && refCountObj != null)
                                             {
-                                                var files = filesProp.GetValue(structure);
-                                                if (files is System.Collections.IList filesList)
-                                                {
-                                                    fileCount = filesList.Count;
-                                                }
+                                                refCount = Convert.ToInt32(refCountObj);
                                             }
 
-                                            resultMessage = $"Structure indexed: {namespaceCount} namespaces, {fileCount} files (scope: {scope})";
-                                        }
-                                        else
-                                        {
-                                            resultMessage = $"Structure indexed for scope: {scope}";
-                                        }
-                                        break;
+                                            resultMessage = $"Found {refCount} references to '{symbol}' (scope: {refScope})";
+                                            break;
 
-                                    case "symbols":
-                                        // Symbol search: show count and query pattern
-                                        var pattern = dataContent.GetValueOrDefault("query")?.ToString() ?? "*";
-                                        var symbolScope = dataContent.GetValueOrDefault("scope")?.ToString() ?? "all";
-                                        var count = 0;
+                                        case "hierarchy":
+                                            // Class hierarchy: show class name
+                                            var className = dataContent.GetValueOrDefault("className")?.ToString() ?? "unknown";
+                                            resultMessage = $"Retrieved hierarchy for class '{className}'";
+                                            break;
 
-                                        if (dataContent.TryGetValue("count", out var countObj) && countObj != null)
-                                        {
-                                            count = Convert.ToInt32(countObj);
-                                        }
-
-                                        resultMessage = $"Found {count} symbols matching '{pattern}' (scope: {symbolScope})";
-                                        break;
-
-                                    case "references":
-                                        // Reference search: show count and symbol name
-                                        var symbol = dataContent.GetValueOrDefault("symbol")?.ToString() ?? "unknown";
-                                        var refScope = dataContent.GetValueOrDefault("scope")?.ToString() ?? "all";
-                                        var refCount = 0;
-
-                                        if (dataContent.TryGetValue("count", out var refCountObj) && refCountObj != null)
-                                        {
-                                            refCount = Convert.ToInt32(refCountObj);
-                                        }
-
-                                        resultMessage = $"Found {refCount} references to '{symbol}' (scope: {refScope})";
-                                        break;
-
-                                    case "hierarchy":
-                                        // Class hierarchy: show class name
-                                        var className = dataContent.GetValueOrDefault("className")?.ToString() ?? "unknown";
-                                        resultMessage = $"Retrieved hierarchy for class '{className}'";
-                                        break;
-
-                                    default:
-                                        resultMessage = $"Code index query completed: {queryType}";
-                                        break;
+                                        default:
+                                            resultMessage = $"Code index query completed: {queryType}";
+                                            break;
                                     }
                                 }
                             }
@@ -546,6 +552,12 @@ namespace Andy.Cli.Services
                 feedViewForCompletion?.AddToolExecutionComplete(
                     uiToolId, result.IsSuccessful, FormatToolDuration(toolStopwatch.Elapsed), resultMessage);
 
+                // Render a git-style diff for a successful file write/edit, right under the tool line.
+                if (result.IsSuccessful && diffCapture != null && feedViewForCompletion != null)
+                {
+                    TryRenderFileDiff(diffCapture, feedViewForCompletion);
+                }
+
                 // INSTRUMENTATION: Publish event when tool result is about to be sent back to LLM
                 var toolResultToLlmEvent = new ToolResultToLlmEvent
                 {
@@ -622,6 +634,95 @@ namespace Andy.Cli.Services
         public ToolExecutionStatistics GetStatistics()
         {
             return _innerExecutor.GetStatistics();
+        }
+
+        // --- File write/edit diff rendering -------------------------------------------------
+
+        // Single-file mutating tools whose target is the `file_path` parameter. replace_text is
+        // intentionally excluded: it can rewrite many files across a directory tree, so capturing
+        // a meaningful "before" for all of them is out of scope here.
+        private static readonly HashSet<string> FileDiffToolIds =
+            new(StringComparer.OrdinalIgnoreCase) { "write_file", "edit_file" };
+
+        // Skip diffing files larger than this (either before or after) to keep the UI responsive.
+        private const long MaxDiffFileBytes = 512 * 1024;
+
+        private sealed record FileMutationCapture(string ResolvedPath, string DisplayPath, bool Existed, string BeforeText);
+
+        private FileMutationCapture? TryCaptureBeforeWrite(string toolId, Dictionary<string, object?> parameters, ToolExecutionContext? context)
+        {
+            try
+            {
+                if (!FileDiffToolIds.Contains(toolId)) return null;
+                if (!parameters.TryGetValue("file_path", out var fpObj) || fpObj is null) return null;
+                var rawPath = fpObj.ToString();
+                if (string.IsNullOrWhiteSpace(rawPath)) return null;
+
+                var workingDir = string.IsNullOrEmpty(context?.WorkingDirectory)
+                    ? Directory.GetCurrentDirectory()
+                    : context!.WorkingDirectory;
+                var resolved = Path.IsPathRooted(rawPath) ? rawPath : Path.GetFullPath(Path.Combine(workingDir, rawPath));
+
+                bool existed = File.Exists(resolved);
+                string before = "";
+                if (existed)
+                {
+                    var len = new FileInfo(resolved).Length;
+                    if (len > MaxDiffFileBytes) return null; // too big to diff cheaply
+                    before = File.ReadAllText(resolved);
+                    if (before.Contains('\0')) return null;  // binary file
+                }
+
+                var display = ToDisplayPath(resolved, workingDir, rawPath!);
+                return new FileMutationCapture(resolved, display, existed, before);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "[UI_EXECUTOR] Failed to capture pre-write content for {ToolId}", toolId);
+                return null;
+            }
+        }
+
+        private void TryRenderFileDiff(FileMutationCapture capture, FeedView feedView)
+        {
+            try
+            {
+                if (!File.Exists(capture.ResolvedPath)) return; // e.g. tool deleted it
+                if (new FileInfo(capture.ResolvedPath).Length > MaxDiffFileBytes) return;
+
+                var after = File.ReadAllText(capture.ResolvedPath);
+                if (after.Contains('\0')) return; // binary
+
+                var diff = UnifiedDiff.Compute(capture.BeforeText, after);
+                if (diff.IsEmpty) return; // no visible change (e.g. identical write / no-op edit)
+
+                var kind = capture.Existed ? FileChangeKind.Update : FileChangeKind.Create;
+                feedView.AddFileDiff(capture.DisplayPath, kind, diff);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "[UI_EXECUTOR] Failed to render file diff for {Path}", capture.ResolvedPath);
+            }
+        }
+
+        // Show a path relative to the working directory when the file is under it; otherwise fall
+        // back to the path the caller supplied.
+        private static string ToDisplayPath(string resolved, string workingDir, string rawPath)
+        {
+            try
+            {
+                var full = Path.GetFullPath(workingDir);
+                var rel = Path.GetRelativePath(full, resolved);
+                if (!rel.StartsWith("..") && !Path.IsPathRooted(rel))
+                {
+                    return rel.Replace('\\', '/');
+                }
+            }
+            catch
+            {
+                // fall through
+            }
+            return rawPath;
         }
     }
 }
