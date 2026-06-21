@@ -722,37 +722,48 @@ namespace Andy.Cli.Widgets
             }
             else if (toolName.Contains("list_directory", StringComparison.OrdinalIgnoreCase))
             {
-                if (parameters?.TryGetValue("path", out var path) == true)
+                // The tool returns "items" (FileSystemEntry objects) plus "count"/"total_count".
+                // Build the listing straight from the result so it works even when the parameters
+                // never reached the UI (a separate tracking miss that used to leave this "done").
+                if (resultData is Dictionary<string, object?> resultDict)
                 {
-                    var dirName = Path.GetFileName(path?.ToString() ?? ".") ?? ".";
-                    if (string.IsNullOrEmpty(dirName)) dirName = ".";
-
-                    // Try to extract entry counts from result
-                    if (resultData is Dictionary<string, object?> resultDict &&
-                        resultDict.TryGetValue("entries", out var entries) && entries is IEnumerable<object> entryList)
+                    var dirs = new List<string>();
+                    var files = new List<string>();
+                    if (resultDict.TryGetValue("items", out var itemsObj)
+                        && itemsObj is System.Collections.IEnumerable itemList && itemsObj is not string)
                     {
-                        var entryArray = entryList.ToArray();
-                        var fileCount = 0;
-                        var dirCount = 0;
-
-                        foreach (var entry in entryArray)
+                        foreach (var entry in itemList)
                         {
-                            if (entry is Dictionary<string, object?> entryDict &&
-                                entryDict.TryGetValue("type", out var type))
-                            {
-                                if ("file".Equals(type?.ToString(), StringComparison.OrdinalIgnoreCase))
-                                    fileCount++;
-                                else if ("directory".Equals(type?.ToString(), StringComparison.OrdinalIgnoreCase))
-                                    dirCount++;
-                            }
+                            if (entry == null) continue;
+                            var et = entry.GetType();
+                            var name = (et.GetProperty("Name")?.GetValue(entry)
+                                        ?? et.GetProperty("RelativePath")?.GetValue(entry)
+                                        ?? et.GetProperty("FullPath")?.GetValue(entry))?.ToString();
+                            if (string.IsNullOrEmpty(name)) continue;
+                            name = Path.GetFileName(name.TrimEnd('/')) is { Length: > 0 } shortName ? shortName : name;
+                            bool isDir = et.GetProperty("IsDirectory")?.GetValue(entry) is bool b && b;
+                            if (isDir) dirs.Add(name + "/"); else files.Add(name);
                         }
+                    }
 
-                        resultSummary = $"Listed {dirName}: {fileCount} files, {dirCount} directories";
-                    }
-                    else
+                    int total = resultDict.TryGetValue("count", out var c) && c is int ci ? ci : dirs.Count + files.Count;
+
+                    string dirLabel = "directory";
+                    if (parameters?.TryGetValue("path", out var path) == true && path != null)
                     {
-                        resultSummary = $"Listed {dirName}";
+                        var dn = Path.GetFileName(path.ToString()!.TrimEnd('/'));
+                        dirLabel = string.IsNullOrEmpty(dn) ? path.ToString()! : dn;
                     }
+
+                    var header = $"Listed {dirLabel}: {total} item{(total == 1 ? "" : "s")} " +
+                                 $"({dirs.Count} dir{(dirs.Count == 1 ? "" : "s")}, {files.Count} file{(files.Count == 1 ? "" : "s")})";
+
+                    var names = dirs.OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+                                    .Concat(files.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))
+                                    .ToList();
+                    resultSummary = names.Count > 0
+                        ? header + "\n" + string.Join("\n", names.Select(n => "  " + n))
+                        : header;
                 }
             }
             else if (toolName.Contains("bash_command", StringComparison.OrdinalIgnoreCase) ||
@@ -2408,15 +2419,17 @@ namespace Andy.Cli.Widgets
             }
             else
             {
-                // Completed. For tools whose result IS raw textual output (shell commands,
-                // git_diff), preview several lines directly - collapsed up to
-                // CollapsedResultPreviewLines, expanded up to ExpandedResultPreviewLines - so a
-                // one-line summary no longer hides what the command produced. Other tools keep
-                // their concise tool-specific summary line (full output only when expanded).
+                // Completed. Preview the actual result lines for any tool whose result is
+                // multi-line (shell commands, git_diff, directory listings, search results, ...) -
+                // collapsed up to CollapsedResultPreviewLines, expanded up to
+                // ExpandedResultPreviewLines - so a one-word summary no longer hides what the tool
+                // produced. Single-line results keep the concise summary line below.
                 bool rawOutputTool = _toolName.Contains("bash") || _toolName.Contains("command")
                                      || _toolName.Contains("git_diff");
+                bool hasMultiLineResult = !string.IsNullOrWhiteSpace(_result)
+                    && _result!.Replace("\r\n", "\n").Replace('\r', '\n').TrimEnd().Contains('\n');
 
-                if (rawOutputTool && !string.IsNullOrWhiteSpace(_result))
+                if ((rawOutputTool || hasMultiLineResult) && !string.IsNullOrWhiteSpace(_result))
                 {
                     var lines = _result!.Replace("\r\n", "\n").Replace('\r', '\n')
                         .Split('\n')
@@ -2797,8 +2810,9 @@ namespace Andy.Cli.Widgets
                 if (!string.IsNullOrEmpty(_filePath))
                     return GetShortPath(_filePath);
 
-                // Otherwise indicate we're waiting for params
-                return "loading...";
+                // While running, show a waiting hint. Once complete, real params never arrived
+                // (a tracking miss) - show nothing rather than a stale "loading...".
+                return IsComplete ? "" : "loading...";
             }
 
             var displayParams = new List<string>();
