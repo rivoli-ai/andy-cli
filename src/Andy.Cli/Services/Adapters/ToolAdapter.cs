@@ -154,17 +154,6 @@ public class ToolAdapter : Andy.Model.Tooling.ITool
             _logger?.LogWarning("[TOOL_ADAPTER] Executing {ToolName} with {ParamCount} parameters: {Params}",
                 call.Name, parameters.Count, string.Join(", ", parameters.Select(p => $"{p.Key}={p.Value}")));
 
-            // DEBUG: Write to file
-            try
-            {
-                var debugInfo = $"[{DateTime.Now:HH:mm:ss.fff}] ToolAdapter.ExecuteAsync:\n";
-                debugInfo += $"  call.Name: {call.Name}\n";
-                debugInfo += $"  _toolId: {_toolId}\n";
-                debugInfo += $"  Parameters: {string.Join(", ", parameters.Select(p => $"{p.Key}={p.Value}"))}\n";
-                System.IO.File.AppendAllText("/tmp/tool_adapter_debug.txt", debugInfo);
-            }
-            catch { }
-
             // IMMEDIATELY update the UI with actual parameters
             // The UI should already exist from the ToolCalled event
             var feedView = ToolExecutionTracker.Instance.GetFeedView();
@@ -179,15 +168,6 @@ public class ToolAdapter : Andy.Model.Tooling.ITool
                              ToolExecutionTracker.Instance.GetToolIdForName(call.Name.Replace("_", "-"));
 
                 _logger?.LogWarning("[TOOL_ADAPTER] Found UI toolId for {ToolName}: {ToolId}", call.Name, toolId ?? "NULL");
-
-                // DEBUG: Write lookup result
-                try
-                {
-                    var debugInfo = $"  Lookup result: toolId = {toolId ?? "NULL"}\n";
-                    debugInfo += $"  About to update: {!string.IsNullOrEmpty(toolId)}\n\n";
-                    System.IO.File.AppendAllText("/tmp/tool_adapter_debug.txt", debugInfo);
-                }
-                catch { }
 
                 if (!string.IsNullOrEmpty(toolId))
                 {
