@@ -164,6 +164,8 @@
     <Compile Include="Services/PermissionRuleFileTests.cs" />
     <Compile Include="Services/ToolCatalogDataFrameTests.cs" />
     <Compile Include="Services/ToolResultDisplayTest.cs" />
+    <Compile Include="Services/UnifiedDiffTests.cs" />
+    <Compile Include="Widgets/FileDiffItemTests.cs" />
   </ItemGroup>
 
   <ItemGroup>
