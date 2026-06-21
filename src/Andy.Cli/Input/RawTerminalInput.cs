@@ -79,11 +79,13 @@ public sealed class RawTerminalInput : IDisposable
     /// when input is not an interactive TTY or <c>stty</c> is unavailable, in
     /// which case the caller should keep using <c>Console.ReadKey</c>.
     ///
-    /// <paramref name="enableMouse"/> defaults to <c>false</c> so the terminal's
-    /// native click-drag text selection keeps working out of the box; callers
-    /// can opt in up front or flip it later via <see cref="SetMouseReporting"/>.
+    /// <paramref name="enableMouse"/> defaults to <c>true</c> so the mouse wheel
+    /// scrolls the feed out of the box. To select text while capture is on, hold
+    /// Option (macOS) / Shift (xterm) and drag - terminals route that around mouse
+    /// reporting. Callers can flip capture off (restoring plain click-drag native
+    /// selection) up front or at runtime via <see cref="SetMouseReporting"/> (F3).
     /// </summary>
-    public static RawTerminalInput? TryStart(bool enableMouse = false)
+    public static RawTerminalInput? TryStart(bool enableMouse = true)
     {
         if (Console.IsInputRedirected) return null;
 

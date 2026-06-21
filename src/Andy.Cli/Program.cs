@@ -212,11 +212,11 @@ class Program
 
         // Switch the terminal into raw byte mode for keyboard decoding. Returns
         // null (and we fall back to Console.ReadKey) when input is redirected or
-        // stty is unavailable. Mouse reporting uses TryStart's selection-safe default
-        // (OFF) so the terminal's native click-drag text selection and Cmd+A/Cmd+C keep
-        // working; the user opts into mouse-wheel capture with F3 (PageUp/PageDown scroll
-        // either way). The default is pinned by MouseDefaultRegressionTests - do not pass
-        // enableMouse:true here, that silently breaks text selection.
+        // stty is unavailable. Mouse reporting uses TryStart's default (ON) so the
+        // mouse wheel scrolls the feed out of the box. To select text while capture
+        // is on, hold Option (macOS) / Shift (xterm) and drag; or press F3 to turn
+        // capture off for plain click-drag native selection. The default is pinned by
+        // MouseDefaultRegressionTests.
         var rawInput = RawTerminalInput.TryStart();
 
         try
@@ -740,7 +740,7 @@ class Program
                             "- **Ctrl+]**: Toggle scroll mode (Feed ↔ Prompt History)\n" +
                             "- **Ctrl+D**: Quit application\n" +
                             "- **F2**: Toggle HUD (performance overlay)\n" +
-                            "- **F3**: Toggle mouse capture (off = native text selection; on = mouse-wheel scroll)\n" +
+                            "- **F3**: Toggle mouse capture (ON by default = mouse-wheel scroll; Option+drag to select text, Cmd+C to copy. F3 OFF = plain-drag native selection)\n" +
                             "- **Ctrl+O**: Expand/collapse tool output detail (view-only; does not affect a running turn)\n" +
                             "- **ESC**: Quit application\n" +
                             "- **Page Up/Down**: Scroll chat history\n" +
@@ -1048,8 +1048,8 @@ class Program
                         {
                             bool on = rawInput.ToggleMouseReporting();
                             toast.Show(on
-                                ? "Mouse capture ON (wheel scrolls; native text selection disabled)"
-                                : "Mouse capture OFF (native text selection enabled)", 120);
+                                ? "Mouse capture ON (wheel scrolls; Option+drag to select text, Cmd+C to copy)"
+                                : "Mouse capture OFF (plain-drag native text selection enabled)", 120);
                             // Refresh the footer so the Mouse On/Off indicator matches the new state.
                             UpdateHints();
                         }
@@ -1325,7 +1325,7 @@ class Program
                                         "- **Ctrl+]**: Toggle scroll mode (Feed ↔ Prompt History)\n" +
                                         "- **Ctrl+D**: Quit application\n" +
                                         "- **F2**: Toggle HUD (performance overlay)\n" +
-                            "- **F3**: Toggle mouse capture (off = native text selection; on = mouse-wheel scroll)\n" +
+                            "- **F3**: Toggle mouse capture (ON by default = mouse-wheel scroll; Option+drag to select text, Cmd+C to copy. F3 OFF = plain-drag native selection)\n" +
                                         "- **Ctrl+O**: Expand/collapse tool output detail (view-only; does not affect a running turn)\n" +
                                         "- **ESC**: Quit application\n" +
                                         "- **Page Up/Down**: Scroll chat history\n" +
