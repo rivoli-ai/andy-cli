@@ -64,7 +64,7 @@ Required secrets:
 Steps to set up:
 1. Export your Developer ID certificate from Keychain Access as .p12
 2. Encode it: `base64 -i certificate.p12 | pbcopy`
-3. Add secrets in GitHub: Settings → Secrets and variables → Actions
+3. Add secrets in GitHub: Settings -> Secrets and variables -> Actions
 4. Uncomment the signing steps in `release-signed.yml`
 
 ### Linux GPG Signing
@@ -214,7 +214,7 @@ If you prefer local builds:
 # Upload manually to GitHub Releases
 ```
 
-(Note: build-release.sh script would need to be created)
+The `scripts/build-release.sh` script already exists and is executable, so you can run it directly as shown above.
 
 ## Questions?
 

@@ -7,16 +7,22 @@
 The CLI now supports model management through slash commands:
 
 - `/model list` or `/m list` - List all available AI models from different providers
-- `/model switch <provider>` - Switch to a different provider (cerebras, openai, anthropic, gemini)
+- `/model switch <provider>` - Switch to a different provider (openrouter, openai, anthropic, cerebras, groq, gemini, ollama)
+- `/model provider` - Show or change the active provider
+- `/model refresh` - Refresh the available model list
+- `/model detect` - Auto-detect available providers based on configured API keys
 - `/model info` - Show detailed information about the current model
-- `/model test [prompt]` - Test the current model with an optional prompt
+- `/tools list` - List available tools
+- `/tools info` - Show detailed information about a tool
+- `/permissions` (aliases: `perms`, `perm`) - View and edit tool permissions (allow/ask/deny rules, persisted to permission layer files) via an interactive permissions manager
+- `/theme` (aliases: `themes`) - List, switch, or toggle transparency of the UI theme
 - `/help` or `/?` - Show help information
 - `/clear` - Clear the chat history
 
 **Updated**: The list models command now shows:
-- Models from all supported providers (Cerebras, OpenAI, Anthropic, Gemini)
-- Current active model with an arrow indicator (→)
-- API key status for each provider (✅ available, ❌ missing)
+- Models from all supported providers (OpenRouter, OpenAI, Anthropic, Cerebras, Groq, Gemini, Ollama)
+- Current active model with an arrow indicator (->)
+- API key status for each provider (available / missing)
 - Which API keys are currently set in the environment
 - Detailed model descriptions and capabilities
 
@@ -61,10 +67,25 @@ Available commands in the palette:
 ## Requirements
 
 Set the appropriate environment variables for the providers you want to use:
-- `CEREBRAS_API_KEY` for Cerebras provider
-- `OPENAI_API_KEY` for OpenAI provider
+- `OPENROUTER_API_KEY` for OpenRouter provider
+- `OPENAI_API_KEY` for OpenAI provider (including the Codex model variants)
 - `ANTHROPIC_API_KEY` for Anthropic provider
+- `CEREBRAS_API_KEY` for Cerebras provider
+- `GROQ_API_KEY` for Groq provider
 - `GOOGLE_API_KEY` for Gemini provider
+- `AZURE_OPENAI_API_KEY` (with `AZURE_OPENAI_ENDPOINT`) for Azure OpenAI provider
+- `OLLAMA_API_BASE` for a local or remote Ollama instance
+
+### Configured Providers
+
+The following providers are defined in `src/Andy.Cli/appsettings.json`:
+- **OpenRouter** - model `xiaomi/mimo-v2.5` (ApiBase `https://openrouter.ai/api/v1`); the primary configured provider
+- **OpenAI** - `gpt-4o`, plus the Codex variants `gpt-5-codex`, `codex-mini-latest`, `gpt-5.1-codex-mini`, `gpt-5.1-codex-max`, `gpt-5.1-codex`, and `gpt-5.2-codex`
+- **Anthropic** - `claude-3-5-haiku-20241022`
+- **Cerebras** - `llama-3.3-70b`
+- **Groq** - `llama-3.3-70b-versatile`
+- **Google Gemini** - `gemini-2.0-flash-exp`
+- **Ollama** - `llama3.2`
 
 ## Architecture
 
@@ -85,7 +106,7 @@ The commands are integrated into `Program.cs` with:
 
 ## Notes
 
-- The default provider is Cerebras (fast Llama models)
+- There is no hardcoded default provider; `DefaultProvider` is empty in `appsettings.json`, so the provider is auto-detected (use `/model detect`). OpenRouter (model `xiaomi/mimo-v2.5`) is the primary configured provider in `appsettings.json`.
 - Model switching recreates the LLM client with the new provider
 - The command palette supports fuzzy search across command names, descriptions, and aliases
 - All UI updates are reflected immediately in the chat feed
