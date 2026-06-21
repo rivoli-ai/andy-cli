@@ -167,6 +167,23 @@ namespace Andy.Cli.Services
             // only be reconstructed by capturing "before" here and reading "after" once it completes.
             var diffCapture = TryCaptureBeforeWrite(toolId, dispatchParameters, context);
 
+            // The framework executor (Andy.Tools) cancels EVERY tool after
+            // context.ResourceLimits.MaxExecutionTimeMs - which the engine leaves at its 30s default
+            // (SimpleAgent only overrides MaxMemoryBytes). That blanket cap overrides each tool's own
+            // timeout (notably execute_command's timeout_seconds) and kills legitimate long-running
+            // operations - builds, test runs, code indexing - well before they finish. Raise the cap
+            // so the tool's own timeout governs: a generous safety-net backstop, and never shorter
+            // than an explicit timeout_seconds the caller asked for.
+            if (context.ResourceLimits != null && context.ResourceLimits.MaxExecutionTimeMs > 0)
+            {
+                long backstopMs = 30L * 60 * 1000; // 30-minute safety net for tools without their own timeout
+                if (dispatchParameters.TryGetValue("timeout_seconds", out var ts) && ts != null
+                    && int.TryParse(ts.ToString(), out var secs) && secs > 0)
+                    backstopMs = Math.Max(backstopMs, (long)secs * 1000 + 5000);
+                if (context.ResourceLimits.MaxExecutionTimeMs < backstopMs)
+                    context.ResourceLimits.MaxExecutionTimeMs = (int)Math.Min(backstopMs, int.MaxValue);
+            }
+
             var result = await _innerExecutor.ExecuteAsync(toolId, dispatchParameters, context);
             toolStopwatch.Stop();
 
