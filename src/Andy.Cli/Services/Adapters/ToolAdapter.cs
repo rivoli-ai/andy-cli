@@ -244,10 +244,22 @@ public class ToolAdapter : Andy.Model.Tooling.ITool
             _logger?.LogInformation("[TOOL_EXEC_END] Tool: {ToolId}, Duration: {Duration}ms, Success: {Success}",
                 _toolId, duration.TotalMilliseconds, result.IsSuccessful);
 
+            // git_diff returns its diff as a plain string decorated with emoji and markdown
+            // ("Change Summary", file bullets, **bold**). Clean it at the SOURCE so every downstream
+            // path - the feed (whichever tracking id wins) and the model - gets a readable, ASCII
+            // diff instead of the emoji/Change-Summary noise. Content-gated and idempotent, so it
+            // only touches git_diff-style output.
+            var trackedMessage = result.Message;
+            var trackedData = result.Data;
+            if (trackedData is string gdData && LooksLikeGitDiffOutput(gdData))
+                trackedData = ToolExecutionTracker.CleanGitDiff(gdData);
+            if (trackedMessage is string gdMsg && LooksLikeGitDiffOutput(gdMsg))
+                trackedMessage = ToolExecutionTracker.CleanGitDiff(gdMsg);
+
             // Track completion with full result data - use call.Id for unique tracking
-            ToolExecutionTracker.Instance.TrackToolComplete(call.Id, result.IsSuccessful, result.Message, result.Data);
+            ToolExecutionTracker.Instance.TrackToolComplete(call.Id, result.IsSuccessful, trackedMessage, trackedData);
             // Also track with the base tool ID for backward compatibility
-            ToolExecutionTracker.Instance.TrackToolComplete(_toolId, result.IsSuccessful, result.Message, result.Data);
+            ToolExecutionTracker.Instance.TrackToolComplete(_toolId, result.IsSuccessful, trackedMessage, trackedData);
 
             // Convert to Andy.Model.ToolResult
             if (result.IsSuccessful)
@@ -284,12 +296,12 @@ public class ToolAdapter : Andy.Model.Tooling.ITool
                     }
                 }
 
-                // Try to use Data if available, otherwise use Message
-                object? resultData = result.Data;
+                // Try to use Data if available, otherwise use Message (cleaned git_diff included).
+                object? resultData = trackedData;
 
-                 if (resultData == null && !string.IsNullOrEmpty(result.Message))
+                 if (resultData == null && !string.IsNullOrEmpty(trackedMessage))
                 {
-                    resultData = new { message = result.Message };
+                    resultData = new { message = trackedMessage };
                 }
 
                 return Andy.Model.Model.ToolResult.FromObject(call.Id, call.Name, resultData ?? new { }, isError: false);
@@ -316,6 +328,13 @@ public class ToolAdapter : Andy.Model.Tooling.ITool
                 new { error = ex.Message, type = ex.GetType().Name }, isError: true);
         }
     }
+
+    /// <summary>
+    /// Heuristic: does this string look like the git_diff tool's decorated output (which we clean
+    /// of emoji/markdown)? Matches its "Change Summary" header, the chart emoji, or a ```diff fence.
+    /// </summary>
+    internal static bool LooksLikeGitDiffOutput(string s) =>
+        s.Contains("Change Summary") || s.Contains("\U0001F4CA") || s.Contains("```diff");
 }
 
 /// <summary>
