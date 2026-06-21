@@ -574,7 +574,13 @@ namespace Andy.Cli.Widgets
             if (w <= 0 || h <= 0) return;
 
             b.PushClip(new DL.ClipPush(x, y, w, h));
-            // No background rectangle - use transparent terminal background
+            // Paint the whole viewport with the theme background every frame so cells that the
+            // items no longer cover are cleared. Without this, when feed content shrinks or reflows
+            // (e.g. a tool item changing height, or the variable-height file-diff items), glyphs and
+            // colors from a taller previous frame linger - phantom characters and whitespace that
+            // does not match the theme. A null (transparent) theme background clears to the terminal
+            // default, so terminal transparency is preserved.
+            b.DrawRect(new DL.Rect(x, y, w, h, Themes.Theme.Current.Background));
             // Focus indicator on left margin
             if (_focused)
             {
