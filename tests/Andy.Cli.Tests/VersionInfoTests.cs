@@ -45,6 +45,16 @@ public class VersionInfoTests
     }
 
     [Fact]
+    public void GitDerivedDevVersion_DisplaysDatePart_StripsShaMetadata()
+    {
+        // Local builds embed InformationalVersion = "<commit-date>-dev+<sha>" (see the
+        // SetDevInformationalVersion target in Andy.Cli.csproj). The header should show the
+        // human-readable "<date>-dev" and drop the build-metadata sha after '+'.
+        var result = VersionInfo.ResolveDisplayVersion("2026.06.20-dev+9164229df", new Version(2026, 5, 30, 0));
+        Assert.Equal("2026.06.20-dev", result);
+    }
+
+    [Fact]
     public void ReturnsEmpty_WhenNoVersionAvailable()
     {
         var result = VersionInfo.ResolveDisplayVersion(null, null);

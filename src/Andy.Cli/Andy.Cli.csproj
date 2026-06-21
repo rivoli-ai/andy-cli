@@ -74,4 +74,24 @@
     <TrimmerRootAssembly Include="Andy.Tui" />
   </ItemGroup>
 
+  <!--
+    For local (non-CI) builds, derive a meaningful InformationalVersion from git so
+    `dotnet run` shows the actual build (commit date + short sha, e.g. "2026.06.20-dev")
+    instead of the static fallback <Version>, which otherwise stays frozen until a release.
+    Release builds pass -p:Version / -p:InformationalVersion (a global property this target
+    cannot override) and run with CI=true, so they are unaffected. Git failures are ignored
+    (ContinueOnError), leaving the static <Version> fallback for tarball/no-git builds.
+  -->
+  <Target Name="SetDevInformationalVersion" BeforeTargets="GetAssemblyAttributes" Condition="'$(CI)' != 'true'">
+    <Exec Command="git show -s --format=%cs HEAD" ConsoleToMSBuild="true" ContinueOnError="true" StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitCommitDate" />
+    </Exec>
+    <Exec Command="git rev-parse --short=9 HEAD" ConsoleToMSBuild="true" ContinueOnError="true" StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitShortSha" />
+    </Exec>
+    <PropertyGroup Condition="'$(_GitShortSha)' != '' and '$(_GitCommitDate)' != ''">
+      <InformationalVersion>$(_GitCommitDate.Trim().Replace('-','.'))-dev+$(_GitShortSha.Trim())</InformationalVersion>
+    </PropertyGroup>
+  </Target>
+
 </Project>
