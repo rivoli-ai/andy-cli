@@ -139,6 +139,11 @@ namespace Andy.Cli.Widgets
         /// <summary>Convenience: append markdown using Andy.Tui.Widgets.MarkdownRenderer to better handle inline formatting. Detects and renders markdown tables separately.</summary>
         public void AddMarkdownRich(string md)
         {
+            // A model that opens a ``` code fence and forgets to close it would otherwise turn
+            // everything after it into a code block - bold and inline-code markers then render
+            // literally (the "**Fix scope**" + visible-backticks bug). Neutralize a dangling fence
+            // first so the prose after it renders as markdown.
+            md = FeedMarkdown.BalanceCodeFences(md);
             // Split markdown by tables and render each part appropriately
             var parts = SplitMarkdownWithTables(md);
             foreach (var part in parts)
@@ -1191,6 +1196,32 @@ namespace Andy.Cli.Widgets
     /// </summary>
     public static class FeedMarkdown
     {
+        /// <summary>
+        /// Neutralizes a dangling (unclosed) ``` code fence. A model that opens a fenced code block
+        /// and never closes it makes a CommonMark renderer treat everything to end-of-content as
+        /// code, so bold/inline-code markers in the trailing prose render literally. When the count
+        /// of fence-delimiter lines is odd, the last one is unmatched; drop that line so the content
+        /// after it parses as normal markdown again. Balanced fences are returned unchanged.
+        /// </summary>
+        internal static string BalanceCodeFences(string md)
+        {
+            if (string.IsNullOrEmpty(md) || md.IndexOf("```", StringComparison.Ordinal) < 0) return md ?? string.Empty;
+
+            var lines = md.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+            var fenceLines = new List<int>();
+            for (int i = 0; i < lines.Length; i++)
+                if (lines[i].TrimStart().StartsWith("```", StringComparison.Ordinal))
+                    fenceLines.Add(i);
+
+            if (fenceLines.Count == 0 || fenceLines.Count % 2 == 0) return md; // none or balanced
+
+            int unmatched = fenceLines[^1];
+            var kept = new List<string>(lines.Length - 1);
+            for (int i = 0; i < lines.Length; i++)
+                if (i != unmatched) kept.Add(lines[i]);
+            return string.Join("\n", kept);
+        }
+
         public static string Normalize(string md)
         {
             if (string.IsNullOrEmpty(md)) return md ?? string.Empty;
