@@ -71,6 +71,14 @@ public static class ToolCatalog
         // Andy.Tools.Data is a TrimmerRootAssembly (see Andy.Cli.csproj) so the tool constructors
         // survive trimming/AOT. Path-bearing tools resolve an optional IPathPolicy from DI if present.
         Andy.Tools.Data.ServiceCollectionExtensions.AddAndyDataFrameTools(services);
+
+        // PDF document tools (Andy.Tools.Pdf) over the fully-managed Andy.Doc engine: read a PDF and
+        // extract text, reading-order reflow, tables, the outline (bookmark) tree, document info, and
+        // full-text search — read-only, no code execution. AddAndyPdfTools registers each pdf_* tool as
+        // a ToolRegistrationInfo, draining into the IToolRegistry like the rest. Andy.Tools.Pdf is a
+        // TrimmerRootAssembly (see Andy.Cli.csproj) so the tool constructors survive trimming/AOT.
+        // Useful for understanding financial filings (10-K) and earnings-call transcripts.
+        Andy.Tools.Pdf.ServiceCollectionExtensions.AddAndyPdfTools(services);
     }
 
     /// <summary>
