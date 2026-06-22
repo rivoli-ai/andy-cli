@@ -1353,14 +1353,11 @@ namespace Andy.Cli.Widgets
         public MarkdownRendererItem(string markdown)
         {
             _originalMd = (markdown ?? string.Empty).TrimEnd(); // Remove trailing whitespace/newlines
-            // Preprocess markdown to prevent "You" from being highlighted
-            // The Andy.Tui markdown renderer seems to treat "You" as a special keyword
-            // We'll insert a zero-width non-joiner to break the word without affecting display
-            _md = _originalMd;
-            // Replace standalone "You" but not "You:" in user prompts
-            _md = System.Text.RegularExpressions.Regex.Replace(_md, @"\bYou\b(?!:)", "Y\u200Cou");
             // Collapse blank-line runs and ensure a blank line before headings.
-            _md = FeedMarkdown.Normalize(_md);
+            // (A former workaround inserted a zero-width non-joiner into the word "You" to dodge a
+            // renderer quirk; the current Andy.Tui renderer no longer special-cases "You", and the
+            // U+200C rendered as a visible space - "Y ou" - in some terminals, so it was removed.)
+            _md = FeedMarkdown.Normalize(_originalMd);
 
             // Note: Paragraph spacing is handled by Andy.Tui.Widgets.MarkdownRenderer
             // during rendering, so we don't need to do it here
