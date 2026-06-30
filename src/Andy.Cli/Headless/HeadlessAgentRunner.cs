@@ -105,7 +105,21 @@ public static class HeadlessAgentRunner
             }
         }
 
+        // Allow-listed tools for this run, computed up-front so it can both scope the
+        // capability grant below and feed the end-of-run tool-usage audit.
+        var allowedTools = config.Permissions?.AllowedTools ?? (IReadOnlyList<string>)Array.Empty<string>();
+
         var toolExecutor = services.GetRequiredService<IToolExecutor>();
+
+        // rivoli-ai/andy-cli#157: the base ToolExecutor builds every ToolExecutionContext with the
+        // restrictive default profile, so a tool that declares ProcessExecution (execute_command)
+        // is rejected at runtime ("Tool requires process execution but it is not granted") even when
+        // allowed_tools lists it. The interactive path grants the gated capabilities via
+        // UiUpdatingToolExecutor; the headless path had no equivalent. Wrap the executor so it grants
+        // those capabilities — but ONLY when execute_command is permitted for this run (fail-closed:
+        // a config that doesn't allow execute_command must still block it).
+        var allowedToolsIncludeExecuteCommand = allowedTools.Contains("execute_command");
+        toolExecutor = new HeadlessCapabilityToolExecutor(toolExecutor, allowedToolsIncludeExecuteCommand);
 
         var maxTurns = config.Limits.MaxIterations > 0 ? config.Limits.MaxIterations : 10;
 
@@ -129,8 +143,6 @@ public static class HeadlessAgentRunner
 
         var auditor = new ToolUsageAuditor();
         WireToolEvents(agent, emitter, auditor);
-
-        var allowedTools = config.Permissions?.AllowedTools ?? (IReadOnlyList<string>)Array.Empty<string>();
 
         // Finalize a run that has reached the agent loop: emit the AX.4 tool-usage
         // audit (once, just before `finished`) then the terminal `finished` event.
