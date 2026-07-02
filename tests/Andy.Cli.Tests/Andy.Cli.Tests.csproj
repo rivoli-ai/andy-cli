@@ -179,6 +179,8 @@
     <Compile Include="Domain/ImageAttachmentTests.cs" />
     <!-- AttachmentIndicator widget tests -->
     <Compile Include="Widgets/AttachmentIndicatorTests.cs" />
+    <!-- Image attachment end-to-end flow through parser, indicator, processor, and assistant service -->
+    <Compile Include="Integration/ImageAttachmentIntegrationTests.cs" />
   </ItemGroup>
 
   <ItemGroup>
