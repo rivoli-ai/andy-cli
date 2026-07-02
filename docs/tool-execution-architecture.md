@@ -284,6 +284,34 @@ prompt is denied unless an injected per-run allow-list (`config.permissions.allo
 installed at the Injected layer) or `ANDY_PERMISSION_MODE=bypass` relaxes it. See
 `docs/headless-runtime.md` for the full headless contract.
 
+### Headless tool wiring: MCP routing and CLI transport
+
+`HeadlessToolHost.BuildAsync` turns each entry in `config.tools[]` into an `ITool`
+adapter and registers it into the tool registry. No built-in tools are registered by
+default -- the agent's tool surface is exactly what the config lists.
+
+**MCP routing.** The top-level `mcp_gateway` config field (resolved from
+`$ANDY_MCP_URL` via `ResolveMcpGateway`) provides a base URL for all MCP tools.
+When an MCP tool binding omits `endpoint`, the runtime resolves it as
+`{mcp_gateway}/{tool-name}`. A per-tool `endpoint` overrides the gateway when
+both are present. One `McpClient` is created per distinct endpoint URL so adapters
+sharing an endpoint reuse a single connection. Each MCP endpoint must advertise
+the configured tool name or the run fails fast with `InvalidOperationException`.
+When the `ANDY_TOKEN` env var is set, `HeadlessToolHost` attaches it as
+`Authorization: Bearer <token>` on every MCP request.
+
+**CLI transport.** Each CLI binding becomes a `CliSubprocessTool`. Two input modes
+are supported (selected by `input_mode` in the tool config):
+
+- **argv** (default): The LLM supplies an `args` string array. The runtime prepends
+  `config.command` and passes the full argv via `ProcessStartInfo.ArgumentList` -- no
+  shell, no string concatenation.
+- **json**: The LLM supplies an `arguments` object (same parameter name as MCP tools).
+  The runtime serializes it as JSON (UTF-8, no BOM, property names preserved verbatim),
+  writes it to the subprocess's stdin, then closes stdin (EOF). The subprocess reads
+  JSON from stdin. The JSON payload is bounded to 1 MB. Exit/error semantics are
+  unchanged (exit code 0 = success).
+
 ## Configuration Constants
 
 ```csharp

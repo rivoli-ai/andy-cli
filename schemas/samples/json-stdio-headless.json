@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "run_id": "00000000-0000-0000-0000-000000000002",
+  "agent": {
+    "slug": "issue-triage",
+    "instructions": "You are an issue triage agent. Read open issues, categorize them, and write the triage report."
+  },
+  "model": {
+    "provider": "openrouter",
+    "id": "xiaomi/mimo-v2.5",
+    "api_key_ref": "env:OPENROUTER_API_KEY"
+  },
+  "tools": [
+    {
+      "name": "andy-issues-cli",
+      "transport": "cli",
+      "binary": "andy-issues-cli",
+      "command": ["andy-issues-cli"],
+      "input_mode": "json"
+    }
+  ],
+  "workspace": {
+    "root": "/workspace"
+  },
+  "output": {
+    "file": "/workspace/.andy/output.json",
+    "stream": "stdout"
+  },
+  "limits": {
+    "max_iterations": 40,
+    "timeout_seconds": 1800
+  }
+}

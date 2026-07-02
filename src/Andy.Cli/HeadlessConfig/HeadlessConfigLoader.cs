@@ -105,6 +105,22 @@ public static class HeadlessConfigLoader
             return HeadlessConfigLoadResult.Fail("Config deserialization returned null.");
         }
 
+        // Semantic check: MCP tools without an endpoint require a top-level mcp_gateway.
+        if (string.IsNullOrEmpty(config.McpGateway))
+        {
+            var mcpWithoutEndpoint = config.Tools
+                .Where(t => t.Transport == "mcp" && string.IsNullOrEmpty(t.Endpoint))
+                .Select(t => t.Name)
+                .ToList();
+
+            if (mcpWithoutEndpoint.Count > 0)
+            {
+                return HeadlessConfigLoadResult.Fail(
+                    $"MCP tools [{string.Join(", ", mcpWithoutEndpoint)}] have no endpoint "
+                    + "and no mcp_gateway is configured.");
+            }
+        }
+
         return HeadlessConfigLoadResult.Ok(config);
     }
 

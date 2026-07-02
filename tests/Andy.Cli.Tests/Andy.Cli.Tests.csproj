@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
@@ -132,6 +132,9 @@
     <Compile Include="Integration/PermissionSessionBroadeningIntegrationTests.cs" />
     <!-- list_directory tool integration tests -->
     <Compile Include="Integration/ListDirectoryIntegrationTests.cs" />
+
+    <!-- CliSubprocessTool new CLI transport contract integration tests -->
+    <Compile Include="Integration/CliSubprocessToolIntegrationTests.cs" />
     <!-- Andy.CodeIndex library in-process integration tests -->
     <Compile Include="Integration/CodeIndexLibraryIntegrationTests.cs" />
     <!-- dataframe_* end-to-end scenario through the CLI tool stack + engine SimpleAgent -->
@@ -154,8 +157,12 @@
     <Compile Include="Headless/HeadlessPermissionAllowListTests.cs" />
     <!-- #157 headless execute_command capability grant (scoped + fail-closed) -->
     <Compile Include="Headless/HeadlessCapabilityToolExecutorTests.cs" />
+    <!-- AQ3 headless CLI subprocess tool tests (rivoli-ai/andy-cli#44) -->
+    <Compile Include="Headless\Tools\CliSubprocessToolTests.cs" />
     <!-- Headless SWE-style end-to-end task (real model; skips without OPENROUTER_API_KEY) -->
     <Compile Include="Headless/HeadlessSweTaskTests.cs" />
+    <!-- ADR 0002: MCP gateway base URL resolution tests (ADR 0002) -->
+    <Compile Include="Headless/HeadlessToolHostGatewayTests.cs" />
     <!-- Interactive ProcessMessageAsync NRE reproduction (real model; skips without OPENROUTER_API_KEY) -->
     <Compile Include="Services/InteractiveAssistantReproTests.cs" />
     <!-- Re-enabled deterministic unit tests (previously excluded during the csproj API migration) -->
@@ -173,6 +180,8 @@
     <Compile Include="Services/ToolResultDisplayTest.cs" />
     <Compile Include="Services/UnifiedDiffTests.cs" />
     <Compile Include="Widgets/FileDiffItemTests.cs" />
+    <Compile Include="TestHelpers\McpRoutingTestServer.cs" />
+    <Compile Include="Headless\HeadlessToolHostMcpRoutingIntegrationTests.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -62,6 +62,7 @@ strongly-typed view is `HeadlessRunConfig` in
 | --- | --- | --- | --- |
 | `schema_version` | Yes | const `1` | Schema version pin. A future bump to `2` introduces a new schema file (`v2.json`); v1 is never overloaded. |
 | `run_id` | Yes | string (uuid) | Correlates stdout events and artifacts with the andy-containers Run entity. |
+| `mcp_gateway` | No | string (uri) | Base URL for MCP tool endpoints. When present, MCP tool bindings without an explicit `endpoint` have their endpoint resolved as `{mcp_gateway}/{tool-name}`. Supports `$ANDY_MCP_URL` substitution. Per-tool `endpoint` overrides this when both are present. |
 | `agent` | Yes | object | Agent identity and resolved system prompt. See below. |
 | `model` | Yes | object | LLM provider and model selection. See below. |
 | `tools` | Yes | array | Concrete tool bindings the run may call. May be empty. See [Tool transports](#tool-transports). |
@@ -148,12 +149,15 @@ Required: `max_iterations`, `timeout_seconds`.
 
 A complete, valid v1 config using OpenRouter with the Mimo model. OpenRouter
 requires a model at construction time; the runner threads `model.id` into the
-provider config, so `model.id` is what is used.
+provider config, so `model.id` is what is used. MCP tools use the top-level
+`mcp_gateway` field so the runtime resolves each tool endpoint as
+`{mcp_gateway}/{tool-name}`.
 
 ```json
 {
   "schema_version": 1,
   "run_id": "f6c2b0d4-2c1e-4a3f-9b21-2f7e0c5d8a90",
+  "mcp_gateway": "$ANDY_MCP_URL",
   "agent": {
     "slug": "code-reviewer",
     "instructions": "You are a code reviewer. Review the changes on the working branch and produce a concise findings report. Objective: review the open diff and report correctness issues.",
@@ -167,8 +171,7 @@ provider config, so `model.id` is what is used.
   "tools": [
     {
       "name": "read_file",
-      "transport": "mcp",
-      "endpoint": "http://127.0.0.1:8080/mcp/read_file"
+      "transport": "mcp"
     },
     {
       "name": "andy-tasks-cli",
@@ -237,17 +240,40 @@ Required: `name`, `transport: "cli"`, `binary`.
 | `name` | Tool identifier as seen by the agent (`^[a-z][a-z0-9_.-]*$`). |
 | `binary` | Executable name resolved via `$PATH` (e.g. `andy-tasks-cli`). |
 | `command` | Optional default argv the agent prepends; the agent appends its own args. |
+| `input_mode` | Optional. `"argv"` (default): LLM parameters are flattened into a string array appended to `command[]`. `"json"`: LLM parameters are serialized as a JSON object and written to the subprocess's stdin, then stdin is closed. The subprocess reads the JSON from stdin. Exit/error semantics are unchanged. |
 
 Each `cli` binding becomes a `CliSubprocessTool`.
 
+#### JSON input mode
+
+When `input_mode` is set to `"json"`, the CLI tool transport switches from positional
+argv passing to structured stdin-based JSON bridging:
+
+1. The LLM emits an `arguments` object (same parameter name as MCP tools):
+   `{"arguments": {"query": "open bugs", "limit": 10}}`
+2. `CliSubprocessTool` serializes the object as JSON (UTF-8, no BOM, preserving the
+   LLM's property names verbatim).
+3. The JSON bytes are written to the subprocess's stdin via `process.StandardInput.BaseStream`.
+4. stdin is closed (sends EOF) so the subprocess knows the input is complete.
+5. The subprocess reads JSON from stdin, processes it, and writes its result to stdout.
+6. stdout and stderr are captured as usual; exit code 0 = success.
+
+The JSON payload is bounded to 1 MB. Payloads exceeding this limit return a failure
+rather than writing to the pipe.
+
+This mode gives CLI tools the same structured-input mental model as MCP tools, reducing
+the cognitive split between "MCP tools get JSON, CLI tools get strings" that complicates
+agent instructions.
+
 ### `mcp`
 
-Required: `name`, `transport: "mcp"`, `endpoint`.
+Required: `name`, `transport: "mcp"`.
+Optional: `endpoint` (required if no top-level `mcp_gateway` is set).
 
 | Field | Notes |
 | --- | --- |
 | `name` | Tool identifier; must match a tool advertised by the endpoint, or the run fails. |
-| `endpoint` | mcp-gateway URL for this tool (usually `$ANDY_MCP_URL/<tool-name>`). Must be a valid URI. |
+| `endpoint` | mcp-gateway URL for this tool (usually `$ANDY_MCP_URL/<tool-name>`). Must be a valid URI. When absent and a top-level `mcp_gateway` is set, resolved as `{mcp_gateway}/{tool-name}`. |
 
 `HeadlessToolHost` opens one `McpClient` per distinct endpoint URL (adapters that
 share an endpoint reuse a single connection), lists the remote tools, and binds
@@ -262,7 +288,7 @@ shadow them:
 
 | Variable | Purpose |
 | --- | --- |
-| `ANDY_MCP_URL` | Base URL of the mcp-gateway. MCP tool endpoints are typically `$ANDY_MCP_URL/<tool-name>`. |
+| `ANDY_MCP_URL` | Base URL of the mcp-gateway. Primary consumer is the `mcp_gateway` top-level config field, which resolves tool endpoints as `{mcp_gateway}/{tool-name}`. Legacy per-tool `endpoint` values may also reference it directly. |
 | `ANDY_TOKEN` | Run-scoped bearer token. When set, `HeadlessToolHost` attaches it as `Authorization: Bearer <token>` on every MCP request. The config cannot override it. |
 | `ANDY_PROXY_URL` | Egress proxy URL injected by the container runtime. |
 
