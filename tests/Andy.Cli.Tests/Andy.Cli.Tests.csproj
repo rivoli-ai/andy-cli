@@ -106,6 +106,8 @@
     <!-- Mouse reporting enable/disable tests -->
     <Compile Include="Input/MouseReportingTests.cs" />
     <Compile Include="Input/MouseDefaultRegressionTests.cs" />
+    <!-- File-drop escape-sequence tests (iTerm2 OSC 1337, Kitty APC _G) -->
+    <Compile Include="Input/TerminalInputFileDropTests.cs" />
     <!-- Code indexing tests -->
     <Compile Include="Tools/CodeIndexToolTests.cs" />
     <!-- Tool spinner completion + concurrency regression tests -->
@@ -173,6 +175,12 @@
     <Compile Include="Services/ToolResultDisplayTest.cs" />
     <Compile Include="Services/UnifiedDiffTests.cs" />
     <Compile Include="Widgets/FileDiffItemTests.cs" />
+    <!-- ImageAttachment domain model tests -->
+    <Compile Include="Domain/ImageAttachmentTests.cs" />
+    <!-- AttachmentIndicator widget tests -->
+    <Compile Include="Widgets/AttachmentIndicatorTests.cs" />
+    <!-- Image attachment end-to-end flow through parser, indicator, processor, and assistant service -->
+    <Compile Include="Integration/ImageAttachmentIntegrationTests.cs" />
   </ItemGroup>
 
   <ItemGroup>
