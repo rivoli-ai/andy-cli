@@ -132,6 +132,9 @@
     <Compile Include="Integration/PermissionSessionBroadeningIntegrationTests.cs" />
     <!-- list_directory tool integration tests -->
     <Compile Include="Integration/ListDirectoryIntegrationTests.cs" />
+
+    <!-- CliSubprocessTool new CLI transport contract integration tests -->
+    <Compile Include="Integration/CliSubprocessToolIntegrationTests.cs" />
     <!-- Andy.CodeIndex library in-process integration tests -->
     <Compile Include="Integration/CodeIndexLibraryIntegrationTests.cs" />
     <!-- dataframe_* end-to-end scenario through the CLI tool stack + engine SimpleAgent -->
