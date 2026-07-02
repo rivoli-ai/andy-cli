@@ -92,7 +92,7 @@ public class HeadlessBuiltInToolsTests
 
         // Mirror HeadlessToolHost: register the cli adapter into the same registry.
         await using var host = await HeadlessToolHost
-            .BuildAsync(new[] { cliTool }, registry, NullLoggerFactory.Instance);
+            .BuildAsync(new[] { cliTool }, registry, config, NullLoggerFactory.Instance);
 
         var ids = registry.Tools.Select(t => t.Metadata.Id).ToHashSet(StringComparer.Ordinal);
         Assert.Contains("read_file", ids);          // built-in survives

@@ -191,8 +191,11 @@ public class HeadlessConfigSchemaTests
     }
 
     [Fact]
-    public void McpToolBinding_MissingEndpoint_Rejected()
+    public void McpToolBinding_MissingEndpoint_PassesSchema()
     {
+        // ADR 0002: endpoint is now optional in the MCP tool binding schema.
+        // Semantic validation (MCP without endpoint and no mcp_gateway) is
+        // handled by HeadlessConfigLoader, not the JSON Schema.
         var schema = LoadSchema();
         var config = MinimalValidConfig();
         config["tools"] = new JsonArray(
@@ -200,11 +203,11 @@ public class HeadlessConfigSchemaTests
             {
                 ["name"] = "issues.get",
                 ["transport"] = "mcp"
-                // endpoint absent
+                // endpoint absent — allowed by schema when mcp_gateway is present
             });
 
         var result = schema.Evaluate(ToElement(config));
-        Assert.False(result.IsValid, "MCP binding requires endpoint");
+        Assert.True(result.IsValid, "MCP binding without endpoint passes schema (endpoint is now optional)");
     }
 
     [Fact]

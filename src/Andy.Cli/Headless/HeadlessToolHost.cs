@@ -37,15 +37,22 @@ public sealed class HeadlessToolHost : IAsyncDisposable
     public static async Task<HeadlessToolHost> BuildAsync(
         IReadOnlyList<HeadlessTool> tools,
         IToolRegistry registry,
+        HeadlessRunConfig? config,
         ILoggerFactory? loggerFactory = null,
         CancellationToken ct = default)
     {
         var host = new HeadlessToolHost(registry, loggerFactory);
         var logger = loggerFactory?.CreateLogger<HeadlessToolHost>();
 
+        // Resolve the optional top-level mcp_gateway once. When present,
+        // MCP tool bindings without an explicit endpoint are resolved as
+        // {gateway}/{tool-name}. Per-tool endpoint overrides the gateway.
+        string? resolvedGateway = ResolveMcpGateway(config);
+
         // One McpClient per distinct endpoint URL. The dictionary is keyed by
-        // the raw endpoint string from the config — schema validation has
-        // already ensured these are well-formed URIs.
+        // the resolved endpoint string — schema validation has already ensured
+        // these are well-formed URIs, and gateway-derived endpoints are
+        // constructed as valid URIs from the resolved gateway base.
         var mcpSessionsByEndpoint = new Dictionary<string, (McpClient Client, IReadOnlyList<Tool> RemoteTools)>(
             StringComparer.Ordinal);
 
@@ -61,21 +68,26 @@ public sealed class HeadlessToolHost : IAsyncDisposable
                 }
                 case "mcp":
                 {
-                    if (string.IsNullOrEmpty(tool.Endpoint))
+                    // Resolve endpoint: per-tool endpoint wins; otherwise
+                    // fall back to the gateway-derived endpoint.
+                    var endpoint = tool.Endpoint;
+                    if (string.IsNullOrEmpty(endpoint))
                     {
-                        // Schema enforces endpoint on mcp transport; defensive guard
-                        // surfaces a clearer message than a NRE deeper in.
-                        throw new InvalidOperationException(
-                            $"MCP tool '{tool.Name}' has no endpoint; schema validation should have rejected this.");
+                        if (resolvedGateway is null)
+                        {
+                            throw new InvalidOperationException(
+                                $"MCP tool '{tool.Name}' has no endpoint and no mcp_gateway is configured.");
+                        }
+                        endpoint = $"{resolvedGateway.TrimEnd('/')}/{tool.Name}";
                     }
 
-                    if (!mcpSessionsByEndpoint.TryGetValue(tool.Endpoint, out var session))
+                    if (!mcpSessionsByEndpoint.TryGetValue(endpoint, out var session))
                     {
-                        var client = await ConnectMcpAsync(tool.Endpoint, loggerFactory, ct);
+                        var client = await ConnectMcpAsync(endpoint, loggerFactory, ct);
                         host._mcpClients.Add(client);
                         var remoteTools = await client.ListToolsAsync(ct);
                         session = (client, remoteTools);
-                        mcpSessionsByEndpoint[tool.Endpoint] = session;
+                        mcpSessionsByEndpoint[endpoint] = session;
                     }
 
                     var remote = session.RemoteTools.FirstOrDefault(t =>
@@ -87,7 +99,7 @@ public sealed class HeadlessToolHost : IAsyncDisposable
                         // here so the operator sees the mismatch instead of the LLM
                         // silently never calling the tool.
                         throw new InvalidOperationException(
-                            $"MCP endpoint {tool.Endpoint} does not advertise a tool named '{tool.Name}'. "
+                            $"MCP endpoint {endpoint} does not advertise a tool named '{tool.Name}'. "
                                 + $"Available: [{string.Join(", ", session.RemoteTools.Select(t => t.Name))}]");
                     }
 
@@ -108,6 +120,20 @@ public sealed class HeadlessToolHost : IAsyncDisposable
             tools.Count, mcpSessionsByEndpoint.Count);
 
         return host;
+    }
+
+    // Resolve the optional mcp_gateway field, substituting $ANDY_MCP_URL from
+    // the process environment when the gateway value references it.
+    internal static string? ResolveMcpGateway(HeadlessRunConfig? config)
+    {
+        if (config is null || string.IsNullOrEmpty(config.McpGateway))
+            return null;
+
+        // Substitute the reserved env var if the gateway value references it.
+        return config.McpGateway
+            .Replace("$ANDY_MCP_URL",
+                Environment.GetEnvironmentVariable("ANDY_MCP_URL") ?? string.Empty,
+                StringComparison.Ordinal);
     }
 
     private static async Task<McpClient> ConnectMcpAsync(

@@ -14,6 +14,15 @@ public sealed record HeadlessRunConfig
 {
     public int SchemaVersion { get; init; }
     public Guid RunId { get; init; }
+
+    /// <summary>
+    /// Optional base URL for MCP tool endpoints. When present, MCP tool bindings
+    /// without an explicit Endpoint have their endpoint resolved as
+    /// {McpGateway}/{tool-name}. Supports $ANDY_MCP_URL substitution from the
+    /// process environment. Per-tool Endpoint overrides this when both are present.
+    /// </summary>
+    public string? McpGateway { get; init; }
+
     public HeadlessAgent Agent { get; init; } = new();
     public HeadlessModel Model { get; init; } = new();
     public IReadOnlyList<HeadlessTool> Tools { get; init; } = [];
@@ -75,6 +84,11 @@ public sealed record HeadlessTool
     public string? Endpoint { get; init; }
     public string? Binary { get; init; }
     public IReadOnlyList<string>? Command { get; init; }
+
+    // Bridging mode for CLI transport. Null/absent = "argv".
+    // When "json", parameters are serialized as a JSON object and written
+    // to the subprocess's stdin (then stdin is closed).
+    public string? InputMode { get; init; }
 }
 
 public sealed record HeadlessWorkspace

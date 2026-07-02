@@ -20,6 +20,10 @@
       "const": 1,
       "description": "Schema version. Bump to 2 introduces a new schema file (v2.json) and a separate compatibility layer; do not overload v1."
     },
+    "mcp_gateway": {
+      "type": "string",
+      "description": "Base URL for MCP tool endpoints. When present, MCP tool bindings without an explicit 'endpoint' have their endpoint resolved as {mcp_gateway}/{tool-name}. Supports $ANDY_MCP_URL substitution. Per-tool 'endpoint' overrides this when both are present."
+    },
     "run_id": {
       "type": "string",
       "format": "uuid",
@@ -80,7 +84,7 @@
           {
             "type": "object",
             "title": "MCP tool binding",
-            "required": ["name", "transport", "endpoint"],
+            "required": ["name", "transport"],
             "additionalProperties": false,
             "properties": {
               "name": {
@@ -92,7 +96,7 @@
               "endpoint": {
                 "type": "string",
                 "format": "uri",
-                "description": "mcp-gateway URL for this tool (usually $ANDY_MCP_URL/<tool-name>)."
+                "description": "mcp-gateway URL for this tool (usually $ANDY_MCP_URL/<tool-name>). When absent and a top-level mcp_gateway is set, resolved as {mcp_gateway}/{tool-name}."
               }
             }
           },
@@ -115,6 +119,12 @@
                 "type": "array",
                 "items": { "type": "string" },
                 "description": "Default argv the agent prepends. The agent appends its own args."
+              },
+              "input_mode": {
+                "type": "string",
+                "enum": ["argv", "json"],
+                "default": "argv",
+                "description": "How the agent's parameters reach the subprocess. 'argv' (default): parameters are flattened into a string array appended to command[]. 'json': parameters are serialized as a JSON object and written to the subprocess's stdin, then stdin is closed. The subprocess reads the JSON from stdin and the exit/error semantics are unchanged."
               }
             }
           }
