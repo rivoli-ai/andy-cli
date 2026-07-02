@@ -11,7 +11,7 @@ namespace Andy.Cli.Services
     /// <summary>
     /// Transparent <see cref="ILlmProvider"/> decorator that reports the provider's REAL token
     /// usage to a callback on every completion. The engine calls the wrapped provider once per
-    /// round-trip within an agent turn, so the callback fires live as the turn progresses — this
+    /// round-trip within an agent turn, so the callback fires live as the turn progresses -- this
     /// is how the thinking row shows actual (not estimated) input/output tokens that move while the
     /// model is still working. Behaviour is otherwise identical to the inner provider: every call
     /// is delegated and the original response/chunk is returned unchanged.
@@ -21,10 +21,22 @@ namespace Andy.Cli.Services
         private readonly ILlmProvider _inner;
         private readonly Action<LlmUsage> _onUsage;
         private readonly Action<string>? _onIntermediateText;
+        private readonly Action? _onThinkingStart;
+        private readonly Action<string>? _onThinkingText;
+        private readonly Action? _onThinkingEnd;
         private readonly ILogger? _logger;
 
         public UsageTrackingLlmProvider(ILlmProvider inner, Action<LlmUsage> onUsage, ILogger? logger = null)
-            : this(inner, onUsage, onIntermediateText: null, logger)
+            : this(inner, onUsage, onIntermediateText: null, onThinkingStart: null, onThinkingText: null, onThinkingEnd: null, logger)
+        {
+        }
+
+        public UsageTrackingLlmProvider(
+            ILlmProvider inner,
+            Action<LlmUsage> onUsage,
+            Action<string>? onIntermediateText,
+            ILogger? logger = null)
+            : this(inner, onUsage, onIntermediateText, onThinkingStart: null, onThinkingText: null, onThinkingEnd: null, logger)
         {
         }
 
@@ -38,15 +50,24 @@ namespace Andy.Cli.Services
         /// they reach the feed through the normal end-of-turn render path, so this avoids showing the
         /// final answer twice. Never fires for empty/whitespace content.
         /// </param>
+        /// <param name="onThinkingStart">Fires when a thinking block begins.</param>
+        /// <param name="onThinkingText">Fires for each thinking content chunk.</param>
+        /// <param name="onThinkingEnd">Fires when a thinking block ends.</param>
         public UsageTrackingLlmProvider(
             ILlmProvider inner,
             Action<LlmUsage> onUsage,
             Action<string>? onIntermediateText,
+            Action? onThinkingStart,
+            Action<string>? onThinkingText,
+            Action? onThinkingEnd,
             ILogger? logger = null)
         {
             _inner = inner ?? throw new ArgumentNullException(nameof(inner));
             _onUsage = onUsage ?? throw new ArgumentNullException(nameof(onUsage));
             _onIntermediateText = onIntermediateText;
+            _onThinkingStart = onThinkingStart;
+            _onThinkingText = onThinkingText;
+            _onThinkingEnd = onThinkingEnd;
             _logger = logger;
         }
 

@@ -174,6 +174,23 @@ namespace Andy.Cli.Widgets
         /// <summary>Append a response separator with token information.</summary>
         public void AddResponseSeparator(int inputTokens = 0, int outputTokens = 0, string pattern = "━━ ◆ ━━") => AddItem(new ResponseSeparatorItem(inputTokens, outputTokens, pattern));
 
+        /// <summary>Add a thinking block that can be updated progressively.</summary>
+        public ThinkingBlockItem AddThinkingBlock()
+        {
+            var item = new ThinkingBlockItem();
+            AddItem(item);
+            return item;
+        }
+
+        /// <summary>Clear all thinking blocks from the feed.</summary>
+        public void ClearThinkingBlocks()
+        {
+            lock (_itemsLock)
+            {
+                _items.RemoveAll(item => item is ThinkingBlockItem);
+            }
+        }
+
         /// <summary>Add a streaming message that can be updated progressively.</summary>
         public StreamingMessageItem AddStreamingMessage()
         {

@@ -10,17 +10,18 @@ namespace Andy.Cli.Widgets
     public static class FooterHints
     {
         public static (string key, string action)[] Build(
-            bool promptHistoryMode, bool toolOutputExpanded, bool mouseOn)
+            bool promptHistoryMode, bool toolOutputExpanded, bool mouseOn, bool thinkingVisible = true)
         {
             string toolHint = toolOutputExpanded ? "Collapse output" : "Expand output";
             string mouseHint = mouseOn ? "Mouse On" : "Mouse Off";
+            string thinkHint = thinkingVisible ? "Thinking On" : "Thinking Off";
 
             if (promptHistoryMode)
             {
                 return new[]
                 {
                     ("Ctrl+]", "Feed Mode"),
-                    ("↑/↓", "Navigate"),
+                    ("\u2191/\u2193", "Navigate"),
                     ("PgUp/PgDn", "Scroll"),
                     ("Ctrl+O", toolHint),
                     ("F3", mouseHint),
@@ -34,6 +35,7 @@ namespace Andy.Cli.Widgets
                 ("PgUp/PgDn", "Scroll"),
                 ("Ctrl+O", toolHint),
                 ("F3", mouseHint),
+                ("F4", thinkHint),
                 ("ESC", "Quit"),
                 ("", "http://localhost:5555"),
             };

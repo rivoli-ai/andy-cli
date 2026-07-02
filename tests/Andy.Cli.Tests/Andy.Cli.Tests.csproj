@@ -65,6 +65,7 @@
     <Compile Include="Widgets/ListDirectoryResultDisplayTests.cs" />
     <Compile Include="Widgets/MarkdownRenderingRegressionTests.cs" />
     <Compile Include="Widgets/FooterHintsTests.cs" />
+    <Compile Include="Widgets/ThinkingBlockItemTests.cs" />
     <!-- Token counter tests -->
     <Compile Include="Widgets/TokenCounterTests.cs" />
     <Compile Include="Widgets/ContextStatusBarTests.cs" />
@@ -173,6 +174,7 @@
     <Compile Include="Services/ToolResultDisplayTest.cs" />
     <Compile Include="Services/UnifiedDiffTests.cs" />
     <Compile Include="Widgets/FileDiffItemTests.cs" />
+  
   </ItemGroup>
 
   <ItemGroup>

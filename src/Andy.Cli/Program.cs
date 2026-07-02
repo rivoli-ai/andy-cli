@@ -181,6 +181,21 @@ class Program
             await HandleCommandLineArgs(args);
             return;
         }
+
+        // ANDY_SHOW_THINKING env var: session-level default for thinking block visibility.
+        // --hide-thinking flag overrides AFTER env read; F4 can override at runtime.
+        // Resolution order: F4 toggle > --hide-thinking > ANDY_SHOW_THINKING > default (true)
+        var showThinkingEnv = Environment.GetEnvironmentVariable("ANDY_SHOW_THINKING");
+        if (showThinkingEnv is "false" or "0" or "no")
+        {
+            ThinkingView.Visible = false;
+        }
+
+        if (args.Contains("--hide-thinking"))
+        {
+            ThinkingView.Visible = false;
+        }
+
         // Apply the persisted theme (falling back to an ANDY_THEME env default,
         // then the built-in dark theme) before the first frame is rendered.
         var themeMemory = new ThemeMemoryService();
@@ -257,7 +272,7 @@ class Program
             {
                 bool mouseOn = rawInput?.MouseEnabled ?? false;
                 hints.SetHints(FooterHints.Build(
-                    scrollMode == ScrollMode.PromptHistory, ToolOutputView.Expanded, mouseOn));
+                    scrollMode == ScrollMode.PromptHistory, ToolOutputView.Expanded, mouseOn, ThinkingView.Visible));
             }
 
             UpdateHints();
@@ -1053,6 +1068,17 @@ class Program
                             // Refresh the footer so the Mouse On/Off indicator matches the new state.
                             UpdateHints();
                         }
+                        return;
+                    }
+
+                    // F4 toggles thinking block visibility. When hidden, thinking blocks
+                    // occupy zero vertical space but content is retained in memory so
+                    // toggling F4 retroactively shows/hides all thinking blocks in the feed.
+                    if (k.Key == ConsoleKey.F4)
+                    {
+                        bool visible = ThinkingView.Toggle();
+                        toast.Show(visible ? "Thinking: visible" : "Thinking: hidden", 90);
+                        UpdateHints();
                         return;
                     }
 

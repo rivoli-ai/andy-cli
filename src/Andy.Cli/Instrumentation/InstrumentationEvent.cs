@@ -145,6 +145,19 @@ public class MessageSummary
 }
 
 /// <summary>
+/// Event fired when a thinking block starts, contains content, or ends
+/// </summary>
+public class ThinkingEvent : InstrumentationEvent
+{
+    public override string EventType => "Thinking";
+
+    public string Content { get; set; } = string.Empty;
+    public int ContentLength { get; set; }
+    public TimeSpan? Duration { get; set; }
+    public string Phase { get; set; } = string.Empty; // "start", "content", "end"
+}
+
+/// <summary>
 /// Event for general diagnostic/debug information
 /// </summary>
 public class DiagnosticEvent : InstrumentationEvent
