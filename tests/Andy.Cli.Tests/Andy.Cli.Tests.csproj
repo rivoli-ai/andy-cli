@@ -65,6 +65,7 @@
     <Compile Include="Widgets/ListDirectoryResultDisplayTests.cs" />
     <Compile Include="Widgets/MarkdownRenderingRegressionTests.cs" />
     <Compile Include="Widgets/FooterHintsTests.cs" />
+    <Compile Include="Widgets/ThinkingBlockItemTests.cs" />
     <!-- Token counter tests -->
     <Compile Include="Widgets/TokenCounterTests.cs" />
     <Compile Include="Widgets/ContextStatusBarTests.cs" />
@@ -134,6 +135,7 @@
     <Compile Include="Integration/ListDirectoryIntegrationTests.cs" />
     <!-- Andy.CodeIndex library in-process integration tests -->
     <Compile Include="Integration/CodeIndexLibraryIntegrationTests.cs" />
+    <Compile Include="Integration/ThinkingBlockRenderingIntegrationTests.cs" />
     <!-- dataframe_* end-to-end scenario through the CLI tool stack + engine SimpleAgent -->
     <Compile Include="Integration/DataFrameScenarioIntegrationTests.cs" />
     <!-- AQ1 headless config schema tests (rivoli-ai/andy-cli#46) -->
@@ -173,6 +175,7 @@
     <Compile Include="Services/ToolResultDisplayTest.cs" />
     <Compile Include="Services/UnifiedDiffTests.cs" />
     <Compile Include="Widgets/FileDiffItemTests.cs" />
+  
   </ItemGroup>
 
   <ItemGroup>

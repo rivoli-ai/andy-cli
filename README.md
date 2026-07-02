@@ -116,9 +116,81 @@ dotnet run --project src/Andy.Cli
 - `Ctrl+O` - Expand/collapse tool output detail
 - `F2` - Toggle performance HUD
 - `F3` - Toggle mouse capture (off by default so native text selection works; on enables mouse-wheel scroll)
+- `F4` - Toggle thinking block visibility (collapse or expand reasoning blocks inline)
 - `ESC` - Exit application
 - `Up/Down` - Scroll through chat history
 - `Page Up/Down` - Fast scroll
+
+### Thinking Blocks
+
+LLM providers that emit structured reasoning text can surface it as inline
+thinking blocks in the chat feed. These blocks are a presentation layer only;
+they do not change the assistant turn or any recorded output.
+
+#### Visual Styling
+
+A thinking block renders as an ASCII-framed panel:
+
+```
+  [thinking]
+  +----------------------------------------------+
+  | Let me first check the project structure...   |
+  | Then I will read the relevant file...          |
+  +----------------------------------------------+
+  [end thinking]
+```
+
+- The `[thinking]` and `[end thinking]` indicators use the current theme's `Ghost` color with italic styling.
+- Body text uses the current theme's `TextDim` color so reasoning stays visually subordinate to the final response.
+- Border and frame use the current theme's `Border` color.
+- No emoji or Unicode decorations are used; the style matches the existing tool-output boxes.
+
+When thinking blocks are hidden, `ThinkingBlockItem` measures itself as zero lines, so the
+text no longer appears in the feed layout and the render path skips it entirely.
+
+#### Visibility Controls
+
+Three mechanisms control thinking-block visibility, evaluated in this order
+(highest priority wins):
+
+1. `F4` runtime toggle
+2. `--hide-thinking` startup flag
+3. `ANDY_SHOW_THINKING` environment variable
+4. Default: visible
+
+Environment variable details:
+
+- `ANDY_SHOW_THINKING=true` (or `1` or `yes`) keeps thinking blocks visible.
+- `ANDY_SHOW_THINKING=false` (or `0` or `no`) starts the session with thinking blocks hidden.
+- `ANDY_SHOW_THINKING` unset defaults to visible.
+
+The flag and the environment variable only set the initial state; `F4` can still
+change visibility at any time while the TUI is running. The footer hint updates to
+show the current state (`F4 Thinking On` or `F4 Thinking Off`).
+
+#### Content Preservation
+
+The `ThinkingView.Visible` flag is a pure UI toggle. Even when thinking blocks are
+hidden from the feed, the content is still published to `InstrumentationHub` as a
+`ThinkingEvent` and retained in the hub's event history. Diagnostic subscribers and
+other observability pipelines receive the full content regardless of the feed toggle,
+so reasoning is never silently discarded.
+
+#### Usage Examples
+
+```bash
+# Start with thinking blocks hidden via environment variable
+ANDY_SHOW_THINKING=false dotnet run --project src/Andy.Cli
+
+# Start with thinking blocks hidden via CLI flag
+dotnet run --project src/Andy.Cli -- --hide-thinking
+
+# Show thinking blocks by default (explicit form of the default)
+ANDY_SHOW_THINKING=true dotnet run --project src/Andy.Cli
+
+# Toggle visibility while the interactive TUI is running
+# Press F4
+```
 
 #### Slash Commands
 
