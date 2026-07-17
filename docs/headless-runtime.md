@@ -284,16 +284,27 @@ clear error rather than letting the LLM silently never call it.
 
 ### Reserved environment variables
 
-The container runtime always sets these. `env_vars` in the config must not
-shadow them; a config that lists any of these keys is rejected at load time
-(exit 2), so a run cannot repoint its own egress proxy, spoof its run token, or
-redirect the MCP gateway:
+`env_vars` in the config must not shadow any of these; a config that lists any
+of these keys is rejected at load time (exit 2). Two families are reserved.
+
+Container-runtime identity (always set by the runtime) — so a run cannot repoint
+its own egress proxy, spoof its run token, or redirect the MCP gateway:
 
 | Variable | Purpose |
 | --- | --- |
 | `ANDY_MCP_URL` | Base URL of the mcp-gateway. MCP tool endpoints are typically `$ANDY_MCP_URL/<tool-name>`. |
 | `ANDY_TOKEN` | Run-scoped bearer token. When set, `HeadlessToolHost` attaches it as `Authorization: Bearer <token>` on every MCP request. The config cannot override it. |
 | `ANDY_PROXY_URL` | Egress proxy URL injected by the container runtime. |
+
+Permission-engine controls — `env_vars` are applied to the process environment
+*before* the fail-closed permission gate is built, so shadowing any of these
+would let a run weaken or disable its own permission enforcement:
+
+| Variable | Purpose |
+| --- | --- |
+| `ANDY_PERMISSION_MODE` | `fail-closed` (default) or `bypass` (turns every Ask into Allow). |
+| `ANDY_PERMISSIONS_FILE` | Path to a rules file loaded as the highest-precedence allow/ask/deny layer. |
+| `ANDY_PERMISSIONS_JSON` | Inline rules loaded as that same highest-precedence layer. |
 
 ## Field enforcement summary
 

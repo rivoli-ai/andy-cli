@@ -139,13 +139,122 @@ public class HeadlessInactiveFieldsRuntimeTests
     [Theory]
     [InlineData("json", true)]
     [InlineData("json-plan-v1", true)]
+    [InlineData("json_plan", true)]
+    [InlineData("json:v1", true)]
     [InlineData("JSON", true)]
+    // Contract: ANY label beginning with "json" (case-insensitive) enforces JSON,
+    // per schemas/headless-config.v1.json and docs/headless-runtime.md.
+    [InlineData("jsonl", true)]
+    [InlineData("json5", true)]
+    [InlineData("JSONL", true)]
+    [InlineData("jsonoutput", true)]
     [InlineData("plain", false)]
+    [InlineData("njson", false)]
     [InlineData(null, false)]
     [InlineData("", false)]
     public void RequiresJsonOutput_Classifies(string? format, bool expected)
     {
         Assert.Equal(expected, HeadlessAgentRunner.RequiresJsonOutput(format));
+    }
+
+    [Theory]
+    [InlineData("jsonl")]
+    [InlineData("json5")]
+    public async Task OutputFormat_JsonPrefixedLabel_InvalidOutput_FailsAndWritesNoFile(string format)
+    {
+        using var ws = new TempDir();
+        var config = Config(ws, outputFormat: format);
+        var (stdout, stderr) = NewIo();
+
+        var code = await HeadlessAgentRunner.ExecuteAsync(
+            config, stdout, stderr, NullLoggerFactory.Instance,
+            llmProviderOverride: new StubLlm("this is not json"));
+
+        Assert.Equal(HeadlessExitCode.AgentFailure, code);
+        Assert.False(File.Exists(config.Output.File));
+        Assert.Contains("\"kind\":\"error\"", stdout.ToString());
+    }
+
+    // ---- ResolveGitBranch: bounded, deadlock-free default resolver -----------
+
+    [Fact]
+    public void ResolveGitBranch_RealRepo_ReturnsBranch_WithoutHanging()
+    {
+        using var repo = new TempDir();
+        if (!InitGitRepoOnBranch(repo.Path, "trunk"))
+        {
+            return; // git not available in this environment; nothing to assert.
+        }
+
+        var branch = HeadlessAgentRunner.ResolveGitBranch(repo.Path);
+
+        Assert.Equal("trunk", branch);
+    }
+
+    [Fact]
+    public void ResolveGitBranch_NonRepo_ReturnsNull()
+    {
+        using var notARepo = new TempDir();
+
+        var branch = HeadlessAgentRunner.ResolveGitBranch(notARepo.Path);
+
+        Assert.Null(branch);
+    }
+
+    // Initializes a git repo at <path> on <branch> with one commit. Returns false
+    // if git is unavailable so the caller can skip rather than fail spuriously.
+    private static bool InitGitRepoOnBranch(string path, string branch)
+    {
+        try
+        {
+            if (!RunGit(path, "init", "-b", branch)
+                && !RunGit(path, "init"))
+            {
+                return false;
+            }
+            // Older git ignores -b; force the branch name explicitly.
+            RunGit(path, "checkout", "-B", branch);
+            RunGit(path, "config", "user.email", "test@example.com");
+            RunGit(path, "config", "user.name", "Test");
+            File.WriteAllText(System.IO.Path.Combine(path, "seed.txt"), "seed");
+            RunGit(path, "add", "-A");
+            return RunGit(path, "commit", "-m", "seed");
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool RunGit(string cwd, params string[] args)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo("git")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WorkingDirectory = cwd,
+        };
+        foreach (var a in args)
+        {
+            psi.ArgumentList.Add(a);
+        }
+        try
+        {
+            using var p = System.Diagnostics.Process.Start(psi);
+            if (p is null)
+            {
+                return false;
+            }
+            p.StandardOutput.ReadToEnd();
+            p.StandardError.ReadToEnd();
+            return p.WaitForExit(10000) && p.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     // ---- atomic-output cleanup on write failure ------------------------------
@@ -234,6 +343,31 @@ public class HeadlessInactiveFieldsRuntimeTests
         finally
         {
             Environment.SetEnvironmentVariable(name, null);
+        }
+    }
+
+    // Defense-in-depth: even if a permission-engine control reached ApplyEnvVars
+    // (it is rejected at config load), it must never be written into the process
+    // environment, or the fail-closed permission gate could be bypassed.
+    [Theory]
+    [InlineData("ANDY_PERMISSION_MODE")]
+    [InlineData("ANDY_PERMISSIONS_FILE")]
+    [InlineData("ANDY_PERMISSIONS_JSON")]
+    public void ApplyEnvVars_SkipsPermissionControls(string reserved)
+    {
+        var original = Environment.GetEnvironmentVariable(reserved);
+        try
+        {
+            HeadlessAgentRunner.ApplyEnvVars(new Dictionary<string, string>
+            {
+                [reserved] = "attacker-controlled",
+            });
+
+            Assert.NotEqual("attacker-controlled", Environment.GetEnvironmentVariable(reserved));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(reserved, original);
         }
     }
 

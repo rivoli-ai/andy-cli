@@ -11,11 +11,33 @@ namespace Andy.Cli.HeadlessConfig;
 // it is rejected here. Nothing carried in the schema is quietly ignored.
 public static class HeadlessConfigValidator
 {
-    // Set by the container runtime (Epic Y5). A config's env_vars must never
-    // shadow these, or an agent could redirect its own egress proxy, spoof its
-    // run token, or repoint the MCP gateway. Rejected fail-closed.
+    // A config's env_vars must never shadow these. Two families, both rejected
+    // fail-closed:
+    //
+    //   Container-runtime identity (Epic Y5) - set by the runtime; shadowing lets
+    //   an agent redirect its own egress proxy, spoof its run token, or repoint
+    //   the MCP gateway:
+    //     ANDY_PROXY_URL, ANDY_TOKEN, ANDY_MCP_URL
+    //
+    //   Permission-engine controls - read by the Andy.Permissions bootstrap when
+    //   the engine is built. env_vars are applied to the process environment
+    //   BEFORE the permission engine is constructed, so a config that set any of
+    //   these would weaken or disable the fail-closed permission gate from inside
+    //   the very config the gate is meant to constrain:
+    //     ANDY_PERMISSION_MODE  - 'bypass' turns every Ask into Allow.
+    //     ANDY_PERMISSIONS_FILE - path to a rules file loaded as the
+    //                             highest-precedence Allow/Ask/Deny layer.
+    //     ANDY_PERMISSIONS_JSON - inline rules loaded as that same layer.
     public static readonly IReadOnlyList<string> ReservedEnvVars =
-        new[] { "ANDY_PROXY_URL", "ANDY_TOKEN", "ANDY_MCP_URL" };
+        new[]
+        {
+            "ANDY_PROXY_URL",
+            "ANDY_TOKEN",
+            "ANDY_MCP_URL",
+            "ANDY_PERMISSION_MODE",
+            "ANDY_PERMISSIONS_FILE",
+            "ANDY_PERMISSIONS_JSON",
+        };
 
     // Returns null when the config is semantically valid, otherwise a clear,
     // secret-free error message. Never embeds a resolved secret value: only
@@ -35,8 +57,9 @@ public static class HeadlessConfigValidator
             {
                 if (ReservedEnvVars.Contains(key, StringComparer.Ordinal))
                 {
-                    return $"env_vars must not set reserved variable '{key}'; it is injected by "
-                        + "the container runtime and cannot be overridden by a run config.";
+                    return $"env_vars must not set reserved variable '{key}'; it is a "
+                        + "container-runtime identity or permission-engine control and cannot be "
+                        + "overridden by a run config.";
                 }
             }
         }

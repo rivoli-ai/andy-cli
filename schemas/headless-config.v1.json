@@ -140,7 +140,7 @@
     "env_vars": {
       "type": "object",
       "additionalProperties": { "type": "string" },
-      "description": "Additional env vars set into the agent process environment before provider/tool wiring. Reserved names ANDY_PROXY_URL, ANDY_TOKEN, ANDY_MCP_URL are always set by the container runtime and MUST NOT appear here; a config that tries to shadow one is rejected at load time (exit 2)."
+      "description": "Additional env vars set into the agent process environment before provider/tool wiring. Reserved names MUST NOT appear here; a config that tries to shadow one is rejected at load time (exit 2). Two families are reserved: container-runtime identity (ANDY_PROXY_URL, ANDY_TOKEN, ANDY_MCP_URL), and permission-engine controls read when the fail-closed permission gate is built (ANDY_PERMISSION_MODE, ANDY_PERMISSIONS_FILE, ANDY_PERMISSIONS_JSON)."
     },
     "output": {
       "type": "object",

@@ -662,8 +662,9 @@ public static class HeadlessAgentRunner
 
     // Default branch resolver: `git -C <root> rev-parse --abbrev-ref HEAD`.
     // Returns the branch name, or null if git is unavailable, root is not a repo,
-    // or HEAD is detached.
-    private static string? ResolveGitBranch(string root)
+    // HEAD is detached, or git does not exit within the bounded wait. Internal for
+    // testing (it is the injectable resolver's default implementation).
+    internal static string? ResolveGitBranch(string root)
     {
         try
         {
@@ -685,8 +686,26 @@ public static class HeadlessAgentRunner
             {
                 return null;
             }
-            var output = process.StandardOutput.ReadToEnd().Trim();
-            process.WaitForExit(5000);
+
+            // Drain stdout AND stderr concurrently BEFORE waiting: reading one
+            // stream to completion first can deadlock if git fills the other
+            // stream's pipe buffer. Then bound the wait; a hung git must not block
+            // the run indefinitely. If it does not exit in time, kill the whole
+            // process tree and treat the branch as unverifiable (return null),
+            // which the caller turns into a fail-fast per the guard-rail design.
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            var stderrTask = process.StandardError.ReadToEndAsync();
+
+            if (!process.WaitForExit(5000))
+            {
+                try { process.Kill(entireProcessTree: true); } catch { /* best-effort */ }
+                return null;
+            }
+
+            // Ensure the async reads have completed now that the process has exited.
+            Task.WaitAll(new Task[] { stdoutTask, stderrTask }, 1000);
+
+            var output = (stdoutTask.IsCompletedSuccessfully ? stdoutTask.Result : string.Empty).Trim();
             if (process.ExitCode != 0 || output.Length == 0 || output == "HEAD")
             {
                 return null;
@@ -723,22 +742,17 @@ public static class HeadlessAgentRunner
         }
     }
 
-    // True when the format label declares JSON structured output: exactly "json"
-    // or beginning with "json-", "json_", "json:" (case-insensitive). Internal for
-    // testing.
+    // True when the format label declares JSON structured output: any label that
+    // begins with "json" (case-insensitive). This matches the contract promised by
+    // schemas/headless-config.v1.json and docs/headless-runtime.md ("a label
+    // beginning with json ... requires ... valid JSON"), so "json", "json-plan-v1",
+    // "jsonl", "json5", etc. all enforce. Internal for testing.
     internal static bool RequiresJsonOutput(string? outputFormat)
     {
         if (string.IsNullOrWhiteSpace(outputFormat))
         {
             return false;
         }
-        var f = outputFormat.Trim();
-        if (string.Equals(f, "json", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-        return f.StartsWith("json-", StringComparison.OrdinalIgnoreCase)
-            || f.StartsWith("json_", StringComparison.OrdinalIgnoreCase)
-            || f.StartsWith("json:", StringComparison.OrdinalIgnoreCase);
+        return outputFormat.Trim().StartsWith("json", StringComparison.OrdinalIgnoreCase);
     }
 }

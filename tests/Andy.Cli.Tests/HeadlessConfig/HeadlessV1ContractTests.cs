@@ -140,6 +140,12 @@ public class HeadlessV1ContractTests
     [InlineData("ANDY_TOKEN")]
     [InlineData("ANDY_MCP_URL")]
     [InlineData("ANDY_PROXY_URL")]
+    // Permission-engine controls: a config must not be able to weaken or disable
+    // the fail-closed permission gate from inside its own env_vars (env_vars are
+    // applied before the permission engine is built).
+    [InlineData("ANDY_PERMISSION_MODE")]
+    [InlineData("ANDY_PERMISSIONS_FILE")]
+    [InlineData("ANDY_PERMISSIONS_JSON")]
     public async Task Loader_EnvVars_ShadowingReserved_Rejected(string reserved)
     {
         var json = BaseConfig.Replace(
