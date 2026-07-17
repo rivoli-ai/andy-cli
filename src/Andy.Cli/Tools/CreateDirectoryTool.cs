@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Andy.Tools.Core;
 using Andy.Tools.Library;
+using Andy.Tools.Library.Common;
 
 namespace Andy.Cli.Tools;
 
@@ -74,13 +75,34 @@ public class CreateDirectoryTool : ToolBase
 
         try
         {
-            // Resolve path
-            var fullPath = Path.IsPathRooted(path)
-                ? path
-                : Path.Combine(Directory.GetCurrentDirectory(), path);
+            // Resolve relative paths against the tool execution context's working directory so that
+            // containment is evaluated against the workspace rather than the process-wide current
+            // directory. Fall back to the current directory only when no working directory is supplied.
+            var workingDirectory = string.IsNullOrEmpty(context.WorkingDirectory)
+                ? Directory.GetCurrentDirectory()
+                : context.WorkingDirectory;
 
-            // Normalize path
-            fullPath = Path.GetFullPath(fullPath);
+            // Normalize path. Absolute paths are kept as supplied (containment is enforced below);
+            // relative paths are combined with the working directory. GetFullPath collapses "." and
+            // ".." segments.
+            var fullPath = Path.IsPathRooted(path)
+                ? Path.GetFullPath(path)
+                : Path.GetFullPath(Path.Combine(workingDirectory, path));
+
+            // Enforce workspace containment before touching the file system. This denies absolute-path
+            // escapes, ".." traversal that leaves the allowed roots, and symlink escapes: the
+            // containment check canonicalises the deepest existing ancestor via realpath before
+            // comparing, so a symlink inside an allowed root that points outside it cannot be used to
+            // escape. The same logic runs for headless and interactive execution because both paths
+            // funnel through this shared tool.
+            if (!IsWithinAllowedRoots(fullPath, workingDirectory, context.Permissions))
+            {
+                // Report only the user-supplied path. Do not echo the resolved absolute path: for a
+                // denied traversal or symlink escape that would disclose the real canonical filesystem
+                // location outside the workspace back to the caller.
+                return Task.FromResult(ToolResult.Failure(
+                    $"Access denied: '{path}' is outside the allowed workspace"));
+            }
 
             // Check if directory already exists
             if (Directory.Exists(fullPath))
@@ -151,6 +173,40 @@ public class CreateDirectoryTool : ToolBase
         {
             return Task.FromResult(ToolResult.Failure($"Unexpected error: {ex.Message}"));
         }
+    }
+
+    /// <summary>
+    /// Determines whether <paramref name="fullPath"/> is contained within the allowed roots for this
+    /// execution. When explicit allowed paths are configured on the permissions they are authoritative
+    /// and multiple roots are honoured; otherwise the working directory is treated as the single
+    /// allowed root. Containment is symlink-aware: the candidate and each root are resolved to their
+    /// real, symlink-free locations (with the deepest existing ancestor canonicalised) before the
+    /// boundary comparison, so a symlink inside an allowed root that points outside cannot be abused.
+    /// </summary>
+    internal static bool IsWithinAllowedRoots(
+        string fullPath,
+        string workingDirectory,
+        ToolPermissions? permissions)
+    {
+        // Explicitly configured allowed roots win. IsPathWithinAllowedPaths resolves the real path of
+        // both the candidate and every configured root, so it honours multiple roots and defeats
+        // symlink escapes.
+        if (permissions?.AllowedPaths is { Count: > 0 })
+        {
+            return ToolHelpers.IsPathWithinAllowedPaths(fullPath, permissions);
+        }
+
+        // No explicit roots configured: confine to the working directory. If neither a working directory
+        // nor allowed paths are available we cannot compute a boundary, so fail closed and deny rather
+        // than allowing creation at an arbitrary absolute path.
+        if (string.IsNullOrEmpty(workingDirectory))
+        {
+            return false;
+        }
+
+        return ToolHelpers.IsPathWithinBoundary(
+            ToolHelpers.ResolveRealPath(fullPath),
+            ToolHelpers.ResolveRealPath(workingDirectory));
     }
 
     public override IList<string> ValidateParameters(Dictionary<string, object?> parameters)
