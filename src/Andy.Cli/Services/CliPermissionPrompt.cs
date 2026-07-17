@@ -78,10 +78,11 @@ public sealed class CliPermissionPrompt : IPermissionPrompt
     }
 
     /// <summary>
-    /// Grant granularity for a session "Allow": tool id + command class, where the command class is the
-    /// executable leaf name plus its first subcommand token (e.g. <c>gh pr</c>, <c>git status</c>,
-    /// <c>npm run</c>; a command with no subcommand stays at the executable, e.g. <c>ls</c>). The rule is
-    /// session-scoped only (in-memory, lost on exit) and applies only to the same tool.
+    /// Grant granularity for a session "Allow": tool id + command class, where the command class is an
+    /// allowlisted executable plus its first subcommand token (e.g. <c>gh pr</c>, <c>git status</c>,
+    /// <c>npm run</c>). The rule is session-scoped only (in-memory, lost on exit) and applies only to the
+    /// same tool. When <see cref="CommandClass"/> declines to broaden (returns empty), no extra rule is
+    /// installed and only the engine's own exact full-command rule stands.
     ///
     /// Rationale: matching on the executable + first subcommand stops re-prompting for argument-only
     /// variations of the *same* action a user already approved, while staying narrow enough that approving
@@ -117,10 +118,35 @@ public sealed class CliPermissionPrompt : IPermissionPrompt
     }
 
     /// <summary>
-    /// Reduces a command string to its command class: the executable leaf name plus the first
-    /// subcommand-like token. Leading <c>VAR=value</c> assignments are skipped; the first token that looks
-    /// like a flag/option (starts with <c>-</c>) or is not a bare word terminates the class. Returns an empty
-    /// string when no usable executable token is found.
+    /// Conservative allowlist of executables that dispatch on a plain first subcommand token and whose
+    /// subcommand-level granularity is safe to broaden to (e.g. approving <c>git status</c> installs a
+    /// <c>git status:*</c> session rule, not an all-of-<c>git</c> rule).
+    ///
+    /// Rationale for an allowlist (issue #168): the previous heuristic fell back to an executable-wide class
+    /// whenever the first argument was a flag, so <c>python -c ...</c>, <c>sh -c ...</c>, or <c>rm -i ...</c>
+    /// could silently authorize ANY later <c>python</c>/<c>sh</c>/<c>rm</c> invocation for the session. We
+    /// therefore refuse to broaden unless (1) the executable is one of these well-known, subcommand-oriented
+    /// developer tools and (2) the token after it is a plain subcommand. Interpreters, shells, and
+    /// destructive utilities (python, sh, bash, zsh, node, ruby, perl, rm, dd, ...) are deliberately absent,
+    /// so they always stay at the engine's exact full-command approval. Membership is by the exact
+    /// (path-free) executable token; a path-qualified executable such as <c>/usr/bin/git</c> or
+    /// <c>./git</c> is never matched, so a same-named binary elsewhere cannot inherit the approval.
+    /// </summary>
+    private static readonly HashSet<string> BroadenableSubcommandTools = new(StringComparer.Ordinal)
+    {
+        "git", "dotnet", "npm", "pnpm", "yarn", "cargo", "go", "gh", "kubectl",
+        "docker", "terraform", "gradle", "mvn", "bundle", "gem", "helm",
+    };
+
+    /// <summary>
+    /// Reduces a command string to its command class: an allowlisted executable plus its first plain
+    /// subcommand token (e.g. <c>git status</c>, <c>npm run</c>). Returns an empty string - meaning "do NOT
+    /// broaden; keep only the exact approval" - for every ambiguous or unsafe form, including:
+    /// a first token that begins with <c>-</c> (a flag/option, e.g. <c>python -c</c>, <c>rm -i</c>,
+    /// <c>git -C /x status</c>), an executable not on <see cref="BroadenableSubcommandTools"/>,
+    /// a path-qualified executable (<c>./script.sh</c>, <c>/usr/bin/git</c>), a redirect/quote/metacharacter,
+    /// an environment assignment where the executable would be, or a missing subcommand. Leading
+    /// <c>VAR=value</c> assignments before the executable are skipped.
     /// </summary>
     internal static string CommandClass(string command)
     {
@@ -138,21 +164,31 @@ public sealed class CliPermissionPrompt : IPermissionPrompt
             i++;
         }
 
-        if (i >= tokens.Length || !IsBareWord(tokens[i]) || tokens[i].StartsWith("-", StringComparison.Ordinal))
+        // The executable must be a plain, path-free word. Reject flags, redirects, quotes, assignments and
+        // path-qualified binaries so we never broaden on something we cannot safely reason about.
+        if (i >= tokens.Length || !IsPlainWord(tokens[i]))
         {
             return string.Empty;
         }
 
-        var exe = LeafName(tokens[i]);
+        var exe = tokens[i];
         i++;
 
-        // Append the first subcommand token if it is a bare word (not a flag/option/path/redirection).
-        if (i < tokens.Length && IsBareWord(tokens[i]) && !tokens[i].StartsWith("-", StringComparison.Ordinal))
+        // Only well-known subcommand-dispatch tools broaden, and only to "executable + subcommand".
+        // Everything else keeps the engine's exact full-command approval (no broadening).
+        if (!BroadenableSubcommandTools.Contains(exe))
         {
-            return $"{exe} {tokens[i]}";
+            return string.Empty;
         }
 
-        return exe;
+        // Require a plain subcommand token immediately after the executable (no flag, path, assignment,
+        // redirect or quoting). A flag-first form (e.g. `git -C /x status`) is intentionally NOT broadened.
+        if (i >= tokens.Length || !IsPlainWord(tokens[i]))
+        {
+            return string.Empty;
+        }
+
+        return $"{exe} {tokens[i]}";
     }
 
     private static bool IsAssignment(string token)
@@ -181,10 +217,29 @@ public sealed class CliPermissionPrompt : IPermissionPrompt
         return true;
     }
 
-    private static string LeafName(string path)
+    /// <summary>
+    /// A plain word safe to use as an executable or subcommand token: a non-empty bare word that is not a
+    /// flag/option (no leading <c>-</c>) and contains no assignment (<c>=</c>), path separator (<c>/</c> or
+    /// <c>\</c>), redirect, quote or other shell metacharacter.
+    /// </summary>
+    private static bool IsPlainWord(string token)
     {
-        int slash = path.LastIndexOfAny(new[] { '/', '\\' });
-        return slash >= 0 ? path[(slash + 1)..] : path;
+        if (token.Length == 0 || token[0] == '-')
+        {
+            return false;
+        }
+
+        foreach (var c in token)
+        {
+            if (c == '=' || c == '/' || c == '\\' ||
+                c == '|' || c == '&' || c == ';' || c == '<' || c == '>' || c == '`' ||
+                c == '$' || c == '(' || c == ')' || c == '"' || c == '\'')
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
 

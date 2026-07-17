@@ -18,12 +18,14 @@ public class CliPermissionSessionBroadeningTests
     [Theory]
     [InlineData("gh pr list --limit 10", "gh pr")]
     [InlineData("git status", "git status")]
+    [InlineData("git commit -m \"some message\"", "git commit")]  // quoted args after subcommand ignored
+    [InlineData("git status > out.txt", "git status")]           // trailing redirect ignored
     [InlineData("npm run build", "npm run")]
-    [InlineData("ls -la", "ls")]
-    [InlineData("/usr/bin/gh pr view 5", "gh pr")]   // executable leaf name only
-    [InlineData("FOO=bar gh pr list", "gh pr")]      // leading env assignment is skipped
-    [InlineData("dotnet --version", "dotnet")]       // first non-exe token is a flag => executable only
-    public void CommandClass_groups_by_executable_and_first_subcommand(string command, string expected)
+    [InlineData("dotnet build", "dotnet build")]
+    [InlineData("cargo test --all", "cargo test")]
+    [InlineData("docker build .", "docker build")]
+    [InlineData("FOO=bar gh pr list", "gh pr")]                  // leading env assignment is skipped
+    public void CommandClass_broadens_allowlisted_executable_plus_subcommand(string command, string expected)
     {
         Assert.Equal(expected, CliPermissionPrompt.CommandClass(command));
     }
@@ -31,11 +33,49 @@ public class CliPermissionSessionBroadeningTests
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
-    [InlineData("| rm")]            // begins with a metacharacter => not a bare executable
-    [InlineData("$(whoami)")]       // command substitution => refuse to widen
-    public void CommandClass_returns_empty_when_no_safe_executable(string command)
+    [InlineData("| rm")]                 // begins with a metacharacter => not a bare executable
+    [InlineData("$(whoami)")]            // command substitution => refuse to widen
+    // Interpreters / shells / destructive utilities: never auto-broaden (issue #168).
+    [InlineData("python -c \"print(1)\"")]  // was previously broadened to executable-wide "python"
+    [InlineData("python3 -c import os")]
+    [InlineData("sh -c \"rm -rf /\"")]
+    [InlineData("bash -lc echo")]
+    [InlineData("node -e 1")]
+    [InlineData("rm -i file")]              // was previously broadened to executable-wide "rm"
+    [InlineData("rm -rf /tmp/x")]
+    [InlineData("dd if=/dev/zero of=/dev/sda")]
+    // Allowlisted executable but first token is a flag => keep exact approval only.
+    [InlineData("dotnet --version")]
+    [InlineData("git -C /x status")]
+    // Not on the allowlist => keep exact approval only (no executable-wide rule).
+    [InlineData("ls -la")]
+    [InlineData("ls")]
+    [InlineData("cat file.txt")]
+    // Path-qualified executables must never broaden by leaf name.
+    [InlineData("./script.sh")]
+    [InlineData("./script.sh run")]
+    [InlineData("/usr/bin/git status")]
+    // Environment assignment where the executable would be => not broadened.
+    [InlineData("FOO=bar")]
+    // Allowlisted executable with no subcommand => nothing to broaden to.
+    [InlineData("git")]
+    // Redirect / quoted first argument after an allowlisted exe => not a plain subcommand.
+    [InlineData("git > out.txt")]
+    [InlineData("git \"space arg\"")]
+    public void CommandClass_returns_empty_for_ambiguous_or_unsafe_commands(string command)
     {
         Assert.Equal(string.Empty, CliPermissionPrompt.CommandClass(command));
+    }
+
+    [Fact]
+    public void Ambiguous_command_installs_no_broadened_session_rule()
+    {
+        var store = new FakeStore();
+
+        // A narrowly-intended `python -c ...` approval must not become an executable-wide python rule.
+        CliPermissionPrompt.GrantBroadenedSessionRules(AskRequest("python -c \"print(1)\""), store);
+
+        Assert.Empty(store.SessionRules);
     }
 
     [Fact]
