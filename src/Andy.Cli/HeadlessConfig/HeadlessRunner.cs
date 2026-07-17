@@ -44,13 +44,45 @@ public static class HeadlessRunner
                 return HeadlessExitCode.ConfigError;
             }
 
-            return await HeadlessAgentRunner.ExecuteAsync(
-                load.Config!,
-                eventStream: stdout,
-                stderr: stderr,
-                loggerFactory: loggerFactory,
-                llmProviderOverride: null,
-                ct: ct);
+            var config = load.Config!;
+
+            // rivoli-ai/andy-cli#180: honor output.stream. 'stdout' (default) streams
+            // the NDJSON events to standard output; 'fifo' redirects them to the named
+            // FIFO at event_sink.path (guaranteed present by config validation). The
+            // runtime opens that path for writing and streams every event to it.
+            TextWriter eventStream = stdout;
+            StreamWriter? fifoWriter = null;
+            if (string.Equals(config.Output.Stream, "fifo", StringComparison.Ordinal))
+            {
+                var fifoPath = config.EventSink!.Path!;
+                try
+                {
+                    fifoWriter = OpenFifoWriter(fifoPath);
+                    eventStream = fifoWriter;
+                }
+                catch (Exception ex)
+                {
+                    stderr.WriteLine(
+                        $"andy-cli run --headless: failed to open FIFO event sink '{fifoPath}': {ex.Message}");
+                    return HeadlessExitCode.AgentFailure;
+                }
+            }
+
+            try
+            {
+                return await HeadlessAgentRunner.ExecuteAsync(
+                    config,
+                    eventStream: eventStream,
+                    stderr: stderr,
+                    loggerFactory: loggerFactory,
+                    llmProviderOverride: null,
+                    ct: ct);
+            }
+            finally
+            {
+                fifoWriter?.Flush();
+                fifoWriter?.Dispose();
+            }
         }
         catch (OperationCanceledException)
         {
@@ -63,6 +95,16 @@ public static class HeadlessRunner
                 $"andy-cli run --headless: internal error: {ex.GetType().Name}: {ex.Message}");
             return HeadlessExitCode.InternalError;
         }
+    }
+
+    // Opens a writer over the named FIFO (or file) at <paramref name="path"/> for
+    // the event stream. FileMode.Open requires the FIFO to already exist - the
+    // container runtime creates it with mkfifo before launch. AutoFlush keeps each
+    // NDJSON line visible to the reader as soon as it is written.
+    private static StreamWriter OpenFifoWriter(string path)
+    {
+        var stream = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
+        return new StreamWriter(stream) { AutoFlush = true };
     }
 
     private const string Usage =

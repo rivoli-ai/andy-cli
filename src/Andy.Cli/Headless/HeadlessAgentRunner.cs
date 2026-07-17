@@ -49,13 +49,20 @@ public static class HeadlessAgentRunner
         TextWriter stderr,
         ILoggerFactory loggerFactory,
         ILlmProvider? llmProviderOverride = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        Func<string, string?>? currentBranchResolver = null)
     {
         var emitter = new HeadlessEventEmitter(eventStream);
         var stopwatch = Stopwatch.StartNew();
         var logger = loggerFactory.CreateLogger("Andy.Cli.Headless.HeadlessAgentRunner");
         var iterations = 0;
         var exitCode = HeadlessExitCode.Success;
+
+        // rivoli-ai/andy-cli#180: apply env_vars into the process environment before
+        // any provider/tool wiring, so ConfigureLlmFromEnvironment and the tools see
+        // them. Reserved names (ANDY_PROXY_URL/ANDY_TOKEN/ANDY_MCP_URL) were already
+        // rejected at config-load time, so this can never shadow a runtime secret.
+        ApplyEnvVars(config.EnvVars);
 
         await using var services = BuildServiceProvider(config, loggerFactory);
 
@@ -85,6 +92,20 @@ public static class HeadlessAgentRunner
         {
             // TryBuildToolHostAsync already emitted an error event and
             // logged. Surface the matching exit code without further chatter.
+            EmitFinished(emitter, stopwatch, iterations, HeadlessExitCode.AgentFailure);
+            return HeadlessExitCode.AgentFailure;
+        }
+
+        // rivoli-ai/andy-cli#180: workspace.branch is a guard-rail, not a no-op. The
+        // container runtime checks the branch out before launch; we VERIFY the
+        // workspace is actually on it. A mismatch (or a root that is not a git work
+        // tree) means the run would operate on the wrong code, so fail fast rather
+        // than silently proceeding.
+        var branchError = VerifyWorkspaceBranch(config, currentBranchResolver);
+        if (branchError is not null)
+        {
+            logger.LogError("Workspace branch verification failed: {Error}", branchError);
+            emitter.EmitError(branchError, fatal: true);
             EmitFinished(emitter, stopwatch, iterations, HeadlessExitCode.AgentFailure);
             return HeadlessExitCode.AgentFailure;
         }
@@ -247,6 +268,19 @@ public static class HeadlessAgentRunner
 
         var output = result.Response ?? string.Empty;
 
+        // rivoli-ai/andy-cli#180: enforce agent.output_format. A format label
+        // beginning with "json" requires the final output to be valid JSON;
+        // otherwise the run fails (exit 1) and NO output file is written, so a
+        // downstream consumer never receives malformed structured output.
+        var formatError = ValidateOutputFormat(config.Agent.OutputFormat, output);
+        if (formatError is not null)
+        {
+            logger.LogError("Output-format enforcement failed: {Error}", formatError);
+            emitter.EmitError(formatError, fatal: true);
+            Finalize(HeadlessExitCode.AgentFailure, iterations);
+            return HeadlessExitCode.AgentFailure;
+        }
+
         try
         {
             var bytesWritten = await WriteOutputAtomicallyAsync(config.Output.File, output, ct);
@@ -368,20 +402,49 @@ public static class HeadlessAgentRunner
         var tempPath = targetPath + ".tmp." + Guid.NewGuid().ToString("N")[..8];
         var bytes = Encoding.UTF8.GetBytes(content);
 
-        await using (var stream = new FileStream(
-            tempPath,
-            FileMode.CreateNew,
-            FileAccess.Write,
-            FileShare.None,
-            bufferSize: 4096,
-            useAsync: true))
+        // rivoli-ai/andy-cli#180: if the write throws or is cancelled mid-flight,
+        // the sibling temp file must not be left behind to clutter the workspace or
+        // be mistaken for output. Delete it on any failure; the final File.Move
+        // consumes it on success so the cleanup is a no-op then.
+        try
         {
-            await stream.WriteAsync(bytes.AsMemory(), ct);
-            await stream.FlushAsync(ct);
-        }
+            await using (var stream = new FileStream(
+                tempPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 4096,
+                useAsync: true))
+            {
+                await stream.WriteAsync(bytes.AsMemory(), ct);
+                await stream.FlushAsync(ct);
+            }
 
-        File.Move(tempPath, targetPath, overwrite: true);
-        return bytes.LongLength;
+            File.Move(tempPath, targetPath, overwrite: true);
+            return bytes.LongLength;
+        }
+        catch
+        {
+            TryDeleteTempFile(tempPath);
+            throw;
+        }
+    }
+
+    // Best-effort cleanup of the atomic-write temp file after a failed or cancelled
+    // write. Swallows its own errors: a cleanup failure must not mask the original.
+    private static void TryDeleteTempFile(string tempPath)
+    {
+        try
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+        }
+        catch
+        {
+            // Best-effort only.
+        }
     }
 
     // Internal for testing: lets a test exercise the real DI wiring (built-in
@@ -409,6 +472,13 @@ public static class HeadlessAgentRunner
         // into the provider entry the factory will resolve for this run.
         services.Configure<LlmOptions>(options =>
             ApplyConfiguredModel(options, config.Model.Provider, config.Model.Id));
+
+        // rivoli-ai/andy-cli#180: honor model.api_key_ref. Only the 'env:NAME' form
+        // is supported (validated at load time); load that env var's value into the
+        // provider's ApiKey so a config that names a non-default key var actually
+        // takes effect. The value is never logged or emitted.
+        services.Configure<LlmOptions>(options =>
+            ApplyApiKeyRef(options, config.Model.Provider, config.Model.ApiKeyRef));
 
         services.AddSingleton<ILlmProviderFactory, LlmProviderFactory>();
 
@@ -485,6 +555,35 @@ public static class HeadlessAgentRunner
     // exists. Internal for testing.
     internal static void ApplyConfiguredModel(LlmOptions options, string provider, string modelId)
     {
+        ResolveOrCreateProviderConfig(options, provider).Model = modelId;
+    }
+
+    // rivoli-ai/andy-cli#180: resolve model.api_key_ref ('env:NAME') into the
+    // provider's ApiKey. No-op when api_key_ref is absent, malformed (already
+    // rejected at load time), or the named env var is unset (provider resolution
+    // then falls back to its default env var, or fails later as AgentFailure).
+    // The secret value is only moved between the environment and the provider
+    // config here; it is never written to a log or the event stream. Internal for
+    // testing.
+    internal static void ApplyApiKeyRef(LlmOptions options, string provider, string? apiKeyRef)
+    {
+        if (string.IsNullOrEmpty(apiKeyRef)
+            || !HeadlessConfig.HeadlessConfigValidator.TryParseEnvRef(apiKeyRef, out var envVarName, out _))
+        {
+            return;
+        }
+
+        var value = Environment.GetEnvironmentVariable(envVarName);
+        if (string.IsNullOrEmpty(value))
+        {
+            return;
+        }
+
+        ResolveOrCreateProviderConfig(options, provider).ApiKey = value;
+    }
+
+    private static ProviderConfig ResolveOrCreateProviderConfig(LlmOptions options, string provider)
+    {
         if (!options.Providers.TryGetValue(provider, out var providerConfig))
         {
             var match = options.Providers.FirstOrDefault(p => string.Equals(
@@ -499,6 +598,161 @@ public static class HeadlessAgentRunner
             }
         }
 
-        providerConfig.Model = modelId;
+        return providerConfig;
+    }
+
+    // rivoli-ai/andy-cli#180: set env_vars into the process environment. Reserved
+    // names are rejected before we get here, so this cannot shadow a runtime
+    // secret. Internal for testing.
+    internal static void ApplyEnvVars(IReadOnlyDictionary<string, string>? envVars)
+    {
+        if (envVars is null)
+        {
+            return;
+        }
+        foreach (var (key, value) in envVars)
+        {
+            if (string.IsNullOrEmpty(key)
+                || HeadlessConfig.HeadlessConfigValidator.ReservedEnvVars.Contains(key, StringComparer.Ordinal))
+            {
+                continue;
+            }
+            Environment.SetEnvironmentVariable(key, value);
+        }
+    }
+
+    // rivoli-ai/andy-cli#180: verify the workspace is on the configured git
+    // branch. Returns null when there is nothing to check (branch absent) or the
+    // branch matches; otherwise a clear error message. The branch resolver is
+    // injectable for testing; the default shells out to git. Internal for testing.
+    internal static string? VerifyWorkspaceBranch(
+        HeadlessRunConfig config,
+        Func<string, string?>? currentBranchResolver = null)
+    {
+        var expected = config.Workspace.Branch;
+        if (string.IsNullOrWhiteSpace(expected))
+        {
+            return null;
+        }
+
+        var root = config.Workspace.Root;
+        if (string.IsNullOrWhiteSpace(root))
+        {
+            return "workspace.branch is set but workspace.root is empty, so the branch cannot be verified.";
+        }
+
+        var resolver = currentBranchResolver ?? ResolveGitBranch;
+        var actual = resolver(root);
+        if (string.IsNullOrWhiteSpace(actual))
+        {
+            return $"workspace.branch is '{expected}' but workspace.root '{root}' is not a "
+                + "git work tree whose current branch could be determined; refusing to run on "
+                + "an unverified tree.";
+        }
+
+        if (!string.Equals(actual, expected, StringComparison.Ordinal))
+        {
+            return $"workspace.branch mismatch: config expects '{expected}' but workspace.root "
+                + $"'{root}' is on '{actual}'. The container runtime must check out the expected "
+                + "branch before launch.";
+        }
+
+        return null;
+    }
+
+    // Default branch resolver: `git -C <root> rev-parse --abbrev-ref HEAD`.
+    // Returns the branch name, or null if git is unavailable, root is not a repo,
+    // HEAD is detached, or git does not exit within the bounded wait. Internal for
+    // testing (it is the injectable resolver's default implementation).
+    internal static string? ResolveGitBranch(string root)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo("git")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            psi.ArgumentList.Add("-C");
+            psi.ArgumentList.Add(root);
+            psi.ArgumentList.Add("rev-parse");
+            psi.ArgumentList.Add("--abbrev-ref");
+            psi.ArgumentList.Add("HEAD");
+
+            using var process = Process.Start(psi);
+            if (process is null)
+            {
+                return null;
+            }
+
+            // Drain stdout AND stderr concurrently BEFORE waiting: reading one
+            // stream to completion first can deadlock if git fills the other
+            // stream's pipe buffer. Then bound the wait; a hung git must not block
+            // the run indefinitely. If it does not exit in time, kill the whole
+            // process tree and treat the branch as unverifiable (return null),
+            // which the caller turns into a fail-fast per the guard-rail design.
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            var stderrTask = process.StandardError.ReadToEndAsync();
+
+            if (!process.WaitForExit(5000))
+            {
+                try { process.Kill(entireProcessTree: true); } catch { /* best-effort */ }
+                return null;
+            }
+
+            // Ensure the async reads have completed now that the process has exited.
+            Task.WaitAll(new Task[] { stdoutTask, stderrTask }, 1000);
+
+            var output = (stdoutTask.IsCompletedSuccessfully ? stdoutTask.Result : string.Empty).Trim();
+            if (process.ExitCode != 0 || output.Length == 0 || output == "HEAD")
+            {
+                return null;
+            }
+            return output;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    // rivoli-ai/andy-cli#180: enforce agent.output_format on the final output.
+    // A label beginning with "json" (case-insensitive) requires syntactically
+    // valid JSON. Any other label is free-form and unconstrained. Returns null
+    // when the output satisfies the format, otherwise a clear error. Internal for
+    // testing.
+    internal static string? ValidateOutputFormat(string? outputFormat, string output)
+    {
+        if (!RequiresJsonOutput(outputFormat))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var _ = System.Text.Json.JsonDocument.Parse(output);
+            return null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return $"agent.output_format '{outputFormat}' requires the final output to be valid "
+                + "JSON, but it did not parse. No output file was written.";
+        }
+    }
+
+    // True when the format label declares JSON structured output: any label that
+    // begins with "json" (case-insensitive). This matches the contract promised by
+    // schemas/headless-config.v1.json and docs/headless-runtime.md ("a label
+    // beginning with json ... requires ... valid JSON"), so "json", "json-plan-v1",
+    // "jsonl", "json5", etc. all enforce. Internal for testing.
+    internal static bool RequiresJsonOutput(string? outputFormat)
+    {
+        if (string.IsNullOrWhiteSpace(outputFormat))
+        {
+            return false;
+        }
+        return outputFormat.Trim().StartsWith("json", StringComparison.OrdinalIgnoreCase);
     }
 }
