@@ -139,7 +139,17 @@ jobs:
           set -euo pipefail
           dotnet tool install --global CycloneDX --version "${CYCLONEDX_VERSION}"
           export PATH="$PATH:$HOME/.dotnet/tools"
-          dotnet CycloneDX src/Andy.Cli/Andy.Cli.csproj -o release-artifacts -F Json -fn sbom.json
+          # CycloneDX .NET global tool v5.5.0 flags (see `dotnet CycloneDX --help`):
+          #   -j  / --json      produce a JSON BOM (there is NO "-F/--format" switch; "-F Json" errors)
+          #   -fn / --filename  exact output filename, written verbatim into the -o directory
+          dotnet CycloneDX src/Andy.Cli/Andy.Cli.csproj -o release-artifacts -j -fn sbom.json
+          # Guard: downstream steps hardcode release-artifacts/sbom.json, so normalise the
+          # filename in case a future tool version changes its default naming.
+          if [ ! -f release-artifacts/sbom.json ]; then
+            produced="$(find release-artifacts -maxdepth 1 \( -name 'sbom*.json' -o -name 'bom*.json' \) | head -1)"
+            [ -n "$produced" ] || { echo "SBOM generation produced no JSON file"; exit 1; }
+            mv "$produced" release-artifacts/sbom.json
+          fi
           echo "SBOM written to release-artifacts/sbom.json"
 
       - name: Generate aggregate checksums
@@ -205,8 +215,26 @@ jobs:
           archive="$(find dist -name '${{ matrix.archive }}' | head -1)"
           [ -n "$archive" ] || { echo "archive '${{ matrix.archive }}' not found under dist/"; exit 1; }
           mkdir run
-          # bsdtar/GNU tar auto-detect gzip and zip, so one command handles .tar.gz and .zip.
-          tar -xf "$archive" -C run
+          # Extract by archive type. GNU/Git-Bash tar CANNOT read ZIP archives, so the
+          # Windows .zip needs a real ZIP extractor (unzip where present, else 7z which is
+          # on the GitHub windows runners). tar handles the .tar.gz platforms.
+          case "$archive" in
+            *.zip)
+              if command -v unzip >/dev/null 2>&1; then
+                unzip -q "$archive" -d run
+              elif command -v 7z >/dev/null 2>&1; then
+                7z x -orun "$archive" >/dev/null
+              else
+                echo "no ZIP extractor (unzip/7z) available to unpack '$archive'"; exit 1
+              fi
+              ;;
+            *.tar.gz|*.tgz)
+              tar -xzf "$archive" -C run
+              ;;
+            *)
+              echo "unsupported archive type: '$archive'"; exit 1
+              ;;
+          esac
           bash scripts/smoke-test.sh run "$EXPECTED"
 
   # 5) Publish the GitHub Release (web) with auto-generated notes plus a human summary, attach the
@@ -257,8 +285,10 @@ jobs:
             fi
             echo
             echo "### Verify downloads"
+            echo "SHA256SUMS.txt lists every platform archive plus sbom.json. Verify just the"
+            echo "file(s) you downloaded - --ignore-missing skips entries you do not have:"
             echo '```'
-            echo "sha256sum -c SHA256SUMS.txt"
+            echo "sha256sum --ignore-missing -c SHA256SUMS.txt"
             echo '```'
             echo
             echo "### Provenance and SBOM"
