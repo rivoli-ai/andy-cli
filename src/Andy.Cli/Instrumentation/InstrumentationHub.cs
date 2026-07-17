@@ -14,8 +14,18 @@ public class InstrumentationHub
     public static InstrumentationHub Instance => _instance.Value;
 
     private readonly ConcurrentQueue<InstrumentationEvent> _eventQueue = new();
-    private readonly ConcurrentBag<Func<InstrumentationEvent, Task>> _subscribers = new();
-    private readonly int _maxEventHistory = 1000;
+    private readonly ConcurrentDictionary<Guid, Func<InstrumentationEvent, Task>> _subscribers = new();
+
+    /// <summary>
+    /// Maximum number of events retained in the in-memory history buffer.
+    ///
+    /// Retention policy: the history is a bounded FIFO ring. Once the buffer reaches
+    /// this size, the oldest events are dropped as new ones arrive (see
+    /// <see cref="Publish"/>). This caps memory growth for long-running sessions and
+    /// bounds how much historical activity a newly connected client can replay.
+    /// </summary>
+    public const int MaxEventHistory = 1000;
+
     private string? _systemPrompt;
 
     private InstrumentationHub() { }
@@ -44,26 +54,34 @@ public class InstrumentationHub
         _eventQueue.Enqueue(evt);
 
         // Trim old events to prevent memory growth
-        while (_eventQueue.Count > _maxEventHistory)
+        while (_eventQueue.Count > MaxEventHistory)
         {
             _eventQueue.TryDequeue(out _);
         }
 
         // Notify all subscribers (fire and forget)
-        foreach (var subscriber in _subscribers)
+        foreach (var subscriber in _subscribers.Values)
         {
             _ = Task.Run(() => subscriber(evt));
         }
     }
 
     /// <summary>
-    /// Subscribe to events
+    /// Subscribe to events. Dispose the returned handle to unsubscribe, which is
+    /// required so the instrumentation server can deterministically release its
+    /// subscription on shutdown.
     /// </summary>
     public IDisposable Subscribe(Func<InstrumentationEvent, Task> handler)
     {
-        _subscribers.Add(handler);
-        return new Subscription(() => { /* Removal not implemented for simplicity */ });
+        var key = Guid.NewGuid();
+        _subscribers[key] = handler;
+        return new Subscription(() => _subscribers.TryRemove(key, out _));
     }
+
+    /// <summary>
+    /// Number of active subscribers. Exposed for diagnostics and testing.
+    /// </summary>
+    public int SubscriberCount => _subscribers.Count;
 
     /// <summary>
     /// Get all events in the current session

@@ -33,6 +33,7 @@
     <Compile Remove="**/*.cs" />
     <Compile Include="AssemblyInfo.cs" />
     <Compile Include="TestHelpers/TestCompatibilityShims.cs" />
+    <Compile Include="Instrumentation/InstrumentationSecurityTests.cs" />
     <Compile Include="VersionInfoTests.cs" />
     <Compile Include="Commands/ModelCommandTests.cs" />
     <Compile Include="Commands/PermissionsCommandTests.cs" />
