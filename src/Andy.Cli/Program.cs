@@ -1950,16 +1950,8 @@ class Program
 
     private static string GetProviderUrl(string provider)
     {
-        return provider switch
-        {
-            "openrouter" => Environment.GetEnvironmentVariable("OPENROUTER_API_BASE") ?? "https://openrouter.ai/api/v1",
-            "cerebras" => "https://api.cerebras.ai",
-            "openai" => Environment.GetEnvironmentVariable("OPENAI_API_BASE") ?? "https://api.openai.com",
-            "anthropic" => "https://api.anthropic.com",
-            "gemini" => "https://generativelanguage.googleapis.com",
-            "ollama" => Environment.GetEnvironmentVariable("OLLAMA_API_BASE") ?? "http://localhost:11434",
-            _ => "unknown"
-        };
+        // Single source of truth for provider endpoints (honors *_API_BASE overrides)
+        return Andy.Cli.Services.ProviderRegistry.GetEndpoint(provider);
     }
 
     private static async Task RunAcpServerModeAsync()

@@ -40,7 +40,8 @@ public class ModelCommand : ICommand
         var hasConfiguredProvider = options?.Value != null && !string.IsNullOrEmpty(options.Value.DefaultProvider);
         if (hasConfiguredProvider)
         {
-            _currentProviderName = options!.Value.DefaultProvider!;
+            // Resolve any alias (e.g. "gemini") to its canonical id so downstream lookups match
+            _currentProviderName = ProviderRegistry.Resolve(options!.Value.DefaultProvider) ?? options.Value.DefaultProvider!;
         }
         else
         {
@@ -108,7 +109,7 @@ public class ModelCommand : ICommand
         result.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         result.AppendLine();
 
-        var providers = new[] { "cerebras", "openai", "anthropic", "gemini", "ollama" };
+        var providers = ProviderRegistry.Ids;
         var rememberedModels = _modelMemory.GetAllModels();
 
         foreach (var provider in providers)
@@ -204,7 +205,7 @@ public class ModelCommand : ICommand
                     {
                         result.AppendLine($"  Models: No API key configured");
                     }
-                    
+
                     // Show remembered model if any
                     if (!string.IsNullOrEmpty(rememberedModel))
                     {
@@ -242,10 +243,10 @@ public class ModelCommand : ICommand
         {
             // Clear any previous error for this provider
             _lastProviderErrors.Remove(providerName);
-            
+
             // Try to use the existing service provider first
             var factory = _serviceProvider.GetService<ILlmProviderFactory>();
-            
+
             if (factory == null)
             {
                 // Fallback: Create a temporary service provider for the specific provider
@@ -326,7 +327,7 @@ public class ModelCommand : ICommand
             {
                 errorMsg = ex.InnerException.Message;
             }
-            
+
             // Store error for display - keep it concise
             if (errorMsg.Length > 100)
             {
@@ -365,7 +366,7 @@ public class ModelCommand : ICommand
         result.AppendLine("Refreshing model lists from API...");
         result.AppendLine();
 
-        var providers = new[] { "cerebras", "openai", "anthropic", "gemini", "ollama" };
+        var providers = ProviderRegistry.Ids;
 
         foreach (var provider in providers)
         {
@@ -393,18 +394,18 @@ public class ModelCommand : ICommand
         string providerName = _currentProviderName;
         string modelName;
 
-        // Check if first arg is a known provider
+        // Check if first arg is a known provider (id or alias)
         if (args.Length >= 2 && IsKnownProvider(args[0].ToLowerInvariant()))
         {
-            // Format: /model switch openai gpt-4
-            providerName = args[0].ToLowerInvariant();
+            // Format: /model switch openai gpt-4 (resolve any alias to its canonical id)
+            providerName = ProviderRegistry.Resolve(args[0].ToLowerInvariant())!;
             modelName = string.Join(" ", args.Skip(1)).Trim();
         }
         else
         {
             // Format: /model switch gpt-4 (use current provider)
             modelName = string.Join(" ", args).Trim();
-            
+
             // First check if the model exists in the current provider
             var currentProviderModels = await GetProviderModelsAsync(_currentProviderName, cancellationToken);
             if (!currentProviderModels.Any(m => m.Id.Equals(modelName, StringComparison.OrdinalIgnoreCase)))
@@ -453,9 +454,7 @@ public class ModelCommand : ICommand
             });
 
             var newProvider = services.BuildServiceProvider();
-            _currentServiceProvider = newProvider;
-            _currentProviderInstance = null; // Clear old instance
-            _serviceProvider = newProvider; // Update service provider
+            SwapServiceProvider(newProvider); // Dispose the previous service provider/clients
             GetOrCreateProviderInstance(); // Try to create new instance
 
             var message = new StringBuilder();
@@ -475,11 +474,11 @@ public class ModelCommand : ICommand
                     message.AppendLine($"Provider URL: {GetProviderUrl(providerName)}");
                 }
 
-                // Show tool limitations for specific providers
-                if (providerName.Contains("cerebras", StringComparison.OrdinalIgnoreCase))
+                // Show tool limitations for providers that impose a small tool-count limit
+                if (ProviderRegistry.Find(providerName)?.LimitsToolCount == true)
                 {
                     message.AppendLine();
-                    message.AppendLine(ConsoleColors.NotePrefix("Cerebras provider limited to 4 essential tools to prevent API errors"));
+                    message.AppendLine(ConsoleColors.NotePrefix($"{providerName} provider limited to 4 essential tools to prevent API errors"));
                     message.AppendLine("  Available tools: list_directory, read_file, execute_command, search_files");
                 }
 
@@ -507,25 +506,13 @@ public class ModelCommand : ICommand
             return Task.FromResult(CommandResult.Failure("Usage: /model provider <provider-name>"));
         }
 
-        var provider = args[0].ToLowerInvariant();
+        var requested = args[0].ToLowerInvariant();
 
-        // Check if this is a known provider
-        if (!IsKnownProvider(provider))
+        // Check if this is a known provider (id or alias) and resolve to its canonical id
+        var provider = ProviderRegistry.Resolve(requested);
+        if (provider == null)
         {
-            var message = new StringBuilder();
-            message.AppendLine(ConsoleColors.ErrorPrefix($"'{provider}' is not a recognized provider."));
-            message.AppendLine();
-            message.AppendLine("Supported providers:");
-            message.AppendLine("  • cerebras  - Fast inference with Llama models [https://api.cerebras.ai]");
-            message.AppendLine("  • openai    - GPT models [https://api.openai.com or custom]");
-            message.AppendLine("  • anthropic - Claude models [https://api.anthropic.com]");
-            message.AppendLine("  • gemini    - Google Gemini models [https://generativelanguage.googleapis.com]");
-            message.AppendLine("  • ollama    - Local models via Ollama [http://localhost:11434]");
-            message.AppendLine();
-            message.AppendLine("For custom endpoints, set environment variables:");
-            message.AppendLine("  OPENAI_API_BASE=<your-endpoint>");
-            message.AppendLine("  OLLAMA_API_BASE=<your-endpoint>");
-            return Task.FromResult(CommandResult.Failure(message.ToString()));
+            return Task.FromResult(CommandResult.Failure(BuildUnknownProviderMessage(requested)));
         }
 
         if (!HasApiKey(provider))
@@ -553,9 +540,7 @@ public class ModelCommand : ICommand
             });
 
             var newProvider = services.BuildServiceProvider();
-            _currentServiceProvider = newProvider;
-            _currentProviderInstance = null; // Clear old instance
-            _serviceProvider = newProvider; // Update service provider
+            SwapServiceProvider(newProvider); // Dispose the previous service provider/clients
             GetOrCreateProviderInstance(); // Try to create new instance
 
             var message = new StringBuilder();
@@ -680,49 +665,22 @@ public class ModelCommand : ICommand
 
     private bool IsKnownProvider(string provider)
     {
-        return provider switch
-        {
-            "cerebras" or "openai" or "anthropic" or "gemini" or "ollama" => true,
-            _ => false
-        };
+        return ProviderRegistry.IsKnown(provider);
     }
 
     private bool HasApiKey(string provider)
     {
-        return provider switch
-        {
-            "cerebras" => !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CEREBRAS_API_KEY")),
-            "openai" => !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("OPENAI_API_KEY")),
-            "anthropic" => !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")),
-            "gemini" => !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("GOOGLE_API_KEY")),
-            "ollama" => true, // Ollama doesn't require an API key
-            _ => false
-        };
+        return ProviderRegistry.HasCredentials(provider);
     }
 
     private string GetApiKeyName(string provider)
     {
-        return provider switch
-        {
-            "cerebras" => "CEREBRAS_API_KEY",
-            "openai" => "OPENAI_API_KEY",
-            "anthropic" => "ANTHROPIC_API_KEY",
-            "gemini" => "GOOGLE_API_KEY",
-            _ => $"{provider.ToUpper()}_API_KEY"
-        };
+        return ProviderRegistry.GetApiKeyEnvVar(provider);
     }
 
     private string GetProviderUrl(string provider)
     {
-        return provider switch
-        {
-            "cerebras" => "https://api.cerebras.ai",
-            "openai" => Environment.GetEnvironmentVariable("OPENAI_API_BASE") ?? "https://api.openai.com",
-            "anthropic" => "https://api.anthropic.com",
-            "gemini" => "https://generativelanguage.googleapis.com",
-            "ollama" => Environment.GetEnvironmentVariable("OLLAMA_API_BASE") ?? "http://localhost:11434",
-            _ => "unknown"
-        };
+        return ProviderRegistry.GetEndpoint(provider);
     }
 
     private string GetDefaultModel(string provider)
@@ -743,35 +701,26 @@ public class ModelCommand : ICommand
             return providerConfig.Model;
         }
 
-        // Fall back to hardcoded defaults
-        return provider switch
-        {
-            "openrouter" => "xiaomi/mimo-v2.5",
-            "cerebras" => "llama-3.3-70b", // Only this model supports function calling
-            "openai" => "gpt-4o",
-            "anthropic" => "claude-3-sonnet-20240229",
-            "gemini" => "gemini-2.0-flash-exp",
-            "ollama" => "llama2",
-            _ => "unknown"
-        };
+        // Fall back to the registry default
+        return ProviderRegistry.Find(provider)?.DefaultModel ?? "unknown";
     }
 
     private async Task<string?> DetectProviderFromModelNameAsync(string modelName, CancellationToken cancellationToken)
     {
         // Check all providers to see which one has this model
-        var providers = new[] { "cerebras", "openai", "anthropic", "gemini", "ollama" };
-        
+        var providers = ProviderRegistry.Ids;
+
         foreach (var provider in providers)
         {
             // Skip providers without API keys (except ollama)
             if (!HasApiKey(provider) && provider != "ollama")
                 continue;
-            
+
             try
             {
                 // Get models for this provider (from cache or API)
                 var models = await GetProviderModelsAsync(provider, cancellationToken);
-                
+
                 // Check if this provider has the requested model
                 if (models.Any(m => m.Id.Equals(modelName, StringComparison.OrdinalIgnoreCase)))
                 {
@@ -784,7 +733,7 @@ public class ModelCommand : ICommand
                 continue;
             }
         }
-        
+
         // No provider found with this model
         return null;
     }
@@ -814,12 +763,60 @@ public class ModelCommand : ICommand
     public string GetCurrentProvider() => _currentProviderName;
     public string GetCurrentModel() => _currentModel;
 
+    /// <summary>
+    /// Adopts a freshly built service provider as the current one and disposes the previously
+    /// created service provider (and any disposable clients it owned).
+    /// </summary>
+    private void SwapServiceProvider(ServiceProvider newProvider)
+    {
+        var previous = _currentServiceProvider;
+        _currentServiceProvider = newProvider;
+        _currentProviderInstance = null; // Clear old provider instance
+        _serviceProvider = newProvider;  // Route subsequent lookups to the new provider
+
+        if (previous != null && !ReferenceEquals(previous, newProvider))
+        {
+            try
+            {
+                (previous as IDisposable)?.Dispose();
+            }
+            catch
+            {
+                // Disposal is best-effort; never fail a switch because cleanup threw.
+            }
+        }
+    }
+
+    /// <summary>
+    /// Builds the "unknown provider" help message from the registry so the advertised
+    /// provider set always matches what detection and switching actually support.
+    /// </summary>
+    private static string BuildUnknownProviderMessage(string requested)
+    {
+        var message = new StringBuilder();
+        message.AppendLine(ConsoleColors.ErrorPrefix($"'{requested}' is not a recognized provider."));
+        message.AppendLine();
+        message.AppendLine("Supported providers:");
+        foreach (var descriptor in ProviderRegistry.All)
+        {
+            var aliasNote = descriptor.Aliases.Count > 0
+                ? $" (alias: {string.Join(", ", descriptor.Aliases)})"
+                : "";
+            message.AppendLine($"  • {descriptor.Id}{aliasNote} - {descriptor.DisplayName} [{ProviderRegistry.GetEndpoint(descriptor.Id)}]");
+        }
+        message.AppendLine();
+        message.AppendLine("For custom endpoints, set environment variables:");
+        message.AppendLine("  OPENAI_API_BASE=<your-endpoint>");
+        message.AppendLine("  OLLAMA_API_BASE=<your-endpoint>");
+        return message.ToString();
+    }
+
     public async Task<ModelListItem> CreateModelListItemAsync(CancellationToken cancellationToken = default)
     {
         var item = new ModelListItem($"Models - {_currentProviderName}: {_currentModel}");
 
         // Get all available providers
-        var providerNames = new[] { "cerebras", "openai", "anthropic", "gemini", "ollama" };
+        var providerNames = ProviderRegistry.Ids;
 
         foreach (var provider in providerNames)
         {

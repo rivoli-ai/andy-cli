@@ -35,10 +35,12 @@
     <Compile Include="TestHelpers/TestCompatibilityShims.cs" />
     <Compile Include="VersionInfoTests.cs" />
     <Compile Include="Commands/ModelCommandTests.cs" />
+    <Compile Include="Commands/ModelCommandProviderConsistencyTests.cs" />
     <Compile Include="Commands/PermissionsCommandTests.cs" />
     <Compile Include="Themes/ThemeSwitchingTests.cs" />
     <Compile Include="Themes/PopularThemesTests.cs" />
     <Compile Include="Services/ProviderDetectionServiceTests.cs" />
+    <Compile Include="Services/ProviderRegistryTests.cs" />
     <Compile Include="Services/ToolExecutionTimeoutTests.cs" />
     <Compile Include="Services/ParameterMapperReplaceTextTests.cs" />
     <Compile Include="Services/ToolOutputFormattingTests.cs" />

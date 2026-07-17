@@ -18,7 +18,7 @@ Command line AI code assistant powered by .NET 8
 ## Features
 
 - **Interactive TUI** - Modern terminal interface with real-time streaming responses
-- **Multi-Provider Support** - Works with OpenRouter, OpenAI, Anthropic, Cerebras, Groq, Google Gemini, Azure OpenAI, and Ollama
+- **Multi-Provider Support** - Works with OpenRouter, OpenAI, Anthropic, Cerebras, Groq, Google Gemini, and Ollama
 - **Smart Provider Detection** - Automatically selects the best available LLM provider
 - **Tool Execution** - File operations, code and text search, shell commands (execute_command), code indexing (code_index), git_diff, dataframe tools, http_request, and MCP tools
 - **Permission Management** - Interactive permission manager (/permissions) and permission layers for controlling tool access
@@ -44,15 +44,19 @@ By default no provider is pinned (the `DefaultProvider` setting in
 `src/Andy.Cli/appsettings.json` is empty), so Andy CLI automatically detects
 and selects the best available LLM provider based on your environment
 variables. Configured providers include OpenRouter, OpenAI, Anthropic,
-Cerebras, Groq, Google Gemini, Azure OpenAI, and Ollama. The detection
-considers providers in roughly this order:
+Cerebras, Groq, Google Gemini, and Ollama. The provider set, endpoints,
+required environment variables, defaults, and detection priorities are all
+defined in a single registry (`src/Andy.Cli/Services/ProviderRegistry.cs`)
+that provider detection and the `/model` command both read from. When several
+providers are configured, detection prefers them in this order:
 
-1. **OpenAI** - Requires `OPENAI_API_KEY` (highest priority for reliability)
-2. **Cerebras** - Requires `CEREBRAS_API_KEY` (fast inference)
-3. **Ollama** (local) - Detected if running on localhost:11434 (no API key required)
-4. **Azure OpenAI** - Requires `AZURE_OPENAI_API_KEY` and `AZURE_OPENAI_ENDPOINT`
-5. **Anthropic** - Requires `ANTHROPIC_API_KEY`
-6. **Google Gemini** - Requires `GOOGLE_API_KEY`
+1. **OpenRouter** - Requires `OPENROUTER_API_KEY` (default Mimo-v2.5 setup)
+2. **OpenAI** - Requires `OPENAI_API_KEY` (reliable fallback)
+3. **Anthropic** - Requires `ANTHROPIC_API_KEY`
+4. **Cerebras** - Requires `CEREBRAS_API_KEY` (fast inference)
+5. **Groq** - Requires `GROQ_API_KEY`
+6. **Google Gemini** - Requires `GOOGLE_API_KEY` (alias: `gemini`)
+7. **Ollama** (local) - Detected if running on localhost:11434 (no API key required)
 
 ### Environment Variables
 
@@ -66,8 +70,6 @@ See Andy.Llm library documentation.
 - `CEREBRAS_API_KEY` - Cerebras API key
 - `GROQ_API_KEY` - Groq API key
 - `GOOGLE_API_KEY` - Google Gemini API key
-- `AZURE_OPENAI_API_KEY` - Azure OpenAI API key
-- `AZURE_OPENAI_ENDPOINT` - Azure OpenAI endpoint URL
 - `OLLAMA_API_BASE` - Custom Ollama endpoint (default: http://localhost:11434)
 
 #### Provider Control
@@ -93,9 +95,8 @@ dotnet run --project src/Andy.Cli -- model provider openai
 # Check provider detection
 dotnet run --project src/Andy.Cli -- model detect
 
-# Use Azure OpenAI
-export AZURE_OPENAI_API_KEY="your-key"
-export AZURE_OPENAI_ENDPOINT="https://your-instance.openai.azure.com"
+# Use OpenRouter (default Mimo-v2.5 setup)
+export OPENROUTER_API_KEY="your-key"
 dotnet run --project src/Andy.Cli
 ```
 
