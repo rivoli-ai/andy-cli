@@ -41,150 +41,34 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Temporarily exclude test files that need updating for new API -->
-    <Compile Remove="**/*.cs" />
-    <Compile Include="AssemblyInfo.cs" />
-    <Compile Include="TestHelpers/TestCompatibilityShims.cs" />
-    <Compile Include="VersionInfoTests.cs" />
-    <Compile Include="Commands/ModelCommandTests.cs" />
-    <Compile Include="Commands/PermissionsCommandTests.cs" />
-    <Compile Include="Themes/ThemeSwitchingTests.cs" />
-    <Compile Include="Themes/PopularThemesTests.cs" />
-    <Compile Include="Services/ProviderDetectionServiceTests.cs" />
-    <Compile Include="Services/ToolExecutionTimeoutTests.cs" />
-    <Compile Include="Services/ParameterMapperReplaceTextTests.cs" />
-    <Compile Include="Services/ToolOutputFormattingTests.cs" />
-    <Compile Include="Services/SystemPromptBuilderTests.cs" />
-    <Compile Include="Configuration/ProviderExtraBodyTests.cs" />
-    <Compile Include="Services/SystemPromptsTests.cs" />
-    <Compile Include="Services/MarkdownContentProcessorTests.cs" />
-    <Compile Include="ModelCommandProviderSwitchTests.cs" />
-    <!-- Tool rendering tests -->
-    <Compile Include="Widgets/ToolRenderingTestBase.cs" />
-    <Compile Include="Widgets/FileSystemToolRenderingTests.cs" />
-    <Compile Include="Widgets/TextAndSystemToolRenderingTests.cs" />
-    <Compile Include="Widgets/ProductivityAndCliToolRenderingTests.cs" />
-    <!-- Markdown rendering tests -->
-    <Compile Include="Widgets/MarkdownRenderingTests.cs" />
-    <Compile Include="Widgets/MarkdownRendererItemMeasureTests.cs" />
-    <!-- Table rendering tests (measure==rendered, vertical separators) -->
-    <Compile Include="Widgets/TableItemTests.cs" />
-    <Compile Include="Widgets/PermissionsManagerTests.cs" />
-    <Compile Include="Widgets/UserBubbleItemTests.cs" />
-    <Compile Include="Widgets/YouWordRenderingTests.cs" />
-    <Compile Include="Widgets/FeedBackgroundClearTests.cs" />
-    <Compile Include="Widgets/UnclosedCodeFenceTests.cs" />
-    <Compile Include="Widgets/ListDirectoryResultDisplayTests.cs" />
-    <Compile Include="Widgets/MarkdownRenderingRegressionTests.cs" />
-    <Compile Include="Widgets/FooterHintsTests.cs" />
-    <!-- Token counter tests -->
-    <Compile Include="Widgets/TokenCounterTests.cs" />
-    <Compile Include="Widgets/ContextStatusBarTests.cs" />
-    <Compile Include="Widgets/TurnStatsTests.cs" />
-    <Compile Include="Widgets/ProcessingIndicatorStatsTests.cs" />
-    <Compile Include="Services/ContextWindowTests.cs" />
-    <Compile Include="Services/UsageTrackingLlmProviderTests.cs" />
-    <Compile Include="Services/IntermediateAssistantTextTests.cs" />
-    <!-- KeyHintsBar tests -->
-    <Compile Include="Widgets/KeyHintsBarTests.cs" />
-    <!-- No-underline rendering tests (markdown emphasis/links rendered Bold+color, not underlined) -->
-    <Compile Include="Widgets/NoUnderlineRenderingTests.cs" />
-    <!-- Tool output expand/collapse (Ctrl+O) view-toggle tests -->
-    <Compile Include="Widgets/ToolOutputExpandCollapseTests.cs" />
-    <!-- PromptLine color/style tests -->
-    <Compile Include="Widgets/PromptLineColorTests.cs" />
-    <!-- Command palette execution tests -->
-    <Compile Include="Widgets/CommandPaletteTests.cs" />
-    <!-- Themed background tests (status/output widgets must follow the theme) -->
-    <Compile Include="Widgets/ThemedBackgroundTests.cs" />
-    <!-- Feed markdown normalization (blank-line collapsing + heading spacing) -->
-    <Compile Include="Widgets/FeedMarkdownTests.cs" />
-    <!-- Text wrapping (permission dialog, panels) -->
-    <Compile Include="Widgets/TextWrapTests.cs" />
-    <!-- Code syntax highlighting (theme colors, no underline) -->
-    <Compile Include="Widgets/CodeHighlighterTests.cs" />
-    <!-- PromptLine soft-wrapping + cursor navigation tests -->
-    <Compile Include="Widgets/PromptLineWrappingTests.cs" />
-    <!-- FeedView reflow signal tests (margin residue fix) -->
-    <Compile Include="Widgets/FeedViewReflowSignalTests.cs" />
-    <!-- FeedView scroll-offset clamp tests (PageUp/PageDown/wheel dead-zone fix) -->
-    <Compile Include="Widgets/FeedViewScrollClampTests.cs" />
-    <!-- FeedView auto-scroll / bottom-follow tests -->
-    <Compile Include="Widgets/FeedViewAutoScrollTests.cs" />
-    <!-- Command output width tests (full-width command output, no narrow cap) -->
-    <Compile Include="Widgets/CommandOutputWidthTests.cs" />
-    <!-- Raw terminal input decoder tests (mouse wheel + keyboard) -->
-    <Compile Include="Input/TerminalInputParserTests.cs" />
-    <!-- Mouse reporting enable/disable tests -->
-    <Compile Include="Input/MouseReportingTests.cs" />
-    <Compile Include="Input/MouseDefaultRegressionTests.cs" />
-    <!-- Code indexing tests -->
-    <Compile Include="Tools/CodeIndexToolTests.cs" />
-    <!-- Tool spinner completion + concurrency regression tests -->
-    <Compile Include="Services/ToolSpinnerCompletionTests.cs" />
-    <!-- Turn-limit response handling (suppress engine history dump) -->
-    <Compile Include="Services/MaxTurnsResponseTests.cs" />
-    <!-- Engine/tool logger wiring (ILoggerFactory) regression -->
-    <Compile Include="Services/SimpleAssistantServiceLoggerWiringTests.cs" />
-    <!-- Tool-call loop detection (short-circuit repeated identical calls) -->
-    <Compile Include="Services/ToolCallLoopDetectionTests.cs" />
-    <!-- Parallel tool execution tests -->
-    <Compile Include="Services/ParallelToolExecutionTests.cs" />
-    <Compile Include="Services/CliPermissionPromptTests.cs" />
-    <Compile Include="Services/CliPermissionSessionBroadeningTests.cs" />
-    <!-- ACP integration tests -->
-    <Compile Include="ACP/AndyAgentProviderTests.cs" />
-    <!-- Multi-turn conversation context tests -->
-    <Compile Include="Integration/MultiTurnToolCallContextTests.cs" />
-    <!-- Bash tool (execute_command) integration tests -->
-    <Compile Include="Integration/ExecuteCommandToolIntegrationTests.cs" />
-    <Compile Include="Integration/GitDiffCleaningIntegrationTests.cs" />
-    <Compile Include="Integration/CodeIndexStructureIntegrationTests.cs" />
-    <Compile Include="Integration/ReplaceTextParameterIntegrationTests.cs" />
-    <Compile Include="Integration/PermissionSessionBroadeningIntegrationTests.cs" />
-    <!-- list_directory tool integration tests -->
-    <Compile Include="Integration/ListDirectoryIntegrationTests.cs" />
-    <!-- Andy.CodeIndex library in-process integration tests -->
-    <Compile Include="Integration/CodeIndexLibraryIntegrationTests.cs" />
-    <!-- dataframe_* end-to-end scenario through the CLI tool stack + engine SimpleAgent -->
-    <Compile Include="Integration/DataFrameScenarioIntegrationTests.cs" />
-    <!-- AQ1 headless config schema tests (rivoli-ai/andy-cli#46) -->
-    <Compile Include="HeadlessConfig/HeadlessConfigSchemaTests.cs" />
-    <!-- AQ2 headless runner tests (rivoli-ai/andy-cli#47) -->
-    <Compile Include="HeadlessConfig/HeadlessRunnerTests.cs" />
-    <!-- Headless provider/model resolution (OpenRouter) -->
-    <Compile Include="HeadlessConfig/HeadlessProviderModelTests.cs" />
-    <!-- AQ5 headless cancel/timeout protocol tests (rivoli-ai/andy-cli#50) -->
-    <Compile Include="Headless/HeadlessAgentRunnerCancelTests.cs" />
-    <!-- AQ7 headless stability + regression fixture tests (rivoli-ai/andy-cli#52) -->
-    <Compile Include="Headless/HeadlessAgentRunnerStabilityTests.cs" />
-    <!-- AQ8 headless contract validation library (rivoli-ai/andy-cli#54) -->
-    <Compile Include="HeadlessConfig/HeadlessConfigContractTests.cs" />
-    <!-- AX.3 headless built-in tool availability (rivoli-ai/conductor#2090) -->
-    <Compile Include="Headless/HeadlessBuiltInToolsTests.cs" />
-    <!-- AX.4 permission allow-list injection + tool restriction + audit (rivoli-ai/conductor#2091) -->
-    <Compile Include="Headless/HeadlessPermissionAllowListTests.cs" />
-    <!-- #157 headless execute_command capability grant (scoped + fail-closed) -->
-    <Compile Include="Headless/HeadlessCapabilityToolExecutorTests.cs" />
-    <!-- Headless SWE-style end-to-end task (real model; skips without OPENROUTER_API_KEY) -->
-    <Compile Include="Headless/HeadlessSweTaskTests.cs" />
-    <!-- Interactive ProcessMessageAsync NRE reproduction (real model; skips without OPENROUTER_API_KEY) -->
-    <Compile Include="Services/InteractiveAssistantReproTests.cs" />
-    <!-- Re-enabled deterministic unit tests (previously excluded during the csproj API migration) -->
-    <Compile Include="Services/ToolOutputLimitsTests.cs" />
-    <Compile Include="Services/CumulativeOutputTrackerTests.cs" />
-    <Compile Include="Services/ParameterMapperTests.cs" />
-    <Compile Include="Services/ContentPipeline/ContentPipelineTests.cs" />
-    <Compile Include="Services/ContentPipeline/TypeConversionTests.cs" />
-    <Compile Include="Services/ResponseFormattingTests.cs" />
-    <Compile Include="Widgets/InlineCommandHelpTests.cs" />
-    <!-- New unit tests for previously-uncovered correctness-critical logic -->
-    <Compile Include="Services/JsonRepairServiceTests.cs" />
-    <Compile Include="Services/PermissionRuleFileTests.cs" />
-    <Compile Include="Services/ToolCatalogDataFrameTests.cs" />
-    <Compile Include="Services/ToolResultDisplayTest.cs" />
-    <Compile Include="Services/UnifiedDiffTests.cs" />
-    <Compile Include="Widgets/FileDiffItemTests.cs" />
+    <!--
+      Quarantined tests (#170). Default Compile discovery is restored for the whole test tree; the
+      files below are the only ones re-excluded. Each exercises a product type that no longer exists
+      (AiConversationService, SystemPromptService, QwenResponseParser, StreamingToolCallAccumulator,
+      ContextManager) or the pre-migration Andy.Llm message-parts model (Message.CreateText, TextPart,
+      MessageRole). The behaviour they covered is now owned by SimpleAssistantService + Andy.Engine,
+      so they cannot be mechanically fixed - they need to be rewritten against the current surface.
+      TODO(#170): rewrite these against SimpleAssistantService / the Andy.Engine agent loop and re-enable.
+    -->
+    <!-- Uses AiConversationService (removed) + old Andy.Llm message model. -->
+    <Compile Remove="AndyLlmIntegrationTests.cs" />
+    <!-- Uses AiConversationService (removed). -->
+    <Compile Remove="Integration/AiConversationComprehensiveAnswerTest.cs" />
+    <Compile Remove="Integration/ContextManagementTest.cs" />
+    <Compile Remove="Integration/ListDirectoryTruncationTest.cs" />
+    <Compile Remove="Services/OutputFormattingTests.cs" />
+    <Compile Remove="Services/SimpleGreetingResponseTests.cs" />
+    <!-- Uses AiConversationService + SystemPromptService (both removed). -->
+    <Compile Remove="Integration/ComplexPromptScenarioTests.cs" />
+    <Compile Remove="Integration/PromptBasedToolTests.cs" />
+    <!-- Uses AiConversationService + ContextManager (both removed). -->
+    <Compile Remove="Integration/LargeFileHandlingTest.cs" />
+    <!-- Uses AiConversationService + QwenResponseParser + StreamingToolCallAccumulator (all removed). -->
+    <Compile Remove="Integration/QwenIntegrationTest.cs" />
+    <!-- Uses ContextManager + the removed Andy.Llm.Models namespace. -->
+    <Compile Remove="Integration/ToolChainIntegrationTests.cs" />
+    <!-- Example/how-to file built on the removed Andy.Llm message-parts model (Message.CreateText, TextPart). -->
+    <Compile Remove="TestData/ExampleTestUsage.cs" />
   </ItemGroup>
 
   <ItemGroup>

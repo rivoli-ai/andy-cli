@@ -104,7 +104,8 @@ public class CliSubprocessToolTests
         await Task.Delay(150);
         cts.Cancel();
 
-        await Assert.ThrowsAsync<OperationCanceledException>(() => task);
+        // TaskCanceledException derives from OperationCanceledException; accept either.
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
     }
 
     private static CliSubprocessTool NewTool(HeadlessTool config) => new(config);
@@ -113,12 +114,16 @@ public class CliSubprocessToolTests
         RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
             ? new HeadlessTool
             {
-                Name = "echoer", Transport = "cli", Binary = "cmd",
+                Name = "echoer",
+                Transport = "cli",
+                Binary = "cmd",
                 Command = ["cmd", "/c", "echo"]
             }
             : new HeadlessTool
             {
-                Name = "echoer", Transport = "cli", Binary = "echo",
+                Name = "echoer",
+                Transport = "cli",
+                Binary = "echo",
                 Command = ["echo"]
             };
 
@@ -126,12 +131,16 @@ public class CliSubprocessToolTests
         RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
             ? new HeadlessTool
             {
-                Name = "falsy", Transport = "cli", Binary = "cmd",
+                Name = "falsy",
+                Transport = "cli",
+                Binary = "cmd",
                 Command = ["cmd", "/c", "exit 1"]
             }
             : new HeadlessTool
             {
-                Name = "falsy", Transport = "cli", Binary = "false",
+                Name = "falsy",
+                Transport = "cli",
+                Binary = "false",
                 Command = ["false"]
             };
 }

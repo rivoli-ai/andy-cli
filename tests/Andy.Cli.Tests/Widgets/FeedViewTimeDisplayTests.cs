@@ -74,7 +74,7 @@ public class FeedViewTimeDisplayTests
     {
         // This would need to be implemented or mocked based on actual implementation
         // For now, we're testing the concept
-        var elapsedText = elapsed.TotalSeconds < 1 ? "" : $"[{elapsed.TotalSeconds:0.1}s]";
+        var elapsedText = elapsed.TotalSeconds < 1 ? "" : $"[{elapsed.TotalSeconds:0.0}s]";
         return $"Processing request{elapsedText}";
     }
 
@@ -84,8 +84,8 @@ public class FeedViewTimeDisplayTests
         if (elapsed.TotalMilliseconds < 1000)
             return $"{elapsed.TotalMilliseconds:0}ms";
         else if (elapsed.TotalSeconds < 60)
-            return $"{elapsed.TotalSeconds:0.1}s";
+            return $"{elapsed.TotalSeconds:0.0}s";
         else
-            return $"{elapsed.TotalMinutes:0.1}m";
+            return $"{elapsed.TotalMinutes:0.0}m";
     }
 }
