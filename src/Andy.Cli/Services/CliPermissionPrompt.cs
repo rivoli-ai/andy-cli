@@ -118,33 +118,87 @@ public sealed class CliPermissionPrompt : IPermissionPrompt
     }
 
     /// <summary>
-    /// Conservative allowlist of executables that dispatch on a plain first subcommand token and whose
-    /// subcommand-level granularity is safe to broaden to (e.g. approving <c>git status</c> installs a
-    /// <c>git status:*</c> session rule, not an all-of-<c>git</c> rule).
+    /// Conservative allowlist of (executable, subcommand) pairs that are safe to broaden to (e.g. approving
+    /// <c>git status</c> installs a <c>git status:*</c> session rule, not an all-of-<c>git</c> rule).
     ///
-    /// Rationale for an allowlist (issue #168): the previous heuristic fell back to an executable-wide class
-    /// whenever the first argument was a flag, so <c>python -c ...</c>, <c>sh -c ...</c>, or <c>rm -i ...</c>
-    /// could silently authorize ANY later <c>python</c>/<c>sh</c>/<c>rm</c> invocation for the session. We
-    /// therefore refuse to broaden unless (1) the executable is one of these well-known, subcommand-oriented
-    /// developer tools and (2) the token after it is a plain subcommand. Interpreters, shells, and
-    /// destructive utilities (python, sh, bash, zsh, node, ruby, perl, rm, dd, ...) are deliberately absent,
-    /// so they always stay at the engine's exact full-command approval. Membership is by the exact
-    /// (path-free) executable token; a path-qualified executable such as <c>/usr/bin/git</c> or
-    /// <c>./git</c> is never matched, so a same-named binary elsewhere cannot inherit the approval.
+    /// Selection criterion (issue #168): a pair is listed ONLY when the subcommand is read-only /
+    /// non-code-executing - inspecting or reporting state, never running arbitrary code the invoker did not
+    /// already spell out in the approved command. Broadening to <c>exe subcommand:*</c> auto-authorizes every
+    /// later invocation of that pair with ANY arguments, so a code-executing subcommand must NEVER be listed:
+    /// approving a benign <c>docker run hello-world</c> would otherwise install <c>docker run:*</c> and then
+    /// silently authorize <c>docker run -v /:/host --rm alpine sh -c 'rm -rf /host'</c>. The same trap applies
+    /// to <c>dotnet run</c>, <c>npm run</c>, <c>cargo run</c>, <c>go run</c>, <c>bundle exec</c>,
+    /// <c>kubectl exec</c>, <c>terraform apply</c>, <c>docker build</c> (Dockerfile RUN steps execute),
+    /// <c>*/publish</c>/<c>install</c> (lifecycle scripts run), and <c>git config</c> (can set
+    /// <c>alias.*</c>/<c>core.pager</c> to shell commands that execute on later git operations). Every such
+    /// subcommand is deliberately absent; when a command's subcommand is not a listed pair, we do NOT broaden
+    /// and only the engine's exact full-command approval stands.
+    ///
+    /// Executables whose primary subcommands all execute code (gradle, mvn, bundle, gem, make, ...) are
+    /// omitted entirely. Membership is by the exact (path-free) executable token; a path-qualified executable
+    /// such as <c>/usr/bin/git</c> or <c>./git</c> is never matched, so a same-named binary elsewhere cannot
+    /// inherit the approval.
     /// </summary>
-    private static readonly HashSet<string> BroadenableSubcommandTools = new(StringComparer.Ordinal)
-    {
-        "git", "dotnet", "npm", "pnpm", "yarn", "cargo", "go", "gh", "kubectl",
-        "docker", "terraform", "gradle", "mvn", "bundle", "gem", "helm",
-    };
+    private static readonly IReadOnlyDictionary<string, HashSet<string>> BroadenableSubcommandPairs =
+        new Dictionary<string, HashSet<string>>(StringComparer.Ordinal)
+        {
+            // Read-only / reporting git subcommands. NOTE: "config" is EXCLUDED (it can wire alias.* or
+            // core.pager to a shell command that executes on a later git operation).
+            ["git"] = new(StringComparer.Ordinal)
+            {
+                "status", "log", "diff", "show", "branch", "fetch", "remote", "rev-parse",
+                "describe", "blame", "shortlog", "ls-files", "ls-remote", "tag",
+            },
+            // "test" runs test assemblies, "run"/"exec"/"publish"/"tool"/"msbuild" execute code => EXCLUDED.
+            ["dotnet"] = new(StringComparer.Ordinal) { "build", "restore", "list" },
+            // "run"/"exec"/"install" (lifecycle scripts) execute code => EXCLUDED.
+            ["npm"] = new(StringComparer.Ordinal) { "list", "ls", "view", "outdated" },
+            ["pnpm"] = new(StringComparer.Ordinal) { "list", "outdated", "why" },
+            ["yarn"] = new(StringComparer.Ordinal) { "list", "why", "outdated" },
+            // "run"/"test"/"install" execute code => EXCLUDED. "build"/"check" only compile.
+            ["cargo"] = new(StringComparer.Ordinal) { "build", "check", "tree", "metadata" },
+            // "run"/"test"/"generate"/"install" execute code => EXCLUDED.
+            ["go"] = new(StringComparer.Ordinal) { "build", "vet", "list", "version", "env", "doc" },
+            // gh dispatches on a resource noun; these are non-code-executing GitHub operations. "api"
+            // (arbitrary requests), "alias" (can define shell aliases), "extension"/"codespace", "auth" and
+            // "config" are EXCLUDED.
+            ["gh"] = new(StringComparer.Ordinal)
+            {
+                "pr", "issue", "repo", "release", "run", "workflow", "label", "search",
+                "gist", "status", "browse", "project", "org",
+            },
+            // "exec"/"apply"/"run"/"edit"/"delete"/"patch"/"port-forward"/"cp" mutate or execute => EXCLUDED.
+            ["kubectl"] = new(StringComparer.Ordinal)
+            {
+                "get", "describe", "logs", "top", "explain", "cluster-info",
+                "version", "api-resources", "api-versions",
+            },
+            // "run"/"exec"/"build"(Dockerfile RUN)/"create"/"start"/"commit"/"cp" execute code => EXCLUDED.
+            ["docker"] = new(StringComparer.Ordinal)
+            {
+                "ps", "images", "inspect", "logs", "version", "info", "history", "port", "top", "stats",
+            },
+            // "apply"/"destroy"/"import"/"console"/"taint" mutate or execute => EXCLUDED.
+            ["terraform"] = new(StringComparer.Ordinal)
+            {
+                "plan", "validate", "fmt", "show", "output", "version", "providers", "graph",
+            },
+            // "install"/"upgrade"/"uninstall"/"rollback" run cluster hooks => EXCLUDED.
+            ["helm"] = new(StringComparer.Ordinal)
+            {
+                "list", "status", "get", "show", "search", "version", "history", "template",
+            },
+        };
 
     /// <summary>
-    /// Reduces a command string to its command class: an allowlisted executable plus its first plain
-    /// subcommand token (e.g. <c>git status</c>, <c>npm run</c>). Returns an empty string - meaning "do NOT
-    /// broaden; keep only the exact approval" - for every ambiguous or unsafe form, including:
+    /// Reduces a command string to its command class: an allowlisted (executable, subcommand) pair
+    /// (e.g. <c>git status</c>, <c>dotnet build</c>). Returns an empty string - meaning "do NOT broaden; keep
+    /// only the exact approval" - for every ambiguous or unsafe form, including:
     /// a first token that begins with <c>-</c> (a flag/option, e.g. <c>python -c</c>, <c>rm -i</c>,
-    /// <c>git -C /x status</c>), an executable not on <see cref="BroadenableSubcommandTools"/>,
-    /// a path-qualified executable (<c>./script.sh</c>, <c>/usr/bin/git</c>), a redirect/quote/metacharacter,
+    /// <c>git -C /x status</c>), an executable not in <see cref="BroadenableSubcommandPairs"/>,
+    /// a subcommand that is not on that executable's safe (read-only / non-code-executing) list - e.g.
+    /// <c>docker run</c>, <c>dotnet run</c>, <c>npm run</c>, <c>git config</c>, <c>kubectl exec</c> - a
+    /// path-qualified executable (<c>./script.sh</c>, <c>/usr/bin/git</c>), a redirect/quote/metacharacter,
     /// an environment assignment where the executable would be, or a missing subcommand. Leading
     /// <c>VAR=value</c> assignments before the executable are skipped.
     /// </summary>
@@ -176,7 +230,7 @@ public sealed class CliPermissionPrompt : IPermissionPrompt
 
         // Only well-known subcommand-dispatch tools broaden, and only to "executable + subcommand".
         // Everything else keeps the engine's exact full-command approval (no broadening).
-        if (!BroadenableSubcommandTools.Contains(exe))
+        if (!BroadenableSubcommandPairs.TryGetValue(exe, out var safeSubcommands))
         {
             return string.Empty;
         }
@@ -188,27 +242,47 @@ public sealed class CliPermissionPrompt : IPermissionPrompt
             return string.Empty;
         }
 
+        // Broaden ONLY for safe, read-only / non-code-executing subcommands. A code-executing subcommand
+        // (docker run, dotnet run, git config, kubectl exec, ...) keeps the engine's exact approval so it
+        // cannot be re-invoked with different, dangerous arguments without a fresh prompt.
+        if (!safeSubcommands.Contains(tokens[i]))
+        {
+            return string.Empty;
+        }
+
         return $"{exe} {tokens[i]}";
     }
 
+    /// <summary>
+    /// True when <paramref name="token"/> is a leading environment assignment (<c>NAME=value</c>) whose name
+    /// is a real shell identifier (<c>[A-Za-z_][A-Za-z0-9_]*</c>). Restricting the left-hand side to an
+    /// identifier stops tokens such as <c>a/b=c</c> or <c>-x=y</c> from being mistaken for an env assignment
+    /// and skipped, which would otherwise let broadening latch onto the wrong executable.
+    /// </summary>
     private static bool IsAssignment(string token)
     {
         int eq = token.IndexOf('=');
-        return eq > 0 && IsBareWord(token[..eq]);
+        return eq > 0 && IsIdentifier(token[..eq]);
     }
 
-    private static bool IsBareWord(string token)
+    /// <summary>A valid shell identifier: <c>[A-Za-z_][A-Za-z0-9_]*</c>.</summary>
+    private static bool IsIdentifier(string token)
     {
         if (token.Length == 0)
         {
             return false;
         }
 
-        foreach (var c in token)
+        char first = token[0];
+        if (!(char.IsAsciiLetter(first) || first == '_'))
         {
-            // Reject shell metacharacters / quoting so we never widen on something we cannot reason about.
-            if (c == '|' || c == '&' || c == ';' || c == '<' || c == '>' || c == '`' ||
-                c == '$' || c == '(' || c == ')' || c == '"' || c == '\'')
+            return false;
+        }
+
+        for (int i = 1; i < token.Length; i++)
+        {
+            char c = token[i];
+            if (!(char.IsAsciiLetterOrDigit(c) || c == '_'))
             {
                 return false;
             }
