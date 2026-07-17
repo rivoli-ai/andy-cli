@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Andy.Cli.Commands;
@@ -175,6 +176,48 @@ public class ModelCommandProviderConsistencyTests
         }
         finally
         {
+            Restore(snapshot);
+        }
+    }
+
+    [Fact]
+    public void ModelMemory_StoringGeminiAlias_ResolvesToGoogleAndKeepsSavedModel()
+    {
+        // A legacy model-memory entry can store the "gemini" alias. On startup the stored provider
+        // must be resolved to the canonical "google" id (the only form the provider factory accepts)
+        // and the saved model must be preserved despite the alias/canonical-id mismatch. Before the
+        // fix, the saved-model lookup compared the canonical current id ("google") against the raw
+        // stored alias ("gemini"), so it discarded the saved model and fell back to the default.
+        var snapshot = Snapshot();
+        var memoryPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".andy", "model-memory.json");
+        var memoryBackup = File.Exists(memoryPath) ? File.ReadAllBytes(memoryPath) : null;
+        try
+        {
+            ClearAll();
+            Environment.SetEnvironmentVariable("GOOGLE_API_KEY", "test-key");
+
+            // Persist a legacy memory entry keyed by the "gemini" alias.
+            new ModelMemoryService().SetCurrent("gemini", "gemini-1.5-custom");
+
+            // No DefaultProvider pinned -> exercises the detection/model-memory startup paths.
+            var command = new ModelCommand(BuildServicesWithAutoDetect());
+
+            // The active provider must be the canonical id, never the alias.
+            Assert.Equal("google", command.GetCurrentProvider());
+            // The saved model must be preserved (not replaced by the provider default).
+            Assert.Equal("gemini-1.5-custom", command.GetCurrentModel());
+        }
+        finally
+        {
+            if (memoryBackup != null)
+            {
+                File.WriteAllBytes(memoryPath, memoryBackup);
+            }
+            else if (File.Exists(memoryPath))
+            {
+                File.Delete(memoryPath);
+            }
             Restore(snapshot);
         }
     }

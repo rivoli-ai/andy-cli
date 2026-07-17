@@ -125,6 +125,38 @@ public class ProviderRegistryTests
         }
     }
 
+    [Theory]
+    // Default models must match the values in use before the provider-centralization refactor;
+    // a refactor must not silently change which model each provider defaults to.
+    [InlineData("openrouter", "xiaomi/mimo-v2.5")]
+    [InlineData("openai", "gpt-4o")]
+    [InlineData("anthropic", "claude-3-sonnet-20240229")]
+    [InlineData("cerebras", "llama-3.3-70b")]
+    [InlineData("groq", "llama-3.3-70b-versatile")]
+    [InlineData("google", "gemini-2.0-flash-exp")]
+    [InlineData("ollama", "llama2")]
+    public void DefaultModel_MatchesOriginalBehavior(string id, string expectedModel)
+    {
+        Assert.Equal(expectedModel, ProviderRegistry.Find(id)!.DefaultModel);
+    }
+
+    [Fact]
+    public void SupportsModelListing_TrueForKnownProviders_FalseForUnknown()
+    {
+        foreach (var id in ProviderRegistry.Ids)
+        {
+            Assert.True(ProviderRegistry.SupportsModelListing(id), $"{id} should support model listing");
+        }
+
+        // Alias resolves to the same descriptor and reports the same capability.
+        Assert.True(ProviderRegistry.SupportsModelListing("gemini"));
+
+        // Unknown / empty ids are treated as not listable.
+        Assert.False(ProviderRegistry.SupportsModelListing("azure"));
+        Assert.False(ProviderRegistry.SupportsModelListing(null));
+        Assert.False(ProviderRegistry.SupportsModelListing(""));
+    }
+
     [Fact]
     public void CerebrasIsTheOnlyProvider_ThatLimitsToolCount()
     {

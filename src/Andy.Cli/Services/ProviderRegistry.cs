@@ -93,7 +93,7 @@ public static class ProviderRegistry
             DisplayName = "Anthropic",
             ApiKeyEnvVars = new[] { "ANTHROPIC_API_KEY" },
             DefaultEndpoint = "https://api.anthropic.com",
-            DefaultModel = "claude-3-5-haiku-20241022",
+            DefaultModel = "claude-3-sonnet-20240229",
             DetectionPriority = 2
         },
         new ProviderDescriptor
@@ -132,7 +132,7 @@ public static class ProviderRegistry
             ApiKeyEnvVars = Array.Empty<string>(),
             ApiBaseEnvVar = "OLLAMA_API_BASE",
             DefaultEndpoint = "http://localhost:11434",
-            DefaultModel = "llama3.2",
+            DefaultModel = "llama2",
             DetectionPriority = 6,
             RequiresApiKey = false,
             IsLocal = true
@@ -164,6 +164,12 @@ public static class ProviderRegistry
 
     /// <summary>Whether the given id or alias maps to a known provider.</summary>
     public static bool IsKnown(string? idOrAlias) => Find(idOrAlias) != null;
+
+    /// <summary>
+    /// Whether the provider exposes a model-listing API that /model list and /model refresh
+    /// can query. Unknown providers are treated as not listable.
+    /// </summary>
+    public static bool SupportsModelListing(string? idOrAlias) => Find(idOrAlias)?.SupportsModelListing ?? false;
 
     /// <summary>Gets the effective endpoint for a provider, honoring its override env var.</summary>
     public static string GetEndpoint(string? idOrAlias)

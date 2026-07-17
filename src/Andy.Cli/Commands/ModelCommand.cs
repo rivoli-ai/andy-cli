@@ -51,23 +51,35 @@ public class ModelCommand : ICommand
 
             if (!string.IsNullOrEmpty(detectedProvider))
             {
-                _currentProviderName = detectedProvider;
+                // Detection already returns a canonical id, but resolve defensively so every
+                // startup path stores the canonical provider id.
+                _currentProviderName = ProviderRegistry.Resolve(detectedProvider) ?? detectedProvider;
             }
             else
             {
                 // Third priority: Load last used provider
                 var current = _modelMemory.GetCurrent();
-                if (current.HasValue && HasApiKey(current.Value.Provider))
+                if (current.HasValue)
                 {
-                    _currentProviderName = current.Value.Provider;
-                    _currentModel = current.Value.Model;
+                    // Resolve any stored alias (e.g. "gemini") to its canonical id before use so the
+                    // provider factory (which only knows canonical ids) can create the provider.
+                    var storedProvider = ProviderRegistry.Resolve(current.Value.Provider) ?? current.Value.Provider;
+                    if (HasApiKey(storedProvider))
+                    {
+                        _currentProviderName = storedProvider;
+                        _currentModel = current.Value.Model;
+                    }
                 }
             }
         }
 
-        // Load last used model for the current provider
+        // Load last used model for the current provider. Resolve the stored provider id so an
+        // aliased entry (e.g. "gemini") still matches the canonical current provider ("google").
         var savedConfig = _modelMemory.GetCurrent();
-        if (savedConfig.HasValue && _currentProviderName == savedConfig.Value.Provider)
+        var savedProvider = savedConfig.HasValue
+            ? ProviderRegistry.Resolve(savedConfig.Value.Provider) ?? savedConfig.Value.Provider
+            : null;
+        if (savedConfig.HasValue && _currentProviderName == savedProvider)
         {
             // If saved provider matches current provider, use the saved model
             _currentModel = savedConfig.Value.Model;
@@ -138,6 +150,15 @@ public class ModelCommand : ICommand
                 if (!string.IsNullOrEmpty(rememberedModel))
                 {
                     result.AppendLine($"  Last used: {rememberedModel}");
+                }
+            }
+            else if (!ProviderRegistry.SupportsModelListing(provider))
+            {
+                // Provider does not expose a model-listing API; skip the query.
+                result.AppendLine($"  Models: Listing not supported by this provider");
+                if (!string.IsNullOrEmpty(rememberedModel))
+                {
+                    result.AppendLine($"    • {rememberedModel} ← last used");
                 }
             }
             else
@@ -370,7 +391,11 @@ public class ModelCommand : ICommand
 
         foreach (var provider in providers)
         {
-            if (HasApiKey(provider) || provider == "ollama")
+            if (!ProviderRegistry.SupportsModelListing(provider))
+            {
+                result.AppendLine($"{provider}: Skipped (model listing not supported)");
+            }
+            else if (HasApiKey(provider) || provider == "ollama")
             {
                 var models = await GetProviderModelsAsync(provider, cancellationToken);
                 result.AppendLine($"{provider}: Found {models.Count} models");
