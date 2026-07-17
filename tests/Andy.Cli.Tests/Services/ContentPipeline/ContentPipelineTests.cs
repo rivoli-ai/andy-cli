@@ -73,7 +73,7 @@ That was the code.";
         // Act - add in reverse priority order
         _pipeline.AddRawContent(lowPriorityContent, priority: 200);
         _pipeline.AddRawContent(highPriorityContent, priority: 50);
-        
+
         // Finalize to render all content
         await _pipeline.FinalizeAsync();
 
@@ -92,7 +92,7 @@ That was the code.";
         // Act
         _pipeline.AddRawContent(regularContent, priority: 100);
         _pipeline.AddSystemMessage(contextMessage, SystemMessageType.Context, priority: 2000);
-        
+
         await _pipeline.FinalizeAsync();
 
         // Assert - context should render last due to high priority number
@@ -107,7 +107,7 @@ That was the code.";
 
         // Act - finalize pipeline
         _pipeline.FinalizeAsync();
-        
+
         // Try to add content after finalization
         _pipeline.AddRawContent("After finalization");
 
@@ -122,7 +122,7 @@ That was the code.";
         _pipeline.AddRawContent("");
         _pipeline.AddRawContent("   ");
         _pipeline.AddRawContent("\n\n\n");
-        
+
         await _pipeline.FinalizeAsync();
 
         // Assert - should not crash with empty content
@@ -157,14 +157,67 @@ Final text";
         Assert.True(true);
     }
 
-    // Skipped: predates the strict-by-default ErrorPolicy. Dispose() now rethrows the background
-    // flush task's TaskCanceledException via ErrorPolicy.RethrowIfStrict (ANDY_STRICT_ERRORS defaults
-    // on), so "dispose never throws" no longer holds. Needs rework against the strict policy.
-    [Fact(Skip = "Stale vs strict-default ErrorPolicy; Dispose rethrows canceled-task under strict mode")]
+    // Re-enabled (#178): Dispose is now non-blocking and never observes/rethrows the background
+    // task, so clean disposal holds again even under the strict-by-default ErrorPolicy.
+    [Fact]
     public void Should_Dispose_Cleanly()
     {
         // Act & Assert - should not throw
         _pipeline.Dispose();
+    }
+
+    [Fact]
+    public async Task Should_Dispose_Async_Cleanly()
+    {
+        // Act & Assert - async disposal should not throw or block
+        await _pipeline.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Should_Dispose_Cleanly_After_Finalization()
+    {
+        _pipeline.AddRawContent("Some content");
+        await _pipeline.FinalizeAsync();
+
+        // Act & Assert - disposing after finalize must not throw
+        await _pipeline.DisposeAsync();
+    }
+
+    // Review fix (#178): synchronous Dispose while the consumer is parked in WaitToReadAsync must
+    // not log an error. Previously the CancellationTokenSource was disposed eagerly, so the parked
+    // consumer could observe a disposed source, throw ObjectDisposedException, hit the generic
+    // catch, and log a spurious error on every sync disposal.
+    [Fact]
+    public async Task Should_Dispose_Sync_Without_Logging_Error()
+    {
+        // Arrange - queue work so the consumer is actively running, then dispose synchronously.
+        _pipeline.AddRawContent("Some streamed content");
+
+        // Act
+        _pipeline.Dispose();
+
+        // Give the background consumer time to observe cancellation and run the deferred CTS
+        // disposal continuation.
+        await Task.Delay(250);
+
+        // Assert - no error was logged during disposal.
+        _mockLogger.Verify(
+            x => x.Log(
+                LogLevel.Error,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception>(),
+                (Func<It.IsAnyType, Exception?, string>)It.IsAny<object>()),
+            Times.Never);
+    }
+
+    // Review fix (#178): repeated/mixed disposal is idempotent and never throws.
+    [Fact]
+    public async Task Should_Allow_Repeated_Disposal()
+    {
+        _pipeline.Dispose();
+        _pipeline.Dispose();
+        await _pipeline.DisposeAsync();
     }
 }
 
@@ -197,9 +250,10 @@ public class TextContentSanitizerTests
     }
 
     [Fact]
-    public void Should_Remove_Consecutive_Newlines()
+    public void Should_Collapse_Excess_Blank_Lines_But_Preserve_Paragraph_Spacing()
     {
-        // Arrange
+        // Arrange - runs of 3+ newlines collapse to a single blank line; a single blank line
+        // between paragraphs is legitimate Markdown and must survive (#178).
         var block = new TextBlock("test", "Line 1\n\n\n\nLine 2\n\n\nLine 3");
 
         // Act
@@ -207,18 +261,30 @@ public class TextContentSanitizerTests
 
         // Assert
         Assert.NotNull(sanitized);
-        Assert.DoesNotContain("\n\n", sanitized.Content);
-        Assert.Contains("Line 1", sanitized.Content);
+        Assert.Contains("Line 1", sanitized!.Content);
         Assert.Contains("Line 2", sanitized.Content);
         Assert.Contains("Line 3", sanitized.Content);
-        // Verify it's single-spaced
-        Assert.Equal("Line 1\nLine 2\nLine 3", sanitized.Content);
+        // Paragraph spacing preserved, runaway gaps collapsed to a single blank line.
+        Assert.Equal("Line 1\n\nLine 2\n\nLine 3", sanitized.Content);
     }
 
-    // Skipped: asserts an exact hardcoded "user example" output string that no longer matches the
-    // evolved TextContentSanitizer. The other sanitizer tests cover current behavior; this fixture
-    // needs regenerating from the current sanitizer output.
-    [Fact(Skip = "Stale hardcoded expected-output fixture; sanitizer behavior has since changed")]
+    [Fact]
+    public void Should_Preserve_Single_Blank_Line_Between_Paragraphs()
+    {
+        // Arrange
+        var block = new TextBlock("test", "First paragraph.\n\nSecond paragraph.");
+
+        // Act
+        var sanitized = _sanitizer.Sanitize(block) as TextBlock;
+
+        // Assert - a single blank line between paragraphs is not collapsed
+        Assert.NotNull(sanitized);
+        Assert.Equal("First paragraph.\n\nSecond paragraph.", sanitized!.Content);
+    }
+
+    // Re-enabled (#178): prose mentioning a tool name ("list_directory tool") must survive, and
+    // runaway blank lines collapse to a single blank line while paragraph spacing is preserved.
+    [Fact]
     public void Should_Handle_Extreme_Whitespace_Like_User_Example()
     {
         // Arrange - simulate the exact user example with many empty lines
@@ -229,9 +295,10 @@ public class TextContentSanitizerTests
 
         // Assert
         Assert.NotNull(sanitized);
-        Assert.DoesNotContain("\n\n", sanitized.Content);
-        // Should be single-spaced
-        var expectedContent = "Conclude:\nAfter migrating all csproj files to .NET 10, I'd verify the results using the\nlist_directory tool to confirm the successful migration.\nClarify: The goal is to migrate existing .NET 10 csproj files.\nPlan:";
+        // The line that mentions the tool name in prose is preserved verbatim.
+        Assert.Contains("list_directory tool to confirm the successful migration.", sanitized!.Content);
+        // Runaway blank run collapses to a single blank line; paragraph spacing preserved.
+        var expectedContent = "Conclude:\nAfter migrating all csproj files to .NET 10, I'd verify the results using the\nlist_directory tool to confirm the successful migration.\n\nClarify: The goal is to migrate existing .NET 10 csproj files.\nPlan:";
         Assert.Equal(expectedContent, sanitized.Content);
     }
 

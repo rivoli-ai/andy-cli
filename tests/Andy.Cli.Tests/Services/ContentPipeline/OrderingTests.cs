@@ -21,7 +21,7 @@ public class OrderingTests
             new TextBlock("", "Empty ID", 100), // Edge case: empty string ID
             new TextBlock("123", "Numeric ID", 100), // Edge case: numeric string
         };
-        
+
         // Act - This should not throw
         Exception? caughtException = null;
         List<IContentBlock>? sorted = null;
@@ -36,7 +36,7 @@ public class OrderingTests
         {
             caughtException = ex;
         }
-        
+
         // Assert
         Assert.Null(caughtException);
         Assert.NotNull(sorted);
@@ -54,13 +54,13 @@ public class OrderingTests
             new { Id = "", Priority = 1 },
             new { Id = "xyz_456", Priority = 1 }
         };
-        
+
         // Act
         var sorted = items
             .OrderBy(x => x.Priority)
             .ThenBy(x => x.Id, StringComparer.Ordinal)
             .ToList();
-        
+
         // Assert
         Assert.Equal(3, sorted.Count(x => x.Priority == 1));
         Assert.Equal(1, sorted.Count(x => x.Priority == 2));
@@ -73,15 +73,15 @@ public class OrderingTests
         var processor = new MarkdownContentProcessor();
         var sanitizer = new TextContentSanitizer();
         var renderer = new TestRenderer();
-        
+
         using var pipeline = new Andy.Cli.Services.ContentPipeline.ContentPipeline(processor, sanitizer, renderer);
-        
+
         // Add various content types
         pipeline.AddRawContent("First text content");
         pipeline.AddSystemMessage("System message", SystemMessageType.Context);
         pipeline.AddRawContent("```csharp\ncode here\n```");
         pipeline.AddSystemMessage("Another system message", SystemMessageType.Info, 500);
-        
+
         // Act - Finalize should trigger ordering
         Exception? caughtException = null;
         try
@@ -92,16 +92,16 @@ public class OrderingTests
         {
             caughtException = ex;
         }
-        
+
         // Assert
         Assert.Null(caughtException);
         Assert.True(renderer.RenderedBlocks.Count > 0);
     }
-    
+
     private class TestRenderer : IContentRenderer
     {
         public List<IContentBlock> RenderedBlocks { get; } = new();
-        
+
         public void Render(IContentBlock block)
         {
             RenderedBlocks.Add(block);
