@@ -228,6 +228,15 @@ dotnet build -c Release
 dotnet clean
 ```
 
+### SDK and dependency policy
+
+The build is pinned to a .NET 8 SDK via `global.json`, restore is locked to
+committed `packages.lock.json` files, and the known-good Andy engine/TUI/package
+versions are recorded in [`dependency-manifest.json`](dependency-manifest.json).
+See [`docs/SDK_AND_DEPENDENCIES.md`](docs/SDK_AND_DEPENDENCIES.md) for the SDK
+band policy, how to update it, the CI SDK check (`scripts/assert-sdk-version.sh`),
+and the engine/TUI source-revision compatibility workflow.
+
 ## License
 
 See LICENSE file for details.

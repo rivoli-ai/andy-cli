@@ -7,6 +7,9 @@
     <LangVersion>latest</LangVersion>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
 
+    <!-- Reproducible restore: pin the package graph via packages.lock.json (see dependency-manifest.json). -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+
     <IsPackable>true</IsPackable>
     <PackageId>Andy.Cli.Headless.Contract</PackageId>
     <Version>2026.5.29-rc.1</Version>

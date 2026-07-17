@@ -54,6 +54,14 @@ public class HeadlessConfigSchemaTests
 
     private static JsonSchema LoadSchema() => s_schema.Value;
 
+    // Build a JsonArray via the classic params JsonNode?[] constructor. A bare
+    // new JsonArray(item) binds to System.Text.Json 9's params ReadOnlySpan<JsonNode?>
+    // overload, which is a C# 13 "params collections" call the pinned .NET 8 SDK
+    // compiler rejects (see global.json / dependency-manifest.json, issue #172).
+    // Passing an explicit array keeps overload resolution on the array overload so
+    // the suite compiles on the .NET 8 SDK and remains identical at runtime.
+    private static JsonArray JsonArrayOf(params JsonNode?[] items) => new JsonArray(items);
+
     private static JsonNode LoadJson(string path)
     {
         var text = File.ReadAllText(path);
@@ -143,7 +151,7 @@ public class HeadlessConfigSchemaTests
     {
         var schema = LoadSchema();
         var config = MinimalValidConfig();
-        config["tools"] = new JsonArray(
+        config["tools"] = JsonArrayOf(
             new JsonObject
             {
                 ["name"] = "issues.get",
@@ -160,13 +168,13 @@ public class HeadlessConfigSchemaTests
     {
         var schema = LoadSchema();
         var config = MinimalValidConfig();
-        config["tools"] = new JsonArray(
+        config["tools"] = JsonArrayOf(
             new JsonObject
             {
                 ["name"] = "tasks.list",
                 ["transport"] = "cli",
                 ["binary"] = "andy-tasks-cli",
-                ["command"] = new JsonArray("andy-tasks-cli", "list")
+                ["command"] = JsonArrayOf("andy-tasks-cli", "list")
             });
 
         var result = schema.Evaluate(ToElement(config));
@@ -178,7 +186,7 @@ public class HeadlessConfigSchemaTests
     {
         var schema = LoadSchema();
         var config = MinimalValidConfig();
-        config["tools"] = new JsonArray(
+        config["tools"] = JsonArrayOf(
             new JsonObject
             {
                 ["name"] = "weird.tool",
@@ -195,7 +203,7 @@ public class HeadlessConfigSchemaTests
     {
         var schema = LoadSchema();
         var config = MinimalValidConfig();
-        config["tools"] = new JsonArray(
+        config["tools"] = JsonArrayOf(
             new JsonObject
             {
                 ["name"] = "issues.get",
@@ -238,7 +246,7 @@ public class HeadlessConfigSchemaTests
         var config = MinimalValidConfig();
         config["permissions"] = new JsonObject
         {
-            ["allowed_tools"] = new JsonArray("write_file", "execute_command")
+            ["allowed_tools"] = JsonArrayOf("write_file", "execute_command")
         };
 
         var result = schema.Evaluate(ToElement(config));
@@ -263,7 +271,7 @@ public class HeadlessConfigSchemaTests
         var config = MinimalValidConfig();
         config["permissions"] = new JsonObject
         {
-            ["allowed_tools"] = new JsonArray("write_file"),
+            ["allowed_tools"] = JsonArrayOf("write_file"),
             ["bogus"] = true
         };
 
@@ -278,7 +286,7 @@ public class HeadlessConfigSchemaTests
         var config = MinimalValidConfig();
         config["permissions"] = new JsonObject
         {
-            ["allowed_tools"] = new JsonArray("Write_File")
+            ["allowed_tools"] = JsonArrayOf("Write_File")
         };
 
         var result = schema.Evaluate(ToElement(config));
@@ -357,7 +365,7 @@ public class HeadlessConfigSchemaTests
             ["provider"] = "anthropic",
             ["id"] = "claude-sonnet-4-6"
         },
-        ["tools"] = new JsonArray(),
+        ["tools"] = JsonArrayOf(),
         ["workspace"] = new JsonObject
         {
             ["root"] = "/workspace"

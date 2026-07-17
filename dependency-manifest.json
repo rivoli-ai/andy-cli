@@ -1,0 +1,56 @@
+{
+  "$comment": "Known-good dependency graph for andy-cli. Records the exact SDK band and Andy ecosystem package versions the CLI is verified against. Update this file in the same commit that bumps global.json or any Andy.* PackageReference in src/Andy.Cli/Andy.Cli.csproj. See docs/SDK_AND_DEPENDENCIES.md and issue #172.",
+  "schemaVersion": 1,
+  "updated": "2026-07-17",
+  "sdk": {
+    "channel": "8.0",
+    "minimumVersion": "8.0.0",
+    "rollForward": "latestMinor",
+    "allowPrerelease": false,
+    "policy": "The build must run on a .NET 8 SDK. global.json (version 8.0.0, rollForward latestMinor) accepts the highest installed 8.0.x SDK on any host and never rolls forward to 9.x; CI and local dev verify with scripts/assert-sdk-version.sh."
+  },
+  "targetFramework": "net8.0",
+  "engine": {
+    "Andy.Engine": "2026.6.21-rc.66"
+  },
+  "tui": {
+    "Andy.Tui": "2026.6.20-rc.64"
+  },
+  "codeIndex": {
+    "Andy.CodeIndex.Infrastructure": "2026.6.8-rc.3"
+  },
+  "permissions": {
+    "Andy.Permissions": "2026.6.21-rc.10"
+  },
+  "otherAndyPackages": {
+    "Andy.Acp.Core": "2025.11.18-rc.3",
+    "Andy.Llm": "2026.6.20-rc.42",
+    "Andy.MCP": "2026.4.26-rc.29",
+    "Andy.Model": "2026.6.20-rc.10",
+    "Andy.Tools": "2026.6.20-rc.77",
+    "Andy.Tools.Data": "2026.6.17-rc.75",
+    "Andy.Tools.Pdf": "2026.6.22-rc.1"
+  },
+  "sourceRevisionCompatibility": {
+    "$comment": "When building the CLI against sibling SOURCE repos instead of the pinned packages (see scripts/check-source-compat.sh), these are the branches/revisions the above package versions were cut from. CI cannot rely on these paths; they document the local composite-build workflow.",
+    "andy-engine": {
+      "repo": "rivoli-ai/andy-engine",
+      "localPath": "../andy-engine",
+      "packageVersion": "2026.6.21-rc.66"
+    },
+    "andy-tui2": {
+      "repo": "rivoli-ai/andy-tui2",
+      "localPath": "../andy-tui2",
+      "packageVersion": "2026.6.20-rc.64"
+    }
+  },
+  "reproducibleRestore": {
+    "lockFiles": [
+      "src/Andy.Cli/packages.lock.json",
+      "src/Andy.Cli.Headless.Contract/packages.lock.json",
+      "tests/Andy.Cli.Tests/packages.lock.json"
+    ],
+    "restoreCommand": "dotnet restore Andy.Cli.sln --locked-mode",
+    "policy": "RestorePackagesWithLockFile is enabled on every project. Release builds must restore with --locked-mode so the package graph is reproducible from the committed lock files."
+  }
+}
