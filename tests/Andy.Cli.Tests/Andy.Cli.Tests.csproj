@@ -122,6 +122,8 @@
     <Compile Include="Services/CliPermissionSessionBroadeningTests.cs" />
     <!-- ACP integration tests -->
     <Compile Include="ACP/AndyAgentProviderTests.cs" />
+    <Compile Include="ACP/AndySessionRegistryTests.cs" />
+    <Compile Include="ACP/AcpServerMetadataTests.cs" />
     <!-- Multi-turn conversation context tests -->
     <Compile Include="Integration/MultiTurnToolCallContextTests.cs" />
     <!-- Bash tool (execute_command) integration tests -->

@@ -1,0 +1,173 @@
+using System;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Andy.Cli.ACP;
+using Xunit;
+
+namespace Andy.Cli.Tests.ACP;
+
+/// <summary>
+/// Tests for the ACP session lifecycle manager: bounded retention, LRU
+/// eviction, disposal, and per-session cancellation.
+/// </summary>
+public class AndySessionRegistryTests
+{
+    private static AcpSessionEntry NewEntry(string id) => new(id, agent: null, mode: "assistant", model: "andy-cli");
+
+    [Fact]
+    public void Add_And_TryGet_RoundTrips()
+    {
+        using var registry = new AndySessionRegistry();
+        var entry = NewEntry("s1");
+
+        registry.Add(entry);
+
+        Assert.True(registry.TryGet("s1", out var found));
+        Assert.Same(entry, found);
+        Assert.Equal(1, registry.Count);
+    }
+
+    [Fact]
+    public void TryGet_ReturnsFalse_ForUnknownSession()
+    {
+        using var registry = new AndySessionRegistry();
+        Assert.False(registry.TryGet("missing", out _));
+    }
+
+    [Fact]
+    public void Constructor_Rejects_NonPositiveCap()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new AndySessionRegistry(maxSessions: 0));
+    }
+
+    [Fact]
+    public void Add_EvictsAndDisposes_LeastRecentlyUsed_WhenCapExceeded()
+    {
+        using var registry = new AndySessionRegistry(maxSessions: 2);
+        var a = NewEntry("a");
+        var b = NewEntry("b");
+
+        registry.Add(a);
+        Thread.Sleep(5);
+        registry.Add(b);
+
+        // Touch "b" so "a" becomes the least-recently-used.
+        Thread.Sleep(5);
+        Assert.True(registry.TryGet("b", out _));
+
+        var c = NewEntry("c");
+        registry.Add(c);
+
+        Assert.Equal(2, registry.Count);
+        Assert.False(registry.TryGet("a", out _));
+        Assert.True(a.IsDisposed);
+        Assert.True(registry.TryGet("b", out _));
+        Assert.True(registry.TryGet("c", out _));
+    }
+
+    [Fact]
+    public void Add_SameId_DoesNotEvict()
+    {
+        using var registry = new AndySessionRegistry(maxSessions: 1);
+        var a = NewEntry("a");
+        registry.Add(a);
+
+        var a2 = NewEntry("a");
+        registry.Add(a2); // replace same id, must not evict anything else
+
+        Assert.Equal(1, registry.Count);
+        Assert.True(registry.TryGet("a", out var found));
+        Assert.Same(a2, found);
+    }
+
+    [Fact]
+    public void Remove_DisposesEntry()
+    {
+        using var registry = new AndySessionRegistry();
+        var entry = NewEntry("s1");
+        registry.Add(entry);
+
+        Assert.True(registry.Remove("s1"));
+        Assert.True(entry.IsDisposed);
+        Assert.False(registry.TryGet("s1", out _));
+        Assert.False(registry.Remove("s1"));
+    }
+
+    [Fact]
+    public void Dispose_DisposesAllRetainedSessions()
+    {
+        var registry = new AndySessionRegistry();
+        var a = NewEntry("a");
+        var b = NewEntry("b");
+        registry.Add(a);
+        registry.Add(b);
+
+        registry.Dispose();
+
+        Assert.True(a.IsDisposed);
+        Assert.True(b.IsDisposed);
+    }
+
+    [Fact]
+    public void Entry_CancelActivePrompt_CancelsLinkedToken()
+    {
+        var entry = NewEntry("s1");
+        var token = entry.BeginPrompt(CancellationToken.None);
+
+        Assert.False(token.IsCancellationRequested);
+        Assert.True(entry.CancelActivePrompt());
+        Assert.True(token.IsCancellationRequested);
+    }
+
+    [Fact]
+    public void Entry_ExternalCancellation_PropagatesToLinkedToken()
+    {
+        var entry = NewEntry("s1");
+        using var external = new CancellationTokenSource();
+        var token = entry.BeginPrompt(external.Token);
+
+        external.Cancel();
+
+        Assert.True(token.IsCancellationRequested);
+    }
+
+    [Fact]
+    public void Entry_CancelActivePrompt_ReturnsFalse_WhenNoActivePrompt()
+    {
+        var entry = NewEntry("s1");
+        Assert.False(entry.CancelActivePrompt());
+    }
+
+    [Fact]
+    public void Entry_Dispose_CancelsActivePrompt()
+    {
+        var entry = NewEntry("s1");
+        var token = entry.BeginPrompt(CancellationToken.None);
+
+        entry.Dispose();
+
+        Assert.True(token.IsCancellationRequested);
+        Assert.True(entry.IsDisposed);
+    }
+
+    [Fact]
+    public async Task Registry_IsolatesConcurrentSessions()
+    {
+        using var registry = new AndySessionRegistry(maxSessions: 100);
+
+        var tasks = Enumerable.Range(0, 20).Select(i => Task.Run(() =>
+        {
+            var entry = NewEntry($"s{i}");
+            registry.Add(entry);
+        })).ToArray();
+
+        await Task.WhenAll(tasks);
+
+        Assert.Equal(20, registry.Count);
+        for (int i = 0; i < 20; i++)
+        {
+            Assert.True(registry.TryGet($"s{i}", out _));
+        }
+    }
+}

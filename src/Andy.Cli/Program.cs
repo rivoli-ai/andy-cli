@@ -2047,20 +2047,25 @@ class Program
 
             var toolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
 
-            // Create the Andy agent provider
-            var agentProvider = new Andy.Cli.ACP.AndyAgentProvider(
+            // Create the Andy agent provider. Passing the logger factory lets it
+            // build a proper typed logger for each engine agent, and the provider
+            // is disposed on shutdown so all retained sessions are cleaned up.
+            using var agentProvider = new Andy.Cli.ACP.AndyAgentProvider(
                 llmProvider,
                 toolRegistry,
                 toolExecutor,
-                loggerFactory.CreateLogger<Andy.Cli.ACP.AndyAgentProvider>());
+                loggerFactory.CreateLogger<Andy.Cli.ACP.AndyAgentProvider>(),
+                loggerFactory,
+                defaultModel: currentProvider);
 
             logger.LogInformation("Andy agent provider initialized");
 
-            // Create server info
+            // Derive server metadata from the running assembly so the advertised
+            // name/version cannot drift from the packaged CLI build.
             var serverInfo = new Andy.Acp.Core.Protocol.ServerInfo
             {
-                Name = "Andy.CLI",
-                Version = "1.0.0",
+                Name = Andy.Cli.ACP.AcpServerMetadata.GetName(),
+                Version = Andy.Cli.ACP.AcpServerMetadata.GetVersion(),
                 Description = "Andy CLI - AI-powered command line assistant"
             };
 
