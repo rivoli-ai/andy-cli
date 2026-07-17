@@ -15,10 +15,22 @@ namespace Andy.Cli.Services.ContentPipeline;
 /// </summary>
 public class TextContentSanitizer : IContentSanitizer
 {
-    // <tool_call>...</tool_call> and close variants (Qwen and similar emit these).
-    private static readonly Regex ToolCallTagPattern = new(
-        @"<\s*(tool_call|tool_code|tool_use|function_call)\s*>.*?<\s*/\s*\1\s*>",
-        RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    // Opening tool-call markers (Qwen and similar emit these): <tool_call>, <tool_use>, etc.
+    private static readonly Regex ToolCallOpenTag = new(
+        @"<\s*(tool_call|tool_code|tool_use|function_call)\s*>",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    // Closing tool-call markers: </tool_call>, </tool_use>, etc.
+    private static readonly Regex ToolCallCloseTag = new(
+        @"<\s*/\s*(tool_call|tool_code|tool_use|function_call)\s*>",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    // Cross-block streaming state: when a stream splits a <tool_call> ... </tool_call> across
+    // blocks, the opening marker arrives in one block and the close in a later one. This holds
+    // the name of an open (not-yet-closed) tool-call tag so its body is suppressed until the
+    // matching close arrives, instead of leaking a raw protocol fragment to the user. Only ever
+    // touched by the single pipeline consumer thread, and the sanitizer is created per request.
+    private string? _openToolCallTag;
 
     // Fenced blocks whose info string marks them as a tool-call protocol block, e.g.
     // ```tool_call\n{...}\n```  -- removed whole. Ordinary ```json / ```csharp prose is kept.
@@ -87,15 +99,19 @@ public class TextContentSanitizer : IContentSanitizer
     }
 
     /// <summary>
-    /// Removes only confirmed protocol/tool-call artifacts: tool-call XML tags, fenced
-    /// tool-call blocks, and standalone JSON tool-call envelopes. Prose that merely mentions
-    /// a tool name or the words "tool call" is left completely intact.
+    /// Removes only confirmed protocol/tool-call artifacts: tool-call XML tags (including ones
+    /// split across streamed blocks), fenced tool-call blocks, and standalone JSON tool-call
+    /// envelopes. Prose that merely mentions a tool name or the words "tool call" is left
+    /// completely intact.
     /// </summary>
-    private static string RemoveToolCallArtifacts(string content)
+    private string RemoveToolCallArtifacts(string content)
     {
+        // Tag handling runs even for empty content so a mid-tool-call streaming state can be
+        // observed/advanced (an empty chunk inside an open tag stays suppressed).
+        content = RemoveToolCallTags(content ?? "");
+
         if (string.IsNullOrEmpty(content)) return content;
 
-        content = ToolCallTagPattern.Replace(content, "");
         content = ToolCallFencePattern.Replace(content, "");
         content = StripJsonToolCallEnvelopes(content);
 
@@ -103,11 +119,99 @@ public class TextContentSanitizer : IContentSanitizer
     }
 
     /// <summary>
-    /// Scans for balanced top-level JSON objects and removes only those that are structurally
-    /// tool-call envelopes: an object carrying a "tool_call"/"tool_calls" key, or both a
-    /// name-like key ("name"/"tool"/"function") and an argument-like key
-    /// ("arguments"/"parameters"/"args"). Objects that do not match are left untouched, so
-    /// ordinary JSON examples and prose survive.
+    /// Removes tool-call XML tags and their bodies, handling both complete tags within a single
+    /// block and tags split across streamed blocks. When an opening marker has no matching close
+    /// in the same block, the remainder is suppressed and <see cref="_openToolCallTag"/> is set
+    /// so the continuation (up to the eventual close) is suppressed in later blocks too. This
+    /// guarantees a real streamed tool call never renders literally, even mid-split.
+    /// </summary>
+    private string RemoveToolCallTags(string content)
+    {
+        if (content.Length == 0)
+        {
+            // Nothing to scan; preserve any open-tag streaming state as-is.
+            return content;
+        }
+
+        var sb = new StringBuilder(content.Length);
+        var i = 0;
+        while (i < content.Length)
+        {
+            if (_openToolCallTag != null)
+            {
+                // Inside an open tool call from a previous block: drop everything up to and
+                // including the matching close, if it appears in this block.
+                var close = FindCloseTag(content, i, _openToolCallTag);
+                if (close != null)
+                {
+                    _openToolCallTag = null;
+                    i = close.Index + close.Length;
+                    continue;
+                }
+
+                // Still no close: the rest of this block belongs to the tool call. Drop it.
+                break;
+            }
+
+            var open = ToolCallOpenTag.Match(content, i);
+            if (!open.Success)
+            {
+                sb.Append(content, i, content.Length - i);
+                break;
+            }
+
+            // Keep the prose that precedes the opening marker.
+            sb.Append(content, i, open.Index - i);
+
+            var name = open.Groups[1].Value;
+            var closeMatch = FindCloseTag(content, open.Index + open.Length, name);
+            if (closeMatch != null)
+            {
+                // Complete tag within this block: drop the whole span.
+                i = closeMatch.Index + closeMatch.Length;
+            }
+            else
+            {
+                // Streaming split: opening marker with no close here. Drop the remainder and
+                // remember we are inside a tool call so later blocks stay suppressed.
+                _openToolCallTag = name;
+                break;
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Finds the first closing tool-call marker at or after <paramref name="start"/> whose tag
+    /// name matches <paramref name="name"/> (case-insensitive). Returns null if none is present.
+    /// </summary>
+    private static Match? FindCloseTag(string content, int start, string name)
+    {
+        if (start > content.Length) return null;
+        var m = ToolCallCloseTag.Match(content, start);
+        while (m.Success)
+        {
+            if (string.Equals(m.Groups[1].Value, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return m;
+            }
+            m = m.NextMatch();
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Scans for balanced JSON objects and removes only those that are tool-call protocol
+    /// envelopes. Removed wherever they appear: an explicit "tool_call"/"tool_calls" container,
+    /// and the concrete invocation shape (a name-like key plus literal "arguments"/"args").
+    /// Removed only when standalone on their own line: the ambiguous name+"parameters" shape
+    /// (which is also a function-schema definition a user may discuss) and bare "tool"/"function"
+    /// markers. Everything else - including inline JSON in a sentence - is preserved.
+    ///
+    /// Scanning is robust to stray/unbalanced braces in prose: an unbalanced '{' is emitted
+    /// literally and scanning continues, so it neither eats the surrounding prose nor prevents a
+    /// genuine later envelope from being stripped.
     /// </summary>
     private static string StripJsonToolCallEnvelopes(string content)
     {
@@ -128,25 +232,95 @@ public class TextContentSanitizer : IContentSanitizer
             var end = FindMatchingBrace(content, i);
             if (end < 0)
             {
-                // Unbalanced - copy the rest verbatim and stop scanning.
-                result.Append(content, i, content.Length - i);
-                break;
+                // Unbalanced stray '{' (typically in prose): emit it literally and keep scanning
+                // so a genuine envelope later in the text is still detected and stripped.
+                result.Append(c);
+                i++;
+                continue;
             }
 
             var candidate = content.Substring(i, end - i + 1);
-            if (LooksLikeToolCallEnvelope(candidate))
-            {
-                // Skip (remove) the envelope entirely.
-                i = end + 1;
-            }
-            else
+            var kind = ClassifyEnvelope(candidate);
+            var strip = kind == EnvelopeKind.Definitive
+                || (kind == EnvelopeKind.Marker && IsStandaloneSpan(content, i, end));
+
+            if (!strip)
             {
                 result.Append(candidate);
                 i = end + 1;
+                continue;
             }
+
+            RemoveEnvelopeSpan(result, content, ref i, end);
         }
 
         return result.ToString();
+    }
+
+    /// <summary>
+    /// Removes the envelope occupying content[start..end] and collapses the whitespace it leaves
+    /// behind: an envelope alone on its line takes the whole line (no blank line remains); an
+    /// inline envelope between words collapses to a single separating space.
+    /// </summary>
+    private static void RemoveEnvelopeSpan(StringBuilder result, string content, ref int i, int end)
+    {
+        var hadLeftSpace = result.Length > 0 && IsHorizontalWs(result[result.Length - 1]);
+
+        // Drop any horizontal indentation already emitted for this span's line.
+        while (result.Length > 0 && IsHorizontalWs(result[result.Length - 1]))
+        {
+            result.Length--;
+        }
+        var leftIsLineStart = result.Length == 0 || result[result.Length - 1] == '\n';
+
+        var j = end + 1;
+        var hadRightSpace = j < content.Length && IsHorizontalWs(content[j]);
+        while (j < content.Length && IsHorizontalWs(content[j]))
+        {
+            j++;
+        }
+        var rightIsLineEnd = j >= content.Length || content[j] == '\n';
+
+        if (leftIsLineStart && rightIsLineEnd)
+        {
+            // Envelope occupied its own line: consume one trailing newline so no blank line is
+            // left behind.
+            if (j < content.Length && content[j] == '\n')
+            {
+                j++;
+            }
+        }
+        else if (hadLeftSpace || hadRightSpace)
+        {
+            // Inline removal between words: keep exactly one separating space.
+            if (result.Length > 0 && result[result.Length - 1] != '\n' &&
+                j < content.Length && content[j] != '\n')
+            {
+                result.Append(' ');
+            }
+        }
+
+        i = j;
+    }
+
+    private static bool IsHorizontalWs(char c) => c == ' ' || c == '\t';
+
+    /// <summary>
+    /// True when the span content[start..end] is alone on its line(s): only horizontal
+    /// whitespace separates it from a line boundary (start/end of content or a newline) on both
+    /// sides.
+    /// </summary>
+    private static bool IsStandaloneSpan(string s, int start, int end)
+    {
+        var l = start - 1;
+        while (l >= 0 && IsHorizontalWs(s[l])) l--;
+        var leftOk = l < 0 || s[l] == '\n';
+
+        var r = end + 1;
+        while (r < s.Length && IsHorizontalWs(s[r])) r++;
+        var rightOk = r >= s.Length || s[r] == '\n';
+
+        return leftOk && rightOk;
     }
 
     private static int FindMatchingBrace(string s, int start)
@@ -181,21 +355,65 @@ public class TextContentSanitizer : IContentSanitizer
         return -1;
     }
 
-    private static bool LooksLikeToolCallEnvelope(string json)
+    private enum EnvelopeKind
     {
-        // Only the top-level keys of the object matter. Match keys followed by a colon so we
-        // do not trip on the same word appearing as a value or inside prose.
+        /// <summary>Not a tool-call envelope; always preserved.</summary>
+        None,
+
+        /// <summary>
+        /// Unambiguous protocol envelope (explicit tool_call/tool_calls key). Always removed,
+        /// wherever it appears.
+        /// </summary>
+        Definitive,
+
+        /// <summary>
+        /// Has the call SHAPE (name-like + args-like, or a bare tool/function marker) but no
+        /// definitive key. Removed only when it stands alone on its own line.
+        /// </summary>
+        Marker
+    }
+
+    private static EnvelopeKind ClassifyEnvelope(string json)
+    {
+        // Match keys followed by a colon so we do not trip on the same word appearing as a
+        // value or inside prose.
         bool HasKey(string key) =>
             Regex.IsMatch(json, "\"" + Regex.Escape(key) + "\"\\s*:", RegexOptions.IgnoreCase);
 
+        // Explicit tool-call protocol container: an unambiguous artifact regardless of context.
         if (HasKey("tool_call") || HasKey("tool_calls"))
         {
-            return true;
+            return EnvelopeKind.Definitive;
         }
 
         var hasName = HasKey("name") || HasKey("tool") || HasKey("function");
-        var hasArgs = HasKey("arguments") || HasKey("parameters") || HasKey("args");
-        return hasName && hasArgs;
+
+        // Concrete invocation shape: a name-like key plus literal argument VALUES
+        // ("arguments"/"args"). This is the runtime tool-call payload that leaks into output, so
+        // it is stripped wherever it appears (inline or standalone).
+        if (hasName && (HasKey("arguments") || HasKey("args")))
+        {
+            return EnvelopeKind.Definitive;
+        }
+
+        // Ambiguous call shape: a name-like key plus a "parameters" object. That is ALSO how a
+        // function/tool is DEFINED in a JSON schema (which a user may legitimately paste and ask
+        // about), so it is only stripped when it stands alone on its own line - never inside a
+        // sentence.
+        if (hasName && HasKey("parameters"))
+        {
+            return EnvelopeKind.Marker;
+        }
+
+        // Bare protocol marker: a lone tool/function identifier with no args (e.g.
+        // {"tool":"read_file"}). Old sanitizers removed these; keep removing them, but only when
+        // they stand alone so a JSON literal discussed in prose is never touched.
+        if (HasKey("tool") || HasKey("function"))
+        {
+            return EnvelopeKind.Marker;
+        }
+
+        return EnvelopeKind.None;
     }
 
     private CodeBlock SanitizeCodeBlock(CodeBlock block)

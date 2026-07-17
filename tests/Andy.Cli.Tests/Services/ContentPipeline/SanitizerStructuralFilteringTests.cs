@@ -138,4 +138,117 @@ public class SanitizerStructuralFilteringTests
         Assert.True(result!.IsComplete);
         Assert.Equal("var x = 5;", result.Code);
     }
+
+    // ---- Review fixes for #178 ----
+
+    // Fix 1: a <tool_call> ... </tool_call> tag split across two streamed blocks must never leak
+    // its raw protocol tag or JSON fragment. The same sanitizer instance processes both blocks in
+    // arrival order (as the pipeline's single consumer does).
+    [Fact]
+    public void Streaming_Split_Tool_Call_Tag_Does_Not_Leak_Across_Blocks()
+    {
+        var block1 = "Let me help you.\n<tool_call>\n{\"name\": \"read_file\", \"argum";
+        var block2 = "ents\": {\"path\": \"a.txt\"}}\n</tool_call>\nAll done.";
+
+        var out1 = SanitizeText(block1);
+        var out2 = SanitizeText(block2);
+
+        // The opening marker and the partial JSON are suppressed in the first block.
+        Assert.Equal("Let me help you.", out1);
+        Assert.DoesNotContain("tool_call", out1);
+        Assert.DoesNotContain("read_file", out1);
+
+        // The continuation up to the close marker is suppressed; only the trailing prose renders.
+        Assert.Equal("All done.", out2);
+        Assert.DoesNotContain("tool_call", out2);
+        Assert.DoesNotContain("arguments", out2);
+        Assert.DoesNotContain("path", out2);
+    }
+
+    // Fix 1: a tool call whose body spans a middle block (no markers at all in that block) stays
+    // suppressed until the close arrives.
+    [Fact]
+    public void Streaming_Tool_Call_Body_Spanning_Three_Blocks_Is_Suppressed()
+    {
+        Assert.Equal("Start.", SanitizeText("Start.<tool_call>{\"name\": \"x\","));
+        Assert.Equal("", SanitizeText("\"arguments\": {\"a\": 1,"));
+        Assert.Equal("End.", SanitizeText("\"b\": 2}}</tool_call>End."));
+    }
+
+    // Fix 2: an inline function-schema JSON literal (name + "parameters") that a user is asking
+    // about is preserved exactly - it is not a concrete invocation.
+    [Fact]
+    public void Preserves_Inline_Function_Schema_Json_In_Prose()
+    {
+        var input = "The schema is {\"name\": \"get_weather\", \"parameters\": {\"location\": \"string\"}} for reference.";
+        Assert.Equal(input, SanitizeText(input));
+    }
+
+    // Fix 2/3: a stray UNBALANCED '{' in prose before a genuine envelope must neither eat the
+    // prose nor stop the later envelope from being stripped.
+    [Fact]
+    public void Unbalanced_Brace_In_Prose_Preserved_And_Later_Envelope_Stripped()
+    {
+        var input = "Use { here and {\"tool_call\": {\"name\": \"x\"}} done.";
+        Assert.Equal("Use { here and done.", SanitizeText(input));
+    }
+
+    // Fix 3: a balanced but non-envelope brace span in prose is preserved while a later real
+    // envelope is stripped.
+    [Fact]
+    public void Stray_Balanced_Braces_Preserved_And_Later_Envelope_Stripped()
+    {
+        var input = "Use {braces} and {\"tool_call\": {\"name\": \"x\"}} here.";
+        Assert.Equal("Use {braces} and here.", SanitizeText(input));
+    }
+
+    // Fix 4: a bare single-key tool marker (no arguments) is a protocol artifact and is stripped
+    // when it stands alone on its own line.
+    [Fact]
+    public void Strips_Standalone_Bare_Tool_Marker()
+    {
+        var input = "Result:\n{\"tool\": \"read_file\"}\nDone.";
+        Assert.Equal("Result:\nDone.", SanitizeText(input));
+    }
+
+    [Fact]
+    public void Strips_Standalone_Bare_Function_Marker()
+    {
+        var input = "Result:\n{\"function\": \"x\"}\nDone.";
+        Assert.Equal("Result:\nDone.", SanitizeText(input));
+    }
+
+    // Fix 4: the SAME bare marker inside a sentence is preserved (it may be JSON a user discusses).
+    [Fact]
+    public void Preserves_Inline_Bare_Tool_Marker_In_Prose()
+    {
+        var input = "The object {\"tool\": \"read_file\"} is what we send.";
+        Assert.Equal(input, SanitizeText(input));
+    }
+
+    // Fix 5: removing a standalone envelope leaves no blank line behind.
+    [Fact]
+    public void Standalone_Envelope_Removal_Leaves_No_Blank_Line()
+    {
+        var input = "Here:\n{\"tool_call\": {\"name\": \"x\", \"arguments\": {}}}\nThere.";
+        Assert.Equal("Here:\nThere.", SanitizeText(input));
+    }
+
+    // Fix 5: removing an inline envelope collapses the surrounding whitespace to a single space,
+    // not a double space.
+    [Fact]
+    public void Inline_Envelope_Removal_Collapses_To_Single_Space()
+    {
+        var input = "Working on it. {\"name\": \"execute_command\", \"arguments\": {\"command\": \"ls\"}} Done.";
+        Assert.Equal("Working on it. Done.", SanitizeText(input));
+    }
+
+    // Fix 3: a genuine envelope is still stripped even when a truly-unbalanced earlier '{' would
+    // previously have caused the scanner to bail out and leak it.
+    [Fact]
+    public void Standalone_Parameters_Invocation_Is_Stripped()
+    {
+        var input = "Plan:\n{\"tool\": \"format_text\", \"parameters\": {\"op\": \"sort\"}}\nContinuing.";
+        Assert.Equal("Plan:\nContinuing.", SanitizeText(input));
+    }
 }

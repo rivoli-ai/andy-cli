@@ -167,8 +167,9 @@ public class ContentPipeline : IDisposable, IAsyncDisposable
 
     private async Task ProcessQueueAsync()
     {
-        // Capture the token up front so a concurrent sync Dispose() that disposes the
-        // CancellationTokenSource can never race our access to it.
+        // Capture the token once for the lifetime of the loop. Disposal never disposes the
+        // CancellationTokenSource until this loop has completed (see Dispose/DisposeAsync), so
+        // the token is never accessed after its source is disposed.
         var cancellationToken = _cancellationTokenSource.Token;
         try
         {
@@ -187,6 +188,11 @@ public class ContentPipeline : IDisposable, IAsyncDisposable
         catch (OperationCanceledException)
         {
             // Cancellation (disposal) - stop promptly; finalization is not expected in this path.
+        }
+        catch (ObjectDisposedException)
+        {
+            // Benign shutdown race: the CancellationTokenSource was disposed as the loop wound
+            // down. Treat like cancellation - stop quietly, do not error-log.
         }
         catch (Exception ex)
         {
@@ -287,8 +293,14 @@ public class ContentPipeline : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Synchronous disposal: signals cancellation and releases resources without blocking
-    /// on the background task. Prefer <see cref="DisposeAsync"/> when an await is available.
+    /// Synchronous disposal: signals cancellation and releases resources without blocking on the
+    /// background task. Non-throwing and non-error-logging by design.
+    ///
+    /// The CancellationTokenSource is disposed only AFTER the consumer loop has completed, never
+    /// eagerly: a consumer parked in WaitToReadAsync(token) would otherwise observe a disposed
+    /// source and throw ObjectDisposedException. We hand disposal to a continuation on the
+    /// processing-completion signal so the calling (UI) thread is never blocked. Prefer
+    /// <see cref="DisposeAsync"/> when an await is available.
     /// </summary>
     public void Dispose()
     {
@@ -298,7 +310,32 @@ public class ContentPipeline : IDisposable, IAsyncDisposable
         }
 
         _channel.Writer.TryComplete();
-        _cancellationTokenSource.Cancel();
-        _cancellationTokenSource.Dispose();
+
+        try
+        {
+            _cancellationTokenSource.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Already disposed elsewhere - nothing to do.
+        }
+
+        // Dispose the CTS only once the consumer has stopped using its token.
+        _processingCompletion.Task.ContinueWith(
+            static (_, state) =>
+            {
+                try
+                {
+                    ((CancellationTokenSource)state!).Dispose();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Already disposed (e.g. by a concurrent DisposeAsync) - benign.
+                }
+            },
+            _cancellationTokenSource,
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 }

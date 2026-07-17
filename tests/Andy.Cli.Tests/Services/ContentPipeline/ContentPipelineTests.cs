@@ -182,6 +182,43 @@ Final text";
         // Act & Assert - disposing after finalize must not throw
         await _pipeline.DisposeAsync();
     }
+
+    // Review fix (#178): synchronous Dispose while the consumer is parked in WaitToReadAsync must
+    // not log an error. Previously the CancellationTokenSource was disposed eagerly, so the parked
+    // consumer could observe a disposed source, throw ObjectDisposedException, hit the generic
+    // catch, and log a spurious error on every sync disposal.
+    [Fact]
+    public async Task Should_Dispose_Sync_Without_Logging_Error()
+    {
+        // Arrange - queue work so the consumer is actively running, then dispose synchronously.
+        _pipeline.AddRawContent("Some streamed content");
+
+        // Act
+        _pipeline.Dispose();
+
+        // Give the background consumer time to observe cancellation and run the deferred CTS
+        // disposal continuation.
+        await Task.Delay(250);
+
+        // Assert - no error was logged during disposal.
+        _mockLogger.Verify(
+            x => x.Log(
+                LogLevel.Error,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception>(),
+                (Func<It.IsAnyType, Exception?, string>)It.IsAny<object>()),
+            Times.Never);
+    }
+
+    // Review fix (#178): repeated/mixed disposal is idempotent and never throws.
+    [Fact]
+    public async Task Should_Allow_Repeated_Disposal()
+    {
+        _pipeline.Dispose();
+        _pipeline.Dispose();
+        await _pipeline.DisposeAsync();
+    }
 }
 
 // MarkdownContentProcessorTests live in Services/MarkdownContentProcessorTests.cs (kept there to
