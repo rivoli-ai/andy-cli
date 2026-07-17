@@ -137,10 +137,15 @@ public sealed class ExecuteCommandToolIntegrationTests
         using var sp = BuildProvider(prompt);
         var exec = new UiUpdatingToolExecutor(sp.GetRequiredService<IToolExecutor>());
 
-        // Use a distinct neutral command from the one Neutral_command_is_blocked... asserts on.
-        // Session-scoped consent is remembered in a process-static store that outlives the DI
-        // provider, so sharing "dotnet --version" would let this test's session grant leak into the
-        // other test and make its "blocked without a rule" assertion order-dependent (#170).
+        // Root cause: session-scoped consent is remembered in a PROCESS-STATIC store that outlives the
+        // per-test DI provider and is never reset between tests. If this test used the same command as
+        // Neutral_command_is_blocked_without_a_rule_then_allowed_when_injected ("dotnet --version"), the
+        // session grant established here would leak into that test and make its "blocked without a rule"
+        // assertion pass or fail depending on test execution order (#170).
+        //
+        // The proper fix is a harness change that resets the process-static session-consent store
+        // between tests; until that lands, this workaround simply uses a DISTINCT neutral command
+        // ("dotnet --info") so the two tests cannot cross-contaminate through the shared static store.
         var first = await exec.ExecuteAsync("execute_command", Cmd("dotnet --info"), new ToolExecutionContext());
         var (ok1, _, stdout1, err1) = Read(first);
         Assert.True(ok1, err1);                 // ran after the user allowed (this is what was failing live)

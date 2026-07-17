@@ -7,10 +7,16 @@ namespace Andy.Cli.Tests.Widgets;
 
 public class ToolExecutionTraceTests
 {
-    // AddToolExecutionStart appends a trailing SpacerItem after each tool (visual separation), so the
-    // feed holds more than one item per tool. These tests assert on the RunningToolItem entries only.
+    // AddToolExecutionStart appends exactly one RunningToolItem followed by exactly one trailing
+    // SpacerItem (visual separation). The assertions below pin the EXACT feed-item sequence rather
+    // than filtering, so any stray or duplicate item beyond the expected spacer fails the test and a
+    // feed-bloat regression cannot slip through.
+    private static IReadOnlyList<IFeedItem> Items(FeedView feed) => feed.GetItemsForTesting();
+
+    private static bool IsRunningTool(IFeedItem item) => item.GetType().Name == "RunningToolItem";
+
     private static List<IFeedItem> RunningTools(FeedView feed)
-        => feed.GetItemsForTesting().Where(i => i.GetType().Name == "RunningToolItem").ToList();
+        => feed.GetItemsForTesting().Where(IsRunningTool).ToList();
 
     [Fact]
     public void AddToolExecutionStart_WithParameters_CreatesRunningToolItem()
@@ -26,9 +32,10 @@ public class ToolExecutionTraceTests
         // Act
         feedView.AddToolExecutionStart("read_file", "Read File", parameters);
 
-        // Assert
-        var runningTools = RunningTools(feedView);
-        Assert.Single(runningTools);
+        // Assert - exactly one RunningToolItem plus exactly one trailing SpacerItem, nothing else.
+        Assert.Collection(Items(feedView),
+            item => Assert.True(IsRunningTool(item)),
+            item => Assert.IsType<SpacerItem>(item));
     }
 
     [Fact]
@@ -38,13 +45,14 @@ public class ToolExecutionTraceTests
         var feedView = new FeedView();
         feedView.AddToolExecutionStart("bash_command", "Bash Command");
 
-        // Act
+        // Act - details update the existing RunningToolItem in place; they must not append items.
         feedView.AddToolExecutionDetail("bash_command", "Executing: ls -la");
         feedView.AddToolExecutionDetail("bash_command", "Found 10 files");
 
-        // Assert
-        var runningTools = RunningTools(feedView);
-        Assert.Single(runningTools);
+        // Assert - still exactly one RunningToolItem plus exactly one trailing SpacerItem.
+        Assert.Collection(Items(feedView),
+            item => Assert.True(IsRunningTool(item)),
+            item => Assert.IsType<SpacerItem>(item));
     }
 
     [Fact]
@@ -54,13 +62,15 @@ public class ToolExecutionTraceTests
         var feedView = new FeedView();
         feedView.AddToolExecutionStart("update_file", "Update File");
 
-        // Act
+        // Act - completion updates the existing RunningToolItem in place; it must not append items.
         feedView.AddToolExecutionComplete("update_file", true, "1.5s", "Updated 5 lines");
 
-        // Assert
-        var runningTools = RunningTools(feedView);
-        Assert.Single(runningTools);
-        var runningTool = runningTools[0];
+        // Assert - exactly one RunningToolItem plus exactly one trailing SpacerItem.
+        Assert.Collection(Items(feedView),
+            item => Assert.True(IsRunningTool(item)),
+            item => Assert.IsType<SpacerItem>(item));
+
+        var runningTool = RunningTools(feedView)[0];
         var isCompleteProperty = runningTool.GetType().GetProperty("IsComplete");
         Assert.NotNull(isCompleteProperty);
         Assert.True((bool)isCompleteProperty.GetValue(runningTool)!);
@@ -84,12 +94,15 @@ public class ToolExecutionTraceTests
         feedView.AddToolExecutionComplete("tool2", true, "0.8s");
         feedView.AddToolExecutionComplete("tool1", false, "1.2s", "Error occurred");
 
-        // Assert
-        var runningTools = RunningTools(feedView);
-        Assert.Equal(2, runningTools.Count);
+        // Assert - exactly two tools, each followed by exactly one SpacerItem, in start order.
+        Assert.Collection(Items(feedView),
+            item => Assert.True(IsRunningTool(item)),
+            item => Assert.IsType<SpacerItem>(item),
+            item => Assert.True(IsRunningTool(item)),
+            item => Assert.IsType<SpacerItem>(item));
 
         // Both should be complete
-        foreach (var item in runningTools)
+        foreach (var item in RunningTools(feedView))
         {
             var isCompleteProperty = item.GetType().GetProperty("IsComplete");
             Assert.NotNull(isCompleteProperty);

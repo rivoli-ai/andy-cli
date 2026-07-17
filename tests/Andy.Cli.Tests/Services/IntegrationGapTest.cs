@@ -10,12 +10,13 @@ namespace Andy.Cli.Tests.Services;
 /// </summary>
 public class IntegrationGapTest
 {
-    // TODO(#170): With the current ContentPipeline, a long run of blank lines causes the text that
-    // follows it ("Now that we have the initial results...") to be dropped from the rendered output
-    // instead of collapsed to a single newline. That looks like real content loss and should be
-    // triaged as its own bug rather than papered over here. The sibling mixed-content test (which does
-    // not hit this pattern) runs. Quarantined pending a dedicated content-pipeline investigation.
-    [Fact(Skip = "#170: ContentPipeline drops content after a long blank-line run; needs a separate bug")]
+    // With the current ContentPipeline, a long run of blank lines causes the text that follows it
+    // ("Now that we have the initial results...") to be dropped from the rendered output instead of
+    // being collapsed to a single newline. That is real content loss in the product, not a test defect,
+    // so it stays skipped here rather than being relaxed to pass. The underlying ContentPipeline
+    // blank-line content-loss fix is owned by the #178 branch; re-enable this test once #178 lands.
+    // The sibling mixed-content test (which does not hit this pattern) runs.
+    [Fact(Skip = "Product bug: ContentPipeline drops content after a long blank-line run. Fix is owned by the #178 branch; re-enable when #178 lands. Do not relax this test to pass.")]
     public async Task Pipeline_Should_Remove_User_Reported_Gaps()
     {
         // Arrange - Direct test of the exact user-reported content with gaps
