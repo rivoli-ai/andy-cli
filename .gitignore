@@ -84,11 +84,18 @@ TestResult.xml
 nunit-*.xml
 
 # Release artifacts
+# Published build output (self-contained binaries, debug symbols, SBOMs, checksums)
+# must never be tracked. Regenerate locally via scripts/build-release.sh (see RELEASE.md);
+# release artifacts are produced only in CI from a clean tagged revision.
 release-artifacts/
 publish/
+**/publish/
 *.tar.gz
 *.zip
 *.sha256
+*.pdb
+sbom*.json
+SHA256SUMS.txt
 
 # Claude Code local session/worktree data
 .claude/
