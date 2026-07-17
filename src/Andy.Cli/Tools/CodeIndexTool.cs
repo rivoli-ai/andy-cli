@@ -34,9 +34,9 @@ public class CodeIndexTool : ToolBase
             {
                 Name = "query_type",
                 Type = "string",
-                Description = "Type of query: 'symbols' (find classes/methods/properties), 'structure' (get project structure), 'references' (find usages), 'hierarchy' (class inheritance)",
+                Description = "Type of query: 'symbols' (find classes/methods/properties), 'structure' (get project structure), 'hierarchy' (class/interface inheritance: base types and derived types)",
                 Required = true,
-                AllowedValues = new[] { "symbols", "structure", "references", "hierarchy" }
+                AllowedValues = new[] { "symbols", "structure", "hierarchy" }
             },
             new ToolParameter
             {
@@ -83,10 +83,10 @@ public class CodeIndexTool : ToolBase
             },
             new ToolExample
             {
-                Description = "Find references to a specific class",
+                Description = "Get the inheritance hierarchy for a class",
                 Parameters = new Dictionary<string, object?>
                 {
-                    ["query_type"] = "references",
+                    ["query_type"] = "hierarchy",
                     ["pattern"] = "AiConversationService"
                 }
             }
@@ -116,10 +116,36 @@ public class CodeIndexTool : ToolBase
             _indexingService ??= new CodeIndexingService();
         }
 
-        // Ensure index is initialized
-        if (!_indexingService.IsIndexed)
+        var cancellationToken = context?.CancellationToken ?? CancellationToken.None;
+
+        // Index roots come from the tool execution workspace, not the process working directory, so
+        // headless runs index the tree they are pointed at. Fall back to the process cwd only when the
+        // context does not carry a working directory.
+        string indexRoot;
+        CodeIndexPathPolicy? pathPolicy;
+        try
         {
-            await _indexingService.IndexDirectoryAsync(Directory.GetCurrentDirectory());
+            indexRoot = ResolveIndexRoot(context);
+            pathPolicy = BuildPathPolicy(context);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return ToolResult.Failure(ex.Message);
+        }
+
+        try
+        {
+            // Re-index when nothing is indexed yet or the requested workspace differs from what is
+            // currently indexed (e.g. a different headless run / different context).
+            if (!_indexingService.IsIndexed ||
+                !string.Equals(_indexingService.IndexedDirectory, indexRoot, CodeIndexPaths.Comparison))
+            {
+                await _indexingService.IndexDirectoryAsync(indexRoot, pathPolicy, cancellationToken);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            return ToolResult.Failure("Code index query was cancelled");
         }
 
         var queryType = parameters.GetValueOrDefault("query_type")?.ToString() ?? "symbols";
@@ -129,12 +155,10 @@ public class CodeIndexTool : ToolBase
 
         try
         {
-            var cancellationToken = context?.CancellationToken ?? CancellationToken.None;
             object result = queryType switch
             {
                 "symbols" => await SearchSymbolsAsync(pattern, scope, includePrivate, cancellationToken),
                 "structure" => await GetProjectStructureAsync(scope, cancellationToken),
-                "references" => await FindReferencesAsync(pattern, scope, cancellationToken),
                 "hierarchy" => await GetClassHierarchyAsync(pattern, cancellationToken),
                 _ => throw new ArgumentException($"Unknown query type: {queryType}")
             };
@@ -247,30 +271,6 @@ public class CodeIndexTool : ToolBase
         };
     }
 
-    private async Task<object> FindReferencesAsync(string symbolName, string scope, CancellationToken cancellationToken)
-    {
-        var references = await _indexingService!.FindReferencesAsync(symbolName, cancellationToken);
-
-        if (scope != "all")
-        {
-            references = references.Where(r => r.FilePath.Contains(scope, StringComparison.OrdinalIgnoreCase)).ToList();
-        }
-
-        return new Dictionary<string, object?>
-        {
-            ["symbol"] = symbolName,
-            ["scope"] = scope,
-            ["count"] = references.Count,
-            ["references"] = references.Select(r => new Dictionary<string, object?>
-            {
-                ["filePath"] = r.FilePath,
-                ["line"] = r.Line,
-                ["column"] = r.Column,
-                ["context"] = r.Context
-            }).Take(100).ToList() // Limit results
-        };
-    }
-
     private async Task<object> GetClassHierarchyAsync(string className, CancellationToken cancellationToken)
     {
         var hierarchy = await _indexingService!.GetClassHierarchyAsync(className, cancellationToken);
@@ -278,8 +278,66 @@ public class CodeIndexTool : ToolBase
         return new Dictionary<string, object?>
         {
             ["className"] = className,
-            ["hierarchy"] = hierarchy
+            ["found"] = hierarchy.FilePath != null,
+            ["namespace"] = hierarchy.Namespace,
+            ["filePath"] = hierarchy.FilePath,
+            ["baseClasses"] = hierarchy.BaseClasses,
+            ["interfaces"] = hierarchy.Interfaces,
+            ["derivedClasses"] = hierarchy.DerivedClasses
         };
+    }
+
+    /// <summary>
+    /// Resolve the directory to index from the tool execution workspace and enforce the allowed-path
+    /// policy. The root is taken from <see cref="ToolExecutionContext.WorkingDirectory"/> (falling
+    /// back to the process working directory), then validated against the context's allowed/blocked
+    /// paths so the tool cannot index outside the sandbox.
+    /// </summary>
+    private static string ResolveIndexRoot(ToolExecutionContext? context)
+    {
+        var workingDir = string.IsNullOrWhiteSpace(context?.WorkingDirectory)
+            ? Directory.GetCurrentDirectory()
+            : context!.WorkingDirectory!;
+
+        var root = Path.GetFullPath(workingDir);
+
+        var permissions = context?.Permissions;
+        if (permissions != null)
+        {
+            // Blocked paths are always blocked, regardless of allowed paths.
+            if (permissions.BlockedPaths is { Count: > 0 } blocked &&
+                blocked.Any(b => CodeIndexPaths.IsContained(root, b)))
+            {
+                throw new UnauthorizedAccessException(
+                    $"Code index root '{root}' is inside a blocked path and cannot be indexed");
+            }
+
+            // If an allow-list is configured, the root must be contained within one of the entries.
+            if (permissions.AllowedPaths is { Count: > 0 } allowed &&
+                !allowed.Any(a => CodeIndexPaths.IsContained(root, a)))
+            {
+                throw new UnauthorizedAccessException(
+                    $"Code index root '{root}' is outside the allowed paths and cannot be indexed");
+            }
+        }
+
+        return root;
+    }
+
+    /// <summary>
+    /// Build the allowed/blocked path policy from the execution context so the policy is enforced on
+    /// every directory and file visited during the walk, not just on the index root. Returns null when
+    /// the context carries no permissions.
+    /// </summary>
+    private static CodeIndexPathPolicy? BuildPathPolicy(ToolExecutionContext? context)
+    {
+        var permissions = context?.Permissions;
+        if (permissions == null)
+        {
+            return null;
+        }
+
+        return new CodeIndexPathPolicy(permissions.AllowedPaths, permissions.BlockedPaths);
     }
 
     private ProjectStructure FilterStructureByScope(ProjectStructure structure, string scope)

@@ -348,20 +348,6 @@ namespace Andy.Cli.Services
                                             resultMessage = $"Found {count} symbols matching '{pattern}' (scope: {symbolScope})";
                                             break;
 
-                                        case "references":
-                                            // Reference search: show count and symbol name
-                                            var symbol = dataContent.GetValueOrDefault("symbol")?.ToString() ?? "unknown";
-                                            var refScope = dataContent.GetValueOrDefault("scope")?.ToString() ?? "all";
-                                            var refCount = 0;
-
-                                            if (dataContent.TryGetValue("count", out var refCountObj) && refCountObj != null)
-                                            {
-                                                refCount = Convert.ToInt32(refCountObj);
-                                            }
-
-                                            resultMessage = $"Found {refCount} references to '{symbol}' (scope: {refScope})";
-                                            break;
-
                                         case "hierarchy":
                                             // Class hierarchy: show class name
                                             var className = dataContent.GetValueOrDefault("className")?.ToString() ?? "unknown";

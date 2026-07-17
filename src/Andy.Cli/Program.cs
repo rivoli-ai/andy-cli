@@ -384,9 +384,12 @@ class Program
             // Register all tools using the trim-safe ToolCatalog
             ToolCatalog.RegisterAllTools(services);
 
-            // Register code indexing service
+            // Register code indexing service as a singleton only. The app builds a plain
+            // ServiceProvider (no HostedService startup), so an AddHostedService registration would
+            // never run - and if it did, it would index Directory.GetCurrentDirectory() (the wrong
+            // tree for headless runs). Indexing is instead driven lazily and per-workspace by
+            // CodeIndexTool, which indexes the tool execution context's WorkingDirectory on demand.
             services.AddSingleton<CodeIndexingService>();
-            services.AddHostedService<CodeIndexingService>(provider => provider.GetRequiredService<CodeIndexingService>());
 
             // Register the Andy.CodeIndex library's DB-free analysis/chunking services
             // (Roslyn-based) so they are available in-process for semantic indexing.
