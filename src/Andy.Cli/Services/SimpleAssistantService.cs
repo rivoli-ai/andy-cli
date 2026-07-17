@@ -247,7 +247,7 @@ public class SimpleAssistantService : IDisposable
                 var msg = $"Current directory: {cwd}";
                 pipeline.AddRawContent(msg);
                 await pipeline.FinalizeAsync();
-                pipeline.Dispose();
+                await pipeline.DisposeAsync();
                 return msg;
             }
 
@@ -559,7 +559,7 @@ public class SimpleAssistantService : IDisposable
             // pipeline.AddSystemMessage(contextInfo, SystemMessageType.Context, priority: 2000);
 
             await pipeline.FinalizeAsync();
-            pipeline.Dispose();
+            await pipeline.DisposeAsync();
 
             // Don't propagate the raw history dump as the return value either.
             if (IsMaxTurnsExceeded(result.StopReason))

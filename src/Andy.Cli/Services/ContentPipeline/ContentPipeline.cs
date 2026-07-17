@@ -1,29 +1,53 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 
 namespace Andy.Cli.Services.ContentPipeline;
 
 /// <summary>
-/// A streaming content processing pipeline that ensures clean separation of concerns
+/// A streaming content processing pipeline that ensures clean separation of concerns.
+///
+/// Ordering and delivery guarantees:
+/// - A single background consumer performs ALL rendering, so every block is rendered
+///   exactly once. Producers only enqueue; they never render.
+/// - Blocks below <see cref="DeferThreshold"/> (regular content) are rendered as they
+///   arrive, preserving arrival order.
+/// - Blocks at or above <see cref="DeferThreshold"/> (system messages) are buffered and
+///   flushed on drain in a stable priority order (arrival order within a priority tier).
+/// - Finalization is deterministic: it completes the channel and awaits an explicit
+///   completion signal, so it returns exactly when the consumer has drained everything.
+///   There is no arbitrary timing/delay.
 /// </summary>
-public class ContentPipeline : IDisposable
+public class ContentPipeline : IDisposable, IAsyncDisposable
 {
+    /// <summary>
+    /// Priority boundary between "render immediately as it streams in" (below the
+    /// threshold) and "defer and flush in priority order on drain" (at/above).
+    /// </summary>
+    public const int DeferThreshold = 500;
+
     private readonly IContentProcessor _processor;
     private readonly IContentSanitizer _sanitizer;
     private readonly IContentRenderer _renderer;
     private readonly ILogger<ContentPipeline>? _logger;
-    
-    private readonly ConcurrentQueue<IContentBlock> _processingQueue = new();
-    private readonly ConcurrentDictionary<string, IContentBlock> _completedBlocks = new();
+
+    private readonly Channel<IContentBlock> _channel;
     private readonly CancellationTokenSource _cancellationTokenSource = new();
     private readonly Task _processingTask;
-    
-    private volatile bool _isFinalized = false;
+
+    // Signalled exactly once when the background consumer loop has fully drained/stopped.
+    private readonly TaskCompletionSource<bool> _processingCompletion =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    // Deferred (high-priority) blocks, only ever touched by the single consumer thread.
+    private readonly List<IContentBlock> _deferred = new();
+
+    private volatile bool _isFinalized;
+    private int _disposed;
 
     public ContentPipeline(
         IContentProcessor processor,
@@ -35,18 +59,24 @@ public class ContentPipeline : IDisposable
         _sanitizer = sanitizer;
         _renderer = renderer;
         _logger = logger;
-        
-        // Start the background processing task
-        _processingTask = Task.Run(ProcessQueueAsync, _cancellationTokenSource.Token);
+
+        // Unbounded, multiple concurrent producers, single consumer.
+        _channel = Channel.CreateUnbounded<IContentBlock>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = false
+        });
+
+        _processingTask = Task.Run(ProcessQueueAsync);
     }
 
     /// <summary>
-    /// Add raw content to be processed
+    /// Add raw content to be processed.
     /// </summary>
     public void AddRawContent(string content, string blockIdPrefix = "", int priority = 100)
     {
         _logger?.LogInformation("[PIPELINE] AddRawContent: length={Length}, priority={Priority}", content?.Length ?? 0, priority);
-        
+
         if (_isFinalized)
         {
             _logger?.LogWarning("Cannot add content to finalized pipeline");
@@ -56,30 +86,11 @@ public class ContentPipeline : IDisposable
         try
         {
             var blocks = _processor.Process(content!, blockIdPrefix);
-            _logger?.LogInformation("[PIPELINE] Processor returned {Count} blocks", blocks.Count());
             foreach (var block in blocks)
             {
-                // Set priority if not default
-                if (priority != 100 && block is TextBlock textBlock)
-                {
-                    var newBlock = new TextBlock(textBlock.Id, textBlock.Content, priority)
-                    {
-                        IsComplete = textBlock.IsComplete
-                    };
-                    _processingQueue.Enqueue(newBlock);
-                }
-                else if (priority != 100 && block is SystemMessageBlock systemBlock)
-                {
-                    var newBlock = new SystemMessageBlock(systemBlock.Id, systemBlock.Message, systemBlock.Type, priority)
-                    {
-                        IsComplete = systemBlock.IsComplete
-                    };
-                    _processingQueue.Enqueue(newBlock);
-                }
-                else
-                {
-                    _processingQueue.Enqueue(block);
-                }
+                // Apply an explicit priority override if one was requested.
+                var toEnqueue = priority != 100 ? WithPriority(block, priority) : block;
+                Enqueue(toEnqueue);
             }
         }
         catch (Exception ex)
@@ -90,7 +101,7 @@ public class ContentPipeline : IDisposable
     }
 
     /// <summary>
-    /// Add a pre-formed content block
+    /// Add a pre-formed content block.
     /// </summary>
     public void AddBlock(IContentBlock block)
     {
@@ -100,11 +111,11 @@ public class ContentPipeline : IDisposable
             return;
         }
 
-        _processingQueue.Enqueue(block);
+        Enqueue(block);
     }
 
     /// <summary>
-    /// Add system message (like context, success, error)
+    /// Add system message (like context, success, error).
     /// </summary>
     public void AddSystemMessage(string message, SystemMessageType type, int priority = 1000)
     {
@@ -113,128 +124,181 @@ public class ContentPipeline : IDisposable
         AddBlock(block);
     }
 
+    private void Enqueue(IContentBlock block)
+    {
+        // TryWrite returns false only once the writer has been completed (finalized).
+        // Racing a concurrent finalize is expected; drop-with-log rather than throwing so a
+        // late producer can never crash or double-deliver.
+        if (!_channel.Writer.TryWrite(block))
+        {
+            _logger?.LogWarning("Dropped block {Id}; pipeline already finalized", block.Id);
+        }
+    }
+
+    private static IContentBlock WithPriority(IContentBlock block, int priority)
+    {
+        return block switch
+        {
+            TextBlock t => new TextBlock(t.Id, t.Content, priority) { IsComplete = t.IsComplete },
+            SystemMessageBlock s => new SystemMessageBlock(s.Id, s.Message, s.Type, priority) { IsComplete = s.IsComplete },
+            CodeBlock c => new CodeBlock(c.Id, c.Code, c.Language, priority) { IsComplete = c.IsComplete },
+            _ => block
+        };
+    }
+
     /// <summary>
-    /// Finalize the pipeline - no more content will be accepted, render remaining blocks
+    /// Finalize the pipeline: accept no more content, then deterministically wait for the
+    /// background consumer to render everything that was enqueued (including deferred,
+    /// priority-ordered blocks). Safe to call more than once.
     /// </summary>
     public async Task FinalizeAsync()
     {
         _logger?.LogInformation("[PIPELINE-FINALIZE] Starting finalization");
         _isFinalized = true;
-        
-        // Wait a bit for any remaining processing
-        await Task.Delay(100);
-        
-        // Force render all remaining blocks
-        _logger?.LogInformation("[PIPELINE-FINALIZE] Rendering all pending blocks");
-        await RenderAllPendingBlocks();
+
+        // Complete the writer so the consumer's ReadAllAsync loop terminates once drained.
+        // TryComplete is idempotent (returns false if already completed).
+        _channel.Writer.TryComplete();
+
+        // Deterministic drain: return exactly when the consumer has finished.
+        await _processingCompletion.Task.ConfigureAwait(false);
         _logger?.LogInformation("[PIPELINE-FINALIZE] Finalization complete");
     }
 
     private async Task ProcessQueueAsync()
     {
-        while (!_cancellationTokenSource.Token.IsCancellationRequested)
-        {
-            try
-            {
-                if (_processingQueue.TryDequeue(out var block))
-                {
-                    // Sanitize the block
-                    _logger?.LogInformation("[PIPELINE-PROCESS] Sanitizing block {Id} of type {Type}", block.Id, block.GetType().Name);
-                    var sanitizedBlock = _sanitizer.Sanitize(block);
-                    _logger?.LogInformation("[PIPELINE-PROCESS] Block {Id} after sanitization: IsComplete={Complete}", 
-                        sanitizedBlock.Id, sanitizedBlock.IsComplete);
-                    
-                    // Store completed blocks
-                    _completedBlocks.TryAdd(sanitizedBlock.Id, sanitizedBlock);
-                    
-                    // Render immediately if ready, or wait for finalization for proper ordering
-                    if (!_isFinalized && sanitizedBlock.IsComplete && sanitizedBlock.Priority < 500)
-                    {
-                        // Render high-priority blocks immediately (content)
-                        _logger?.LogInformation("[PIPELINE-PROCESS] Rendering block {Id} immediately (priority={Priority})", 
-                            sanitizedBlock.Id, sanitizedBlock.Priority);
-                        _renderer.Render(sanitizedBlock);
-                        // Remove from completed blocks since we've already rendered it
-                        _completedBlocks.TryRemove(sanitizedBlock.Id, out _);
-                        _logger?.LogInformation("[PIPELINE-PROCESS] Removed block {Id} from completed blocks after immediate render", 
-                            sanitizedBlock.Id);
-                    }
-                    else
-                    {
-                        _logger?.LogInformation("[PIPELINE-PROCESS] Block {Id} stored for later (finalized={Fin}, complete={Com}, priority={Pri})", 
-                            sanitizedBlock.Id, _isFinalized, sanitizedBlock.IsComplete, sanitizedBlock.Priority);
-                    }
-                }
-                else
-                {
-                    // No work available, check if we should render pending blocks
-                    if (_isFinalized)
-                    {
-                        break;
-                    }
-                    
-                    // Short delay before checking again
-                    await Task.Delay(10, _cancellationTokenSource.Token);
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogError(ex, "Error in processing queue");
-                ErrorPolicy.RethrowIfStrict(ex);
-            }
-        }
-    }
-
-    private Task RenderAllPendingBlocks()
-    {
-        // Get all completed blocks and sort by priority
-        var blocksToRender = _completedBlocks.Values
-            .Where(b => b.IsComplete)
-            .OrderBy(b => b.Priority)
-            .ThenBy(b => b.Id)
-            .ToList();
-
-        _logger?.LogInformation("[PIPELINE-RENDER] Found {Count} blocks to render", blocksToRender.Count);
-
-        foreach (var block in blocksToRender)
-        {
-            try
-            {
-                _logger?.LogInformation("[PIPELINE-RENDER] Rendering block {Id} of type {Type}, priority {Priority}", 
-                    block.Id, block.GetType().Name, block.Priority);
-                _renderer.Render(block);
-                // Remove the block after rendering to prevent duplicate rendering
-                _completedBlocks.TryRemove(block.Id, out _);
-                _logger?.LogInformation("[PIPELINE-RENDER] Successfully rendered and removed block {Id}", block.Id);
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogError(ex, "Error rendering block {BlockId}", block.Id);
-                ErrorPolicy.RethrowIfStrict(ex);
-            }
-        }
-
-        return Task.CompletedTask;
-    }
-
-    public void Dispose()
-    {
-        _cancellationTokenSource.Cancel();
+        // Capture the token up front so a concurrent sync Dispose() that disposes the
+        // CancellationTokenSource can never race our access to it.
+        var cancellationToken = _cancellationTokenSource.Token;
         try
         {
-            _processingTask?.Wait(TimeSpan.FromSeconds(2));
+            var reader = _channel.Reader;
+            while (await reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                while (reader.TryRead(out var block))
+                {
+                    RenderOrDefer(block);
+                }
+            }
+
+            // Channel completed and fully drained: flush any deferred (priority) blocks.
+            FlushDeferred();
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancellation (disposal) - stop promptly; finalization is not expected in this path.
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning(ex, "Error waiting for processing task to complete");
-            // Rethrow only if strict to avoid dispose-time crashes in non-strict mode
+            _logger?.LogError(ex, "Error in processing queue");
+            // Note: do not rethrow here. The exception would otherwise fault the background
+            // task and be observed asynchronously (potentially at dispose time). Strict-mode
+            // propagation for render/sanitize errors happens inside the renderer/sanitizer.
+        }
+        finally
+        {
+            _processingCompletion.TrySetResult(true);
+        }
+    }
+
+    private void RenderOrDefer(IContentBlock block)
+    {
+        IContentBlock sanitized;
+        try
+        {
+            sanitized = _sanitizer.Sanitize(block);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error sanitizing block {BlockId}", block.Id);
+            ErrorPolicy.RethrowIfStrict(ex);
+            return;
+        }
+
+        // Incomplete/empty blocks are never rendered.
+        if (!sanitized.IsComplete)
+        {
+            return;
+        }
+
+        if (sanitized.Priority < DeferThreshold)
+        {
+            RenderOne(sanitized);
+        }
+        else
+        {
+            _deferred.Add(sanitized);
+        }
+    }
+
+    private void FlushDeferred()
+    {
+        if (_deferred.Count == 0)
+        {
+            return;
+        }
+
+        // OrderBy is stable, so blocks with equal priority keep arrival order.
+        foreach (var block in _deferred.OrderBy(b => b.Priority))
+        {
+            RenderOne(block);
+        }
+
+        _deferred.Clear();
+    }
+
+    private void RenderOne(IContentBlock block)
+    {
+        try
+        {
+            _renderer.Render(block);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error rendering block {BlockId}", block.Id);
             ErrorPolicy.RethrowIfStrict(ex);
         }
-        
+    }
+
+    /// <summary>
+    /// Asynchronous disposal: cancels the consumer and awaits its completion without
+    /// blocking the calling (UI) thread.
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
+        _channel.Writer.TryComplete();
+        _cancellationTokenSource.Cancel();
+
+        try
+        {
+            await _processingCompletion.Task.ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Error awaiting processing task during async disposal");
+        }
+
+        _cancellationTokenSource.Dispose();
+    }
+
+    /// <summary>
+    /// Synchronous disposal: signals cancellation and releases resources without blocking
+    /// on the background task. Prefer <see cref="DisposeAsync"/> when an await is available.
+    /// </summary>
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
+        _channel.Writer.TryComplete();
+        _cancellationTokenSource.Cancel();
         _cancellationTokenSource.Dispose();
     }
 }

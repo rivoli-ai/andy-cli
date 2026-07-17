@@ -24,10 +24,10 @@ public class TypeConversionTests
             ["array_param"] = new[] { 1, 2, 3 }
         };
         var result = "Success";
-        
+
         // Act - This should not throw
         var item = new ToolExecutionItem(toolId, parameters, result, true);
-        
+
         // Assert - Measure line count to ensure it rendered
         var lineCount = item.MeasureLineCount(80);
         Assert.True(lineCount > 0);
@@ -49,7 +49,7 @@ public class TypeConversionTests
             ["array_param"] = new[] { 1, 2, 3 }
         };
         var result = "Success";
-        
+
         // Act - This should not throw
         Exception? caughtException = null;
         try
@@ -60,7 +60,7 @@ public class TypeConversionTests
         {
             caughtException = ex;
         }
-        
+
         // Assert - No exception should be thrown
         Assert.Null(caughtException);
     }
@@ -73,13 +73,13 @@ public class TypeConversionTests
         var processor = new MarkdownContentProcessor();
         var sanitizer = new TextContentSanitizer();
         var renderer = new FeedContentRenderer(feed);
-        
+
         using var pipeline = new Andy.Cli.Services.ContentPipeline.ContentPipeline(processor, sanitizer, renderer);
-        
+
         // Act
         pipeline.AddSystemMessage("Test message", SystemMessageType.Context);
         pipeline.FinalizeAsync().Wait();
-        
+
         // Assert - Just verify no exception is thrown
         Assert.True(true);
     }
@@ -90,14 +90,14 @@ public class TypeConversionTests
         // This tests a scenario that might cause "Object must be of type String" error
         object value1 = "hello";
         object value2 = 42;
-        
+
         // Test ToString conversions
         var str1 = value1?.ToString();
         var str2 = value2?.ToString();
-        
+
         Assert.Equal("hello", str1);
         Assert.Equal("42", str2);
-        
+
         // Test that comparison doesn't throw
         Assert.NotEqual(str1, str2);
     }
@@ -113,7 +113,7 @@ public class TypeConversionTests
             ["key3"] = true,
             ["key4"] = null
         };
-        
+
         // Act & Assert - Should not throw
         foreach (var kvp in dict)
         {

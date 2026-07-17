@@ -164,6 +164,11 @@
     <Compile Include="Services/ParameterMapperTests.cs" />
     <Compile Include="Services/ContentPipeline/ContentPipelineTests.cs" />
     <Compile Include="Services/ContentPipeline/TypeConversionTests.cs" />
+    <!-- #178 pipeline completion/race + structural sanitizer tests -->
+    <Compile Include="Services/ContentPipeline/ContentPipelineCompletionTests.cs" />
+    <Compile Include="Services/ContentPipeline/SanitizerStructuralFilteringTests.cs" />
+    <Compile Include="Services/ContentPipeline/OrderingTests.cs" />
+    <Compile Include="Services/ContentPipeline/SimpleHelloTest.cs" />
     <Compile Include="Services/ResponseFormattingTests.cs" />
     <Compile Include="Widgets/InlineCommandHelpTests.cs" />
     <!-- New unit tests for previously-uncovered correctness-critical logic -->
