@@ -1,13 +1,25 @@
 name: Release Build
 
 # On-demand cross-platform release. Build the binaries only when you want a new
-# version — never on every merge:
+# version - never on every merge:
 #   * push a tag:        git tag v2026.6.16 && git push origin v2026.6.16   (builds + publishes a GitHub Release)
 #   * or run manually:   Actions -> "Release Build" -> Run workflow          (builds + smoke-tests; publishes only on a tag)
 #
-# Pipeline: secret-scan (gate) -> build (6 targets) -> smoke-test -> publish Release.
+# Pipeline: secret-scan (gate) -> validate (build+test gate) -> build (6 targets, + SBOM)
+#           -> smoke-test -> publish Release (+ SHA256SUMS, SBOM, build provenance attestation).
 #
-# The signed/notarized variant lives in release-signed.yml (manual only).
+# Release artifacts are produced ONLY here, in CI, from the clean revision that the
+# triggering tag points at (see the `ref` on each checkout). Never publish a locally
+# built binary; scripts/build-release.sh is for local verification only.
+#
+# Supply-chain hardening:
+#   * Every third-party action is pinned to an immutable commit SHA (the trailing
+#     "# vX.Y.Z" comment is informational only - the SHA is what runs).
+#   * The gitleaks scanner is pinned to a fixed version and its archive checksum is
+#     verified before it is executed (no "download latest").
+#
+# The signing/notarization variant lives in release-signed-todo.yml. That workflow does
+# NOT yet produce signed output (no certificates are configured) - see its header.
 
 on:
   push:
@@ -21,40 +33,81 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
+
+# Pinned tool versions (kept here so a single edit updates the whole pipeline).
+env:
+  # gitleaks release used by the secret-scan gate. Bump the version AND the checksum together;
+  # get the checksum from gitleaks_<ver>_checksums.txt on the corresponding GitHub release.
+  GITLEAKS_VERSION: '8.30.1'
+  GITLEAKS_LINUX_X64_SHA256: '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb'
+  # CycloneDX .NET global tool used to generate the SBOM.
+  CYCLONEDX_VERSION: '5.5.0'
 
 jobs:
   # 1) Gate: refuse to build/publish a tree that contains secrets. Runs before anything is built,
   #    so a version that leaks a secret is never produced. Scans the working tree as it will be
-  #    compiled (--no-git), which is what ends up "in the app".
+  #    compiled (--no-git), which is what ends up "in the app". The scanner itself is pinned to a
+  #    fixed version and checksum-verified before execution.
   secret-scan:
     name: Secret scan (gate)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
-      - name: Scan for secrets with gitleaks
+      - name: Scan for secrets with gitleaks (pinned + checksum-verified)
         run: |
           set -euo pipefail
-          TAG="$(curl -fsSL https://api.github.com/repos/gitleaks/gitleaks/releases/latest | grep -oP '"tag_name": *"\K[^"]+')"
-          VER="${TAG#v}"
-          echo "Using gitleaks ${TAG}"
-          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/${TAG}/gitleaks_${VER}_linux_x64.tar.gz" | tar -xz gitleaks
+          VER="${GITLEAKS_VERSION}"
+          ARCHIVE="gitleaks_${VER}_linux_x64.tar.gz"
+          echo "Using gitleaks v${VER}"
+          curl -fsSL -o "$ARCHIVE" "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/${ARCHIVE}"
+          # Verify the downloaded archive against the pinned checksum BEFORE extracting/executing it.
+          echo "${GITLEAKS_LINUX_X64_SHA256}  ${ARCHIVE}" | sha256sum -c -
+          tar -xzf "$ARCHIVE" gitleaks
           # --no-git scans the checked-out files (what gets compiled), not historical commits.
           # Exit non-zero (fail the release) if anything is found.
           ./gitleaks detect --no-git --source . --redact --verbose --exit-code 1
 
-  # 2) Build all six platform binaries (self-contained, single-file, trimmed) via the shared script.
+  # 2) Build+test gate. The ordinary release path must not publish an untested tree.
+  #    This mirrors the mandatory validation from issue #171 (the general PR/release
+  #    quality-gate workflow). If/when that reusable workflow lands, replace this job with
+  #    a `needs:` on it; until then this in-line gate guarantees a release is built from a
+  #    revision whose full test suite passes.
+  validate:
+    name: Build and test gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9  # v4.3.1
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build (warnings visible)
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Run test suite
+        run: dotnet test --no-restore --configuration Release --verbosity normal
+
+  # 3) Build all six platform binaries (self-contained, single-file, trimmed) via the shared
+  #    script, and generate a CycloneDX SBOM of the CLI project. Checks out the exact triggering
+  #    revision (the tag) so the release is reproducible from a clean tagged source.
   build:
     name: Build binaries
-    needs: secret-scan
+    needs: [secret-scan, validate]
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.get_version.outputs.VERSION }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          ref: ${{ github.ref }}  # build from the clean tagged revision that triggered this run
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9  # v4.3.1
         with:
           dotnet-version: '8.0.x'
 
@@ -81,27 +134,38 @@ jobs:
           chmod +x scripts/build-release.sh
           ./scripts/build-release.sh "${{ steps.get_version.outputs.VERSION }}"
 
+      - name: Generate SBOM (CycloneDX, pinned)
+        run: |
+          set -euo pipefail
+          dotnet tool install --global CycloneDX --version "${CYCLONEDX_VERSION}"
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          dotnet CycloneDX src/Andy.Cli/Andy.Cli.csproj -o release-artifacts -F Json -fn sbom.json
+          echo "SBOM written to release-artifacts/sbom.json"
+
       - name: Generate aggregate checksums
         run: |
+          set -euo pipefail
           cd release-artifacts
-          sha256sum ./*.tar.gz ./*.zip > SHA256SUMS.txt
+          sha256sum ./*.tar.gz ./*.zip sbom.json > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: release-binaries
           path: |
             release-artifacts/*.tar.gz
             release-artifacts/*.zip
             release-artifacts/*.sha256
+            release-artifacts/sbom.json
             release-artifacts/SHA256SUMS.txt
           retention-days: 30
 
-  # 3) Simple post-build check: each binary launches on its native platform and reports the version
-  #    it was built as. Covers both architectures on macOS plus x64 Linux/Windows on standard runners;
+  # 4) Smoke test: each binary is exercised on its native platform through startup, version,
+  #    help, a non-network tool path, and headless schema validation (scripts/smoke-test.sh).
+  #    Covers both architectures on macOS plus x64 Linux/Windows on standard runners;
   #    linux-arm64 and win-arm64 are built but not smoke-tested here (no free arm64 Linux/Windows
-  #    runners) — add `ubuntu-24.04-arm` / `windows-11-arm` entries if those runners are available.
+  #    runners) - add `ubuntu-24.04-arm` / `windows-11-arm` entries if those runners are available.
   smoke-test:
     name: Smoke test ${{ matrix.artifact }}
     needs: build
@@ -123,55 +187,57 @@ jobs:
             archive: andy-cli-windows-x64.zip
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          ref: ${{ github.ref }}  # provides scripts/smoke-test.sh matching this revision
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
           name: release-binaries
           path: dist
 
-      - name: Run binary (Unix)
-        if: runner.os != 'Windows'
+      - name: Extract and smoke test
+        shell: bash
         env:
           EXPECTED: ${{ needs.build.outputs.version }}
         run: |
           set -euo pipefail
           archive="$(find dist -name '${{ matrix.archive }}' | head -1)"
-          mkdir run && tar -xzf "$archive" -C run
-          chmod +x run/andy-cli
-          out="$(run/andy-cli --version)"
-          echo "Output: $out"
-          echo "$out" | grep -q "andy-cli"
-          echo "$out" | grep -q "${EXPECTED#v}"
+          [ -n "$archive" ] || { echo "archive '${{ matrix.archive }}' not found under dist/"; exit 1; }
+          mkdir run
+          # bsdtar/GNU tar auto-detect gzip and zip, so one command handles .tar.gz and .zip.
+          tar -xf "$archive" -C run
+          bash scripts/smoke-test.sh run "$EXPECTED"
 
-      - name: Run binary (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          EXPECTED: ${{ needs.build.outputs.version }}
-        run: |
-          $archive = Get-ChildItem -Recurse -Filter '${{ matrix.archive }}' dist | Select-Object -First 1
-          New-Item -ItemType Directory run | Out-Null
-          Expand-Archive $archive.FullName -DestinationPath run
-          $out = & run/andy-cli.exe --version | Out-String
-          Write-Host "Output: $out"
-          if ($out -notmatch "andy-cli") { Write-Error "missing andy-cli marker"; exit 1 }
-          $expected = "${env:EXPECTED}" -replace '^v',''
-          if ($out -notmatch [regex]::Escape($expected)) { Write-Error "version $expected not reported"; exit 1 }
-
-  # 4) Publish the GitHub Release (web) with auto-generated notes plus a human summary. Tags only.
+  # 5) Publish the GitHub Release (web) with auto-generated notes plus a human summary, attach the
+  #    SBOM and checksums, and record signed build-provenance attestations for every artifact. Tags only.
   release:
     name: Publish GitHub Release
     needs: [build, smoke-test]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write       # create the release
+      id-token: write       # mint the OIDC token used to sign the provenance attestation
+      attestations: write   # record the build-provenance attestation
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
+          ref: ${{ github.ref }}
           fetch-depth: 0  # full history so we can diff against the previous tag
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
           name: release-binaries
           path: release-artifacts
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be  # v2.4.0
+        with:
+          subject-path: |
+            release-artifacts/*.tar.gz
+            release-artifacts/*.zip
+            release-artifacts/sbom.json
 
       - name: Build release summary
         run: |
@@ -181,7 +247,7 @@ jobs:
           {
             echo "## andy-cli ${VERSION}"
             echo
-            echo "Self-contained binaries for Linux, macOS and Windows (x64 and arm64) — no .NET runtime required. Download the archive for your platform, extract, and run."
+            echo "Self-contained binaries for Linux, macOS and Windows (x64 and arm64) - no .NET runtime required. Download the archive for your platform, extract, and run."
             echo
             echo "### Changes"
             if [ -n "$PREV" ]; then
@@ -194,11 +260,18 @@ jobs:
             echo '```'
             echo "sha256sum -c SHA256SUMS.txt"
             echo '```'
+            echo
+            echo "### Provenance and SBOM"
+            echo "- \`sbom.json\` is a CycloneDX software bill of materials for this build."
+            echo "- Each archive carries a signed build-provenance attestation. Verify with:"
+            echo '```'
+            echo "gh attestation verify <archive> --repo ${GITHUB_REPOSITORY}"
+            echo '```'
           } > RELEASE_NOTES.md
           cat RELEASE_NOTES.md
 
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8  # v2.3.2
         with:
           body_path: RELEASE_NOTES.md
           generate_release_notes: true  # appends GitHub's auto PR/commit changelog under the summary
@@ -206,6 +279,7 @@ jobs:
             release-artifacts/*.tar.gz
             release-artifacts/*.zip
             release-artifacts/*.sha256
+            release-artifacts/sbom.json
             release-artifacts/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
