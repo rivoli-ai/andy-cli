@@ -152,11 +152,46 @@ public class AndyAgentProvider : IAgentProvider, IDisposable
             };
         }
 
-        // Link the transport token with the session's cancel source so an
-        // explicit ACP cancel request reaches the running engine operation.
-        var linkedToken = entry.BeginPrompt(cancellationToken);
+        // BeginPrompt is called INSIDE the try so a session that was
+        // concurrently disposed/evicted (ObjectDisposedException) or already
+        // busy with another prompt (InvalidOperationException) is turned into a
+        // clean protocol error instead of an unhandled exception. EndPrompt runs
+        // in the finally only when BeginPrompt actually succeeded, so a rejected
+        // second prompt never tears down the first prompt's cancellation source.
+        CancellationToken linkedToken = default;
+        var promptStarted = false;
         try
         {
+            try
+            {
+                // Link the transport token with the session's cancel source so an
+                // explicit ACP cancel request reaches the running engine operation.
+                linkedToken = entry.BeginPrompt(cancellationToken);
+                promptStarted = true;
+            }
+            catch (ObjectDisposedException)
+            {
+                _logger?.LogWarning(
+                    "Session {SessionId} was disposed before the prompt could start", sessionId);
+                return new AgentResponse
+                {
+                    Message = "Error: Session no longer available",
+                    StopReason = StopReason.Error,
+                    Error = "Session no longer available"
+                };
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger?.LogWarning(
+                    "Rejected concurrent prompt for session {SessionId}: {Reason}", sessionId, ex.Message);
+                return new AgentResponse
+                {
+                    Message = $"Error: {ex.Message}",
+                    StopReason = StopReason.Error,
+                    Error = ex.Message
+                };
+            }
+
             var effectivePrompt = BuildPrompt(prompt);
             _logger?.LogInformation("Processing prompt for session {SessionId}: {Preview}",
                 sessionId, effectivePrompt.Substring(0, Math.Min(100, effectivePrompt.Length)));
@@ -199,7 +234,10 @@ public class AndyAgentProvider : IAgentProvider, IDisposable
         }
         finally
         {
-            entry.EndPrompt();
+            if (promptStarted)
+            {
+                entry.EndPrompt();
+            }
         }
     }
 

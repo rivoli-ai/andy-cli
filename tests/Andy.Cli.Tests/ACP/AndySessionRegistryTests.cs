@@ -82,6 +82,89 @@ public class AndySessionRegistryTests
     }
 
     [Fact]
+    public void Add_SameId_DisposesDisplacedEntry()
+    {
+        // Fix 2: replacing an existing id must not leak the old entry (its
+        // engine agent + cancellation source would otherwise be orphaned).
+        using var registry = new AndySessionRegistry(maxSessions: 5);
+        var a = NewEntry("a");
+        registry.Add(a);
+
+        var a2 = NewEntry("a");
+        registry.Add(a2);
+
+        Assert.True(a.IsDisposed);
+        Assert.False(a2.IsDisposed);
+        Assert.Equal(1, registry.Count);
+        Assert.True(registry.TryGet("a", out var found));
+        Assert.Same(a2, found);
+    }
+
+    [Fact]
+    public void Add_SameId_Rejects_WhenExistingHasInFlightPrompt()
+    {
+        // Fix 2 + Fix 1: a busy entry must never be torn down by a same-id
+        // replacement; the duplicate add is rejected instead.
+        using var registry = new AndySessionRegistry(maxSessions: 5);
+        var busy = NewEntry("a");
+        registry.Add(busy);
+        busy.BeginPrompt(CancellationToken.None); // mark in-flight
+
+        var replacement = NewEntry("a");
+        Assert.Throws<InvalidOperationException>(() => registry.Add(replacement));
+
+        Assert.False(busy.IsDisposed);
+        Assert.True(registry.TryGet("a", out var found));
+        Assert.Same(busy, found);
+    }
+
+    [Fact]
+    public void Add_DoesNotEvict_BusySession_WhenCapExceeded()
+    {
+        // Fix 1: a session with an in-flight prompt is excluded from LRU
+        // eviction even when it is the least-recently-accessed entry.
+        using var registry = new AndySessionRegistry(maxSessions: 2);
+        var busy = NewEntry("busy");
+        registry.Add(busy);
+        busy.BeginPrompt(CancellationToken.None); // in-flight; do not end
+
+        Thread.Sleep(5);
+        var idle = NewEntry("idle");
+        registry.Add(idle);
+
+        // "busy" is the oldest but is in-flight, so adding a third session must
+        // evict the IDLE one and leave the busy session intact.
+        Thread.Sleep(5);
+        var third = NewEntry("third");
+        registry.Add(third);
+
+        Assert.False(busy.IsDisposed);
+        Assert.True(registry.TryGet("busy", out _));
+        Assert.True(idle.IsDisposed);
+        Assert.False(registry.TryGet("idle", out _));
+        Assert.True(registry.TryGet("third", out _));
+    }
+
+    [Fact]
+    public void Add_AcceptsSoftOverCap_WhenAllSessionsBusy()
+    {
+        // Fix 1: when every retained session is in-flight, the registry must
+        // accept a soft over-cap rather than disposing an active session.
+        using var registry = new AndySessionRegistry(maxSessions: 1);
+        var busy = NewEntry("busy");
+        registry.Add(busy);
+        busy.BeginPrompt(CancellationToken.None); // in-flight
+
+        var second = NewEntry("second");
+        registry.Add(second); // cap is 1 but busy cannot be evicted
+
+        Assert.False(busy.IsDisposed);
+        Assert.Equal(2, registry.Count);
+        Assert.True(registry.TryGet("busy", out _));
+        Assert.True(registry.TryGet("second", out _));
+    }
+
+    [Fact]
     public void Remove_DisposesEntry()
     {
         using var registry = new AndySessionRegistry();
@@ -137,6 +220,50 @@ public class AndySessionRegistryTests
     {
         var entry = NewEntry("s1");
         Assert.False(entry.CancelActivePrompt());
+    }
+
+    [Fact]
+    public void Entry_BeginPrompt_Rejects_SecondConcurrentPrompt()
+    {
+        // Fix 4: a second concurrent prompt must be rejected rather than
+        // disposing the first prompt's still-in-use cancellation source.
+        var entry = NewEntry("s1");
+        var firstToken = entry.BeginPrompt(CancellationToken.None);
+
+        Assert.Throws<InvalidOperationException>(() => entry.BeginPrompt(CancellationToken.None));
+
+        // The first prompt's token remains valid and usable (not disposed).
+        Assert.False(firstToken.IsCancellationRequested);
+        Assert.True(entry.HasActivePrompt);
+
+        // And it can still be cancelled without an ObjectDisposedException.
+        Assert.True(entry.CancelActivePrompt());
+        Assert.True(firstToken.IsCancellationRequested);
+    }
+
+    [Fact]
+    public void Entry_BeginPrompt_AllowedAgain_AfterEndPrompt()
+    {
+        var entry = NewEntry("s1");
+        entry.BeginPrompt(CancellationToken.None);
+        entry.EndPrompt();
+
+        Assert.False(entry.HasActivePrompt);
+        var token = entry.BeginPrompt(CancellationToken.None); // must not throw
+        Assert.False(token.IsCancellationRequested);
+    }
+
+    [Fact]
+    public void Entry_HasActivePrompt_TracksLifecycle()
+    {
+        var entry = NewEntry("s1");
+        Assert.False(entry.HasActivePrompt);
+
+        entry.BeginPrompt(CancellationToken.None);
+        Assert.True(entry.HasActivePrompt);
+
+        entry.EndPrompt();
+        Assert.False(entry.HasActivePrompt);
     }
 
     [Fact]

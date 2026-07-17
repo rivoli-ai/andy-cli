@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Andy.Acp.Core.Agent;
@@ -390,6 +391,77 @@ public class AndyAgentProviderTests
         var response = await promptTask;
 
         Assert.Equal(StopReason.Cancelled, response.StopReason);
+    }
+
+    // ----- Concurrent prompts on one session are serialized (fix 4) -----
+
+    [Fact]
+    public async Task ProcessPromptAsync_RejectsSecondConcurrentPrompt_WithoutBreakingTheFirst()
+    {
+        // Arrange: the first prompt blocks in the engine, keeping the session
+        // busy. A second prompt arriving on the same session must be rejected
+        // cleanly and must NOT dispose the first prompt's cancellation source.
+        var engineStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        CancellationToken firstToken = default;
+        var factory = new FakeAgentFactory(_ => FakeAgent.Blocking(ct =>
+        {
+            firstToken = ct;
+            engineStarted.TrySetResult(true);
+        }));
+        var provider = NewProvider(factory);
+        var streamer = new Mock<IResponseStreamer>();
+
+        var session = await provider.CreateSessionAsync(null, CancellationToken.None);
+
+        var firstTask = provider.ProcessPromptAsync(
+            session.SessionId, new PromptMessage { Text = "long" }, streamer.Object, CancellationToken.None);
+        await engineStarted.Task; // first prompt is in flight
+
+        // Act: a second concurrent prompt on the same session.
+        var second = await provider.ProcessPromptAsync(
+            session.SessionId, new PromptMessage { Text = "again" }, streamer.Object, CancellationToken.None);
+
+        // Assert: the second prompt is a clean protocol error, not an exception.
+        Assert.Equal(StopReason.Error, second.StopReason);
+        Assert.Contains("already in progress", second.Error);
+
+        // The first prompt's token is intact (not disposed by the rejection) and
+        // still cancellable through the session.
+        Assert.False(firstToken.IsCancellationRequested);
+        await provider.CancelSessionAsync(session.SessionId, CancellationToken.None);
+        var first = await firstTask;
+        Assert.True(firstToken.IsCancellationRequested);
+        Assert.Equal(StopReason.Cancelled, first.StopReason);
+    }
+
+    // ----- Concurrent dispose race yields a clean error, not an exception (fix 3) -----
+
+    [Fact]
+    public async Task ProcessPromptAsync_ReturnsCleanError_WhenSessionDisposedConcurrently()
+    {
+        var provider = NewProvider(new FakeAgentFactory(_ => FakeAgent.ReturningSuccess("ok")));
+        var streamer = new Mock<IResponseStreamer>();
+        var session = await provider.CreateSessionAsync(null, CancellationToken.None);
+
+        // Simulate the race where the entry is disposed after it is resolved but
+        // before/at the moment BeginPrompt runs. Reach into the registry and
+        // dispose the still-retained entry (dispose does not remove it), so the
+        // provider resolves it via TryGet but BeginPrompt throws
+        // ObjectDisposedException.
+        var registryField = typeof(AndyAgentProvider)
+            .GetField("_sessions", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(registryField);
+        var registry = (AndySessionRegistry)registryField!.GetValue(provider)!;
+        Assert.True(registry.TryGet(session.SessionId, out var entry));
+        entry.Dispose();
+
+        // Act: must not throw an unhandled ObjectDisposedException.
+        var response = await provider.ProcessPromptAsync(
+            session.SessionId, new PromptMessage { Text = "hi" }, streamer.Object, CancellationToken.None);
+
+        // Assert: a clean protocol error.
+        Assert.Equal(StopReason.Error, response.StopReason);
+        Assert.Contains("no longer available", response.Error);
     }
 
     // ----- Error handling -----
