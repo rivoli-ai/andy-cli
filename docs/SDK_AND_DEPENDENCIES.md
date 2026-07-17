@@ -12,21 +12,23 @@ pinned in [`global.json`](../global.json):
 ```json
 {
   "sdk": {
-    "version": "8.0.302",
-    "rollForward": "latestFeature",
+    "version": "8.0.0",
+    "rollForward": "latestMinor",
     "allowPrerelease": false
   }
 }
 ```
 
-- `version: 8.0.302` selects the 8.0.3xx feature band as the floor.
-- `rollForward: latestFeature` allows the newest installed feature band **within
-  .NET 8** (for example 8.0.4xx) but never rolls forward to .NET 9 or later. This
-  is deliberately different from `latestMajor`, which previously let a host with
-  only .NET 9 installed build the CLI against the wrong toolchain and silently
-  pull in C# 13 / .NET 9-only language behavior.
-- The pin is intentionally not tighter than a feature band, so any 8.0.3xx (or
-  newer 8.0.x) SDK satisfies it and 8.0.302 remains valid where available.
+- `version: 8.0.0` sets the .NET 8 line as the floor without pinning a specific
+  feature band, so any installed 8.0.x SDK satisfies it.
+- `rollForward: latestMinor` selects the **highest installed .NET 8 SDK** on the
+  host (for example 8.0.100, 8.0.204, or 8.0.4xx) but never rolls forward to
+  .NET 9 or later. This is deliberately different from `latestMajor`, which
+  previously let a host with only .NET 9 installed build the CLI against the
+  wrong toolchain and silently pull in C# 13 / .NET 9-only language behavior.
+- The policy accepts any installed .NET 8.x SDK, so local developers whose only
+  .NET 8 SDK is a lower feature band (for example 8.0.100 or 8.0.204) are not
+  hard-failed, while .NET 9.x hosts are still refused.
 
 ### Why this matters
 

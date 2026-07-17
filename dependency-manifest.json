@@ -4,11 +4,10 @@
   "updated": "2026-07-17",
   "sdk": {
     "channel": "8.0",
-    "featureBand": "8.0.3xx",
-    "pinnedVersion": "8.0.302",
-    "rollForward": "latestFeature",
+    "minimumVersion": "8.0.0",
+    "rollForward": "latestMinor",
     "allowPrerelease": false,
-    "policy": "The build must run on a .NET 8 SDK (feature band 8.0.3xx or newer within 8.0). global.json enforces this; CI and local dev verify with scripts/assert-sdk-version.sh."
+    "policy": "The build must run on a .NET 8 SDK. global.json (version 8.0.0, rollForward latestMinor) accepts the highest installed 8.0.x SDK on any host and never rolls forward to 9.x; CI and local dev verify with scripts/assert-sdk-version.sh."
   },
   "targetFramework": "net8.0",
   "engine": {

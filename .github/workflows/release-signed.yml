@@ -39,8 +39,17 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      # Gate: the pinned global.json band must resolve to a .NET 8 SDK.
+      # See docs/SDK_AND_DEPENDENCIES.md (issue #172).
+      - name: Assert .NET 8 SDK
+        shell: bash
+        run: |
+          chmod +x scripts/assert-sdk-version.sh
+          scripts/assert-sdk-version.sh
+
+      # Reproducible restore from the committed packages.lock.json graph.
       - name: Restore dependencies
-        run: dotnet restore
+        run: dotnet restore --locked-mode
 
       - name: Run tests
         run: dotnet test --no-restore --verbosity normal
@@ -131,8 +140,17 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      # Gate: the pinned global.json band must resolve to a .NET 8 SDK.
+      # See docs/SDK_AND_DEPENDENCIES.md (issue #172).
+      - name: Assert .NET 8 SDK
+        shell: bash
+        run: |
+          chmod +x scripts/assert-sdk-version.sh
+          scripts/assert-sdk-version.sh
+
+      # Reproducible restore from the committed packages.lock.json graph.
       - name: Restore dependencies
-        run: dotnet restore
+        run: dotnet restore --locked-mode
 
       - name: Run tests
         run: dotnet test --no-restore --verbosity normal
@@ -205,8 +223,17 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      # Gate: the pinned global.json band must resolve to a .NET 8 SDK.
+      # See docs/SDK_AND_DEPENDENCIES.md (issue #172).
+      - name: Assert .NET 8 SDK
+        shell: bash
+        run: |
+          chmod +x scripts/assert-sdk-version.sh
+          scripts/assert-sdk-version.sh
+
+      # Reproducible restore from the committed packages.lock.json graph.
       - name: Restore dependencies
-        run: dotnet restore
+        run: dotnet restore --locked-mode
 
       - name: Run tests
         run: dotnet test --no-restore --verbosity normal
