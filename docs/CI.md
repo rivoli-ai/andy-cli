@@ -26,6 +26,12 @@ The `validate.yml` pipeline runs three jobs:
    - `dotnet build` in Release with compiler warnings left visible (warnings are
      neither suppressed nor promoted to errors).
    - `dotnet format --verify-no-changes` (fails if the tree is not formatted).
+     Note: the repository tree must be brought into `dotnet format` compliance
+     before (or at the moment) this gate is enabled, or the check will fail on a
+     pre-existing formatting backlog. The local fix is to run
+     `dotnet format Andy.Cli.sln`; the one-time whole-tree reformat is applied
+     during integration on `main` rather than on this branch, to avoid a massive
+     diff that conflicts with other in-flight branches.
    - The FULL test suite with `--collect:"XPlat Code Coverage"`.
    - A readable coverage summary rendered by ReportGenerator into the job summary
      panel, plus the Cobertura report uploaded as an artifact.
@@ -45,9 +51,18 @@ The `validate.yml` pipeline runs three jobs:
 
 ## Supply-chain notes
 
-All `actions/*` steps are pinned to a full commit SHA (with the human-readable
-version in a trailing comment) rather than a floating tag, per issue #173. When
-bumping an action, update both the SHA and the comment.
+The CI workflows (`validate.yml` and `ci.yml`) pin every `actions/*` step to a
+full commit SHA (with the human-readable version in a trailing comment) rather
+than a floating tag. When bumping an action, update both the SHA and the
+comment. SHA pinning for the release workflows (`release.yml` and
+`release-signed.yml`, which still use floating tags on this branch) is delivered
+separately by issue #173.
+
+The gitleaks binary is likewise pinned: `validate.yml` downloads a fixed
+`GITLEAKS_VERSION` and verifies it against a recorded sha256 (`sha256sum -c`)
+instead of resolving the latest release through an unauthenticated
+api.github.com call, which is rate-limited and would fail the security job
+flakily on busy pull requests.
 
 ## Local equivalents
 

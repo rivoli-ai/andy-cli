@@ -111,7 +111,15 @@ jobs:
         run: |
           set -euo pipefail
           echo "Scanning direct and transitive packages for known vulnerabilities..."
-          report="$(dotnet list Andy.Cli.sln package --vulnerable --include-transitive || true)"
+          # Do NOT swallow the command's failure: a restore/network error must
+          # fail the job, never read as "clean". dotnet list exits 0 even when
+          # it reports vulnerabilities, so any non-zero exit here is a real tool
+          # error and must abort the gate rather than pass silently.
+          if ! report="$(dotnet list Andy.Cli.sln package --vulnerable --include-transitive)"; then
+            echo "$report"
+            echo "::error::dotnet list --vulnerable failed (restore/network error); dependency audit could not run."
+            exit 1
+          fi
           echo "$report"
           if echo "$report" | grep -Eiq '\b(High|Critical)\b'; then
             echo "::error::High or Critical severity vulnerabilities found in dependencies."
@@ -119,16 +127,24 @@ jobs:
           fi
           echo "No High/Critical vulnerabilities detected."
 
-      # Secret scan. This repo deliberately downloads the pinned gitleaks binary
-      # (verified by version) instead of a third-party marketplace action, so no
-      # unpinned Action code runs in CI. See release.yml for the same approach.
+      # Secret scan. This repo deliberately downloads a pinned gitleaks binary
+      # (fixed version + verified sha256) instead of a third-party marketplace
+      # action, so no unpinned Action code runs in CI. The version is pinned
+      # rather than resolved via an unauthenticated api.github.com latest-release
+      # lookup, which is rate-limited (60/hr/IP) and would fail the job flakily
+      # on busy PRs. Bump GITLEAKS_VERSION and the checksum together; the
+      # checksum comes from the release's gitleaks_<version>_checksums.txt.
       - name: Scan for secrets with gitleaks
+        env:
+          GITLEAKS_VERSION: '8.18.4'
+          GITLEAKS_LINUX_X64_SHA256: 'ba6dbb656933921c775ee5a2d1c13a91046e7952e9d919f9bac4cec61d628e7d'
         run: |
           set -euo pipefail
-          TAG="$(curl -fsSL https://api.github.com/repos/gitleaks/gitleaks/releases/latest | grep -oP '"tag_name": *"\K[^"]+')"
-          VER="${TAG#v}"
-          echo "Using gitleaks ${TAG}"
-          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/${TAG}/gitleaks_${VER}_linux_x64.tar.gz" | tar -xz gitleaks
+          echo "Using gitleaks v${GITLEAKS_VERSION}"
+          curl -fsSL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_LINUX_X64_SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
           # --no-git scans the checked-out working tree (what actually gets compiled).
           ./gitleaks detect --no-git --source . --redact --verbose --exit-code 1
 
