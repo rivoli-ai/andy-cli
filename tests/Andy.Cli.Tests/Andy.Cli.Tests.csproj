@@ -108,6 +108,7 @@
     <Compile Include="Input/MouseDefaultRegressionTests.cs" />
     <!-- Code indexing tests -->
     <Compile Include="Tools/CodeIndexToolTests.cs" />
+    <Compile Include="Services/CodeIndexingServiceTests.cs" />
     <!-- Tool spinner completion + concurrency regression tests -->
     <Compile Include="Services/ToolSpinnerCompletionTests.cs" />
     <!-- Turn-limit response handling (suppress engine history dump) -->

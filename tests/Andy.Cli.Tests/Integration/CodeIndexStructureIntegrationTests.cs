@@ -92,7 +92,7 @@ public sealed class CodeIndexStructureIntegrationTests
 
             var result = await exec.ExecuteAsync("code_index",
                 new Dictionary<string, object?> { ["query_type"] = "structure" },
-                new ToolExecutionContext { Permissions = new ToolPermissions { FileSystemAccess = true } });
+                new ToolExecutionContext { WorkingDirectory = dir, Permissions = new ToolPermissions { FileSystemAccess = true } });
 
             Assert.True(result.IsSuccessful, result.ErrorMessage);
 
