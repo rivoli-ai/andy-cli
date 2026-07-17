@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using Andy.Cli.Widgets;
 using Xunit;
 
@@ -6,6 +7,11 @@ namespace Andy.Cli.Tests.Widgets;
 
 public class ToolExecutionTraceTests
 {
+    // AddToolExecutionStart appends a trailing SpacerItem after each tool (visual separation), so the
+    // feed holds more than one item per tool. These tests assert on the RunningToolItem entries only.
+    private static List<IFeedItem> RunningTools(FeedView feed)
+        => feed.GetItemsForTesting().Where(i => i.GetType().Name == "RunningToolItem").ToList();
+
     [Fact]
     public void AddToolExecutionStart_WithParameters_CreatesRunningToolItem()
     {
@@ -21,10 +27,8 @@ public class ToolExecutionTraceTests
         feedView.AddToolExecutionStart("read_file", "Read File", parameters);
 
         // Assert
-        var items = feedView.GetItemsForTesting();
-        Assert.Single(items);
-        // RunningToolItem is internal, so check by type name
-        Assert.Equal("RunningToolItem", items[0].GetType().Name);
+        var runningTools = RunningTools(feedView);
+        Assert.Single(runningTools);
     }
 
     [Fact]
@@ -39,10 +43,8 @@ public class ToolExecutionTraceTests
         feedView.AddToolExecutionDetail("bash_command", "Found 10 files");
 
         // Assert
-        var items = feedView.GetItemsForTesting();
-        Assert.Single(items);
-        // RunningToolItem is internal, verify it exists and has correct type
-        Assert.Equal("RunningToolItem", items[0].GetType().Name);
+        var runningTools = RunningTools(feedView);
+        Assert.Single(runningTools);
     }
 
     [Fact]
@@ -56,11 +58,9 @@ public class ToolExecutionTraceTests
         feedView.AddToolExecutionComplete("update_file", true, "1.5s", "Updated 5 lines");
 
         // Assert
-        var items = feedView.GetItemsForTesting();
-        Assert.Single(items);
-        // RunningToolItem is internal, verify completion through reflection
-        var runningTool = items[0];
-        Assert.Equal("RunningToolItem", runningTool.GetType().Name);
+        var runningTools = RunningTools(feedView);
+        Assert.Single(runningTools);
+        var runningTool = runningTools[0];
         var isCompleteProperty = runningTool.GetType().GetProperty("IsComplete");
         Assert.NotNull(isCompleteProperty);
         Assert.True((bool)isCompleteProperty.GetValue(runningTool)!);
@@ -85,13 +85,12 @@ public class ToolExecutionTraceTests
         feedView.AddToolExecutionComplete("tool1", false, "1.2s", "Error occurred");
 
         // Assert
-        var items = feedView.GetItemsForTesting();
-        Assert.Equal(2, items.Count);
+        var runningTools = RunningTools(feedView);
+        Assert.Equal(2, runningTools.Count);
 
-        // Both should be RunningToolItem instances and complete
-        foreach (var item in items)
+        // Both should be complete
+        foreach (var item in runningTools)
         {
-            Assert.Equal("RunningToolItem", item.GetType().Name);
             var isCompleteProperty = item.GetType().GetProperty("IsComplete");
             Assert.NotNull(isCompleteProperty);
             Assert.True((bool)isCompleteProperty.GetValue(item)!);

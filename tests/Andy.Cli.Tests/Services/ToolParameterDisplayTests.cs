@@ -19,7 +19,8 @@ namespace Andy.Cli.Tests.Services
                 { "timezone", "UTC" }
             };
 
-            var toolItem = new RunningToolItem("test_id", "datetime_tool", parameters);
+            var toolItem = new RunningToolItem("test_id", "datetime_tool");
+            toolItem.SetParameters(parameters);
 
             // Act - Use reflection to call the private method
             var getParameterDisplayMethod = typeof(RunningToolItem).GetMethod(
@@ -40,7 +41,8 @@ namespace Andy.Cli.Tests.Services
         {
             // Arrange
             var emptyParameters = new Dictionary<string, object?>();
-            var toolItem = new RunningToolItem("test_id", "datetime_tool", emptyParameters);
+            var toolItem = new RunningToolItem("test_id", "datetime_tool");
+            toolItem.SetParameters(emptyParameters);
 
             // Act - Use reflection to call the private method
             var getParameterDisplayMethod = typeof(RunningToolItem).GetMethod(
@@ -59,7 +61,8 @@ namespace Andy.Cli.Tests.Services
         {
             // Arrange
             var initialParameters = new Dictionary<string, object?>();
-            var toolItem = new RunningToolItem("test_id", "datetime_tool", initialParameters);
+            var toolItem = new RunningToolItem("test_id", "datetime_tool");
+            toolItem.SetParameters(initialParameters);
 
             // Act - Update with real parameters
             var newParameters = new Dictionary<string, object?>
@@ -67,7 +70,7 @@ namespace Andy.Cli.Tests.Services
                 { "operation", "day_of_week" },
                 { "format", "full" }
             };
-            toolItem.UpdateParameters(newParameters);
+            toolItem.SetParameters(newParameters);
 
             // Get display using reflection
             var getParameterDisplayMethod = typeof(RunningToolItem).GetMethod(

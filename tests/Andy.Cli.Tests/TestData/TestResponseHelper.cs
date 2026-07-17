@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Andy.Model.Llm;
+using Andy.Model.Model;
 
 namespace Andy.Cli.Tests.TestData;
 
@@ -15,7 +16,7 @@ public static class TestResponseHelper
     {
         return new LlmResponse
         {
-            Content = sampleResponse,
+            AssistantMessage = new Message { Role = Role.Assistant, Content = sampleResponse },
             Model = "test-model",
             FinishReason = "stop"
         };
@@ -100,7 +101,7 @@ public static class TestResponseHelper
             var chunk = response.Substring(i, Math.Min(chunkSize, response.Length - i));
             chunks.Add(new LlmStreamResponse
             {
-                TextDelta = chunk,
+                Delta = new Message { Role = Role.Assistant, Content = chunk },
                 IsComplete = i + chunkSize >= response.Length
             });
         }

@@ -25,13 +25,21 @@ public class ToolAdapterTests
         _mockLogger = new Mock<ILogger<ToolAdapter>>();
     }
 
+    // IToolRegistry.GetTool now returns a ToolRegistration wrapping the tool metadata
+    // (was ITool). ToolAdapter only reads .Metadata, so wrapping is sufficient.
+    private static ToolRegistration Reg(ITool tool) => new()
+    {
+        Metadata = tool.Metadata,
+        ToolType = tool.GetType()
+    };
+
     [Fact]
     public void ToolAdapter_ConvertsEnumValuesToJsonSchema()
     {
         // Arrange
         var toolId = "test_tool";
         var tool = new TestToolWithEnum();
-        _mockToolRegistry.Setup(r => r.GetTool(toolId)).Returns(tool);
+        _mockToolRegistry.Setup(r => r.GetTool(toolId)).Returns(Reg(tool));
 
         // Act
         var adapter = new ToolAdapter(toolId, _mockToolRegistry.Object, _mockToolExecutor.Object, _mockLogger.Object);
@@ -54,7 +62,8 @@ public class ToolAdapterTests
         Assert.Equal("string", queryTypeSchema["type"]);
         Assert.True(queryTypeSchema.ContainsKey("enum"));
 
-        var enumValues = queryTypeSchema["enum"] as string[];
+        // AllowedValues is object-typed, so ToolAdapter emits the enum as object[].
+        var enumValues = queryTypeSchema["enum"] as object[];
         Assert.NotNull(enumValues);
         Assert.Contains("symbols", enumValues);
         Assert.Contains("structure", enumValues);
@@ -68,7 +77,7 @@ public class ToolAdapterTests
         // Arrange
         var toolId = "test_array_tool";
         var tool = new TestToolWithArray();
-        _mockToolRegistry.Setup(r => r.GetTool(toolId)).Returns(tool);
+        _mockToolRegistry.Setup(r => r.GetTool(toolId)).Returns(Reg(tool));
 
         // Act
         var adapter = new ToolAdapter(toolId, _mockToolRegistry.Object, _mockToolExecutor.Object, _mockLogger.Object);
@@ -101,7 +110,7 @@ public class ToolAdapterTests
         // Arrange
         var toolId = "test_default_tool";
         var tool = new TestToolWithDefaults();
-        _mockToolRegistry.Setup(r => r.GetTool(toolId)).Returns(tool);
+        _mockToolRegistry.Setup(r => r.GetTool(toolId)).Returns(Reg(tool));
 
         // Act
         var adapter = new ToolAdapter(toolId, _mockToolRegistry.Object, _mockToolExecutor.Object, _mockLogger.Object);
@@ -127,7 +136,7 @@ public class ToolAdapterTests
         // Arrange
         var toolId = "test_required_tool";
         var tool = new TestToolWithRequired();
-        _mockToolRegistry.Setup(r => r.GetTool(toolId)).Returns(tool);
+        _mockToolRegistry.Setup(r => r.GetTool(toolId)).Returns(Reg(tool));
 
         // Act
         var adapter = new ToolAdapter(toolId, _mockToolRegistry.Object, _mockToolExecutor.Object, _mockLogger.Object);
@@ -156,14 +165,15 @@ public class ToolAdapterTests
         {
             new TestTool("list_directory"),
             new TestTool("read_file"),
-            new TestTool("bash_command"),
+            new TestTool("execute_command"),
             new TestTool("search_files"),
             new TestTool("write_file"),     // Not essential for Cerebras
             new TestTool("code_index"),     // Not essential for Cerebras
             new TestTool("system_info")     // Not essential for Cerebras
         };
 
-        mockRegistry.Setup(r => r.GetTools(true)).Returns(allTools);
+        mockRegistry.Setup(r => r.GetTools(It.IsAny<ToolCategory?>(), It.IsAny<ToolCapability?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<bool>()))
+            .Returns(allTools.Select(Reg).ToList());
 
         // Act - Create adapter with Cerebras provider
         var adapter = new ToolRegistryAdapter(mockRegistry.Object, mockExecutor.Object, mockLogger.Object, "cerebras");
@@ -177,7 +187,7 @@ public class ToolAdapterTests
         var toolNames = registeredToolNames.ToHashSet();
         Assert.Contains("list_directory", toolNames);
         Assert.Contains("read_file", toolNames);
-        Assert.Contains("bash_command", toolNames);
+        Assert.Contains("execute_command", toolNames);
         Assert.Contains("search_files", toolNames);
         Assert.DoesNotContain("write_file", toolNames);
         Assert.DoesNotContain("code_index", toolNames);
@@ -200,7 +210,8 @@ public class ToolAdapterTests
             new TestTool("system_info")
         };
 
-        mockRegistry.Setup(r => r.GetTools(true)).Returns(allTools);
+        mockRegistry.Setup(r => r.GetTools(It.IsAny<ToolCategory?>(), It.IsAny<ToolCapability?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<bool>()))
+            .Returns(allTools.Select(Reg).ToList());
 
         // Act - Create adapter with OpenAI provider
         var adapter = new ToolRegistryAdapter(mockRegistry.Object, mockExecutor.Object, null, "openai");
