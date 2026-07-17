@@ -43,6 +43,21 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="9.0.9" />
   </ItemGroup>
 
+  <!--
+    Security remediation (#169): pin patched versions of transitive System.*
+    packages pulled in via Andy.Tools.Pdf / Andy.Doc.Pdf / CSJ2K and
+    Andy.CodeIndex.Infrastructure / Microsoft.AspNetCore.DataProtection.
+    These direct references override the vulnerable transitive versions.
+    On net8.0 the runtime provides System.Net.Http / System.Text.RegularExpressions,
+    so the patched 4.3.x packages only serve to remove the advisories from the graph.
+    Re-audit with the dotnet list package vulnerable/include-transitive command.
+  -->
+  <ItemGroup>
+    <PackageReference Include="System.Net.Http" Version="4.3.4" />
+    <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="8.0.3" />
+  </ItemGroup>
+
   <ItemGroup>
     <None Update="appsettings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
