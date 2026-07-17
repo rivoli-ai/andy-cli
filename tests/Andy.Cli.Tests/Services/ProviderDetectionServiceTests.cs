@@ -53,11 +53,10 @@ public class ProviderDetectionServiceTests
     }
 
     [Fact]
-    public void DetectDefaultProvider_WithAzureCredentials_ReturnsAzure()
+    public void DetectDefaultProvider_WithOnlyGroq_ReturnsGroq()
     {
         // Arrange
-        var originalKey = Environment.GetEnvironmentVariable("AZURE_OPENAI_API_KEY");
-        var originalEndpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT");
+        var originalGroq = Environment.GetEnvironmentVariable("GROQ_API_KEY");
         var originalOllama = Environment.GetEnvironmentVariable("OLLAMA_API_BASE");
         var originalSkipOllama = Environment.GetEnvironmentVariable("ANDY_SKIP_OLLAMA");
         var originalOpenRouter = Environment.GetEnvironmentVariable("OPENROUTER_API_KEY");
@@ -77,21 +76,20 @@ public class ProviderDetectionServiceTests
             Environment.SetEnvironmentVariable("CEREBRAS_API_KEY", null);
             Environment.SetEnvironmentVariable("GOOGLE_API_KEY", null);
 
-            // Set Azure
-            Environment.SetEnvironmentVariable("AZURE_OPENAI_API_KEY", "test-key");
-            Environment.SetEnvironmentVariable("AZURE_OPENAI_ENDPOINT", "https://test.openai.azure.com");
+            // Set Groq
+            Environment.SetEnvironmentVariable("GROQ_API_KEY", "test-groq-key");
             var service = new ProviderDetectionService();
 
             // Act
             var result = service.DetectDefaultProvider();
 
             // Assert
-            Assert.Equal("azure", result);
+            Assert.Equal("groq", result);
+            Assert.True(service.IsProviderAvailable("groq"));
         }
         finally
         {
-            Environment.SetEnvironmentVariable("AZURE_OPENAI_API_KEY", originalKey);
-            Environment.SetEnvironmentVariable("AZURE_OPENAI_ENDPOINT", originalEndpoint);
+            Environment.SetEnvironmentVariable("GROQ_API_KEY", originalGroq);
             Environment.SetEnvironmentVariable("OLLAMA_API_BASE", originalOllama);
             Environment.SetEnvironmentVariable("ANDY_SKIP_OLLAMA", originalSkipOllama);
             Environment.SetEnvironmentVariable("OPENROUTER_API_KEY", originalOpenRouter);

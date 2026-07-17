@@ -5,133 +5,59 @@ using System.Linq;
 namespace Andy.Cli.Services;
 
 /// <summary>
-/// Service for detecting available LLM providers based on environment variables
+/// Service for detecting available LLM providers based on environment variables.
+/// The provider set, priorities, and required env vars come from
+/// <see cref="ProviderRegistry"/> so detection stays in sync with the /model command.
 /// </summary>
 public class ProviderDetectionService
 {
-    private readonly struct ProviderInfo
-    {
-        public string Name { get; init; }
-        public string[] RequiredEnvVars { get; init; }
-        public int Priority { get; init; }
-    }
-
-    private static readonly ProviderInfo[] Providers = new[]
-    {
-        new ProviderInfo
-        {
-            Name = "openrouter",
-            RequiredEnvVars = new[] { "OPENROUTER_API_KEY" },
-            Priority = 0 // Preferred when its key is present (default Mimo-v2.5 setup)
-        },
-        new ProviderInfo
-        {
-            Name = "openai",
-            RequiredEnvVars = new[] { "OPENAI_API_KEY" },
-            Priority = 1 // Most reliable fallback
-        },
-        new ProviderInfo
-        {
-            Name = "anthropic",
-            RequiredEnvVars = new[] { "ANTHROPIC_API_KEY" },
-            Priority = 2
-        },
-        new ProviderInfo
-        {
-            Name = "cerebras",
-            RequiredEnvVars = new[] { "CEREBRAS_API_KEY" },
-            Priority = 3
-        },
-        new ProviderInfo
-        {
-            Name = "gemini",
-            RequiredEnvVars = new[] { "GOOGLE_API_KEY" },
-            Priority = 4
-        },
-        new ProviderInfo
-        {
-            Name = "ollama",
-            RequiredEnvVars = Array.Empty<string>(), // Ollama doesn't require API key
-            Priority = 5
-        },
-        new ProviderInfo
-        {
-            Name = "azure",
-            RequiredEnvVars = new[] { "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT" },
-            Priority = 6
-        }
-    };
-
     /// <summary>
     /// Detects the default provider based on available environment variables
     /// </summary>
-    /// <returns>The name of the detected provider, or null if none found</returns>
+    /// <returns>The canonical id of the detected provider, or null if none found</returns>
     public string? DetectDefaultProvider()
     {
-        var availableProviders = new List<(string name, int priority)>();
-
-        foreach (var provider in Providers)
-        {
-            if (IsProviderAvailable(provider))
-            {
-                availableProviders.Add((provider.Name, provider.Priority));
-            }
-        }
-
-        // Return the provider with the highest priority (lowest number)
-        return availableProviders
-            .OrderBy(p => p.priority)
-            .Select(p => p.name)
+        return ProviderRegistry.All
+            .Where(IsProviderAvailable)
+            .OrderBy(p => p.DetectionPriority)
+            .Select(p => p.Id)
             .FirstOrDefault();
     }
 
     /// <summary>
     /// Gets all available providers ordered by priority
     /// </summary>
-    /// <returns>List of available provider names</returns>
+    /// <returns>List of available provider ids</returns>
     public List<string> GetAvailableProviders()
     {
-        var availableProviders = new List<(string name, int priority)>();
-
-        foreach (var provider in Providers)
-        {
-            if (IsProviderAvailable(provider))
-            {
-                availableProviders.Add((provider.Name, provider.Priority));
-            }
-        }
-
-        return availableProviders
-            .OrderBy(p => p.priority)
-            .Select(p => p.name)
+        return ProviderRegistry.All
+            .Where(IsProviderAvailable)
+            .OrderBy(p => p.DetectionPriority)
+            .Select(p => p.Id)
             .ToList();
     }
 
     /// <summary>
-    /// Checks if a specific provider is available
+    /// Checks if a specific provider (by id or alias) is available
     /// </summary>
     public bool IsProviderAvailable(string providerName)
     {
-        var provider = Providers.FirstOrDefault(p =>
-            p.Name.Equals(providerName, StringComparison.OrdinalIgnoreCase));
-
-        if (provider.Name == null)
+        var descriptor = ProviderRegistry.Find(providerName);
+        if (descriptor == null)
             return false;
 
-        return IsProviderAvailable(provider);
+        return IsProviderAvailable(descriptor);
     }
 
-    private bool IsProviderAvailable(ProviderInfo provider)
+    private bool IsProviderAvailable(ProviderDescriptor provider)
     {
-        // Special case for Ollama - check if it's running
-        if (provider.Name == "ollama")
+        // Local providers (e.g. Ollama) are detected by probing rather than by env var
+        if (provider.IsLocal)
         {
             return IsOllamaRunning();
         }
 
-        // For other providers, check if all required environment variables are set
-        return provider.RequiredEnvVars.All(envVar =>
-            !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(envVar)));
+        return ProviderRegistry.HasCredentials(provider.Id);
     }
 
     private bool IsOllamaRunning()
@@ -182,17 +108,17 @@ public class ProviderDetectionService
         info.AppendLine("Provider Detection Diagnostics:");
         info.AppendLine("-------------------------------");
 
-        foreach (var provider in Providers.OrderBy(p => p.Priority))
+        foreach (var provider in ProviderRegistry.All.OrderBy(p => p.DetectionPriority))
         {
-            info.Append($"{provider.Name} (priority {provider.Priority}): ");
+            info.Append($"{provider.Id} (priority {provider.DetectionPriority}): ");
 
-            if (provider.Name == "ollama")
+            if (provider.IsLocal)
             {
                 info.AppendLine(IsOllamaRunning() ? "Available (running)" : "Not available");
             }
             else
             {
-                var missingVars = provider.RequiredEnvVars
+                var missingVars = provider.ApiKeyEnvVars
                     .Where(v => string.IsNullOrEmpty(Environment.GetEnvironmentVariable(v)))
                     .ToList();
 

@@ -5,6 +5,23 @@ namespace Andy.Cli.Services.Prompts;
 /// <summary>
 /// Provides pre-configured system prompts for different scenarios.
 /// </summary>
+/// <remarks>
+/// System-prompt composition status (issue #174):
+/// All non-headless modes compose their prompt through this helper (the shared
+/// <see cref="SystemPromptBuilder"/> pipeline), but they still enter it via different methods:
+/// <list type="bullet">
+///   <item>Interactive TUI (Program.BuildSystemPrompt) uses <see cref="GetPromptWithTools"/>,
+///   injecting the available tools plus the current model/provider.</item>
+///   <item>The ACP server (AndyAgentProvider) and <c>SimpleAssistantService</c> use
+///   <see cref="GetDefaultCliPrompt"/> (no tool list / model context).</item>
+///   <item>The headless runner intentionally uses the caller-supplied
+///   <c>config.Agent.Instructions</c> as the system prompt (the run's objective).</item>
+/// </list>
+/// The provider registry has been centralized (<see cref="Andy.Cli.Services.ProviderRegistry"/>),
+/// but fully unifying the prompt bodies across modes (e.g. making the ACP path tool-aware) is
+/// deferred: the modes have deliberately different context needs and headless is caller-driven.
+/// Tracked as remaining work for #174.
+/// </remarks>
 public static class SystemPrompts
 {
     /// <summary>
