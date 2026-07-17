@@ -21,8 +21,13 @@ public sealed record HeadlessRunConfig
     public IReadOnlyDictionary<string, string>? EnvVars { get; init; }
     public HeadlessOutput Output { get; init; } = new();
     public HeadlessEventSink? EventSink { get; init; }
-    public Guid? PolicyId { get; init; }
-    public IReadOnlyList<string>? Boundaries { get; init; }
+
+    // rivoli-ai/andy-cli#180: policy_id and boundaries were removed from the v1
+    // contract. The runtime enforced neither, so carrying them created FALSE
+    // security assurance (a config tagged "read-only"/"no-prod" was in no way
+    // constrained). They are now rejected as unknown properties at load time.
+    // Enforceable per-run controls live in `permissions.allowed_tools`; a real
+    // policy/boundary engine, if reintroduced, ships in a future schema version.
 
     // AX.4 (rivoli-ai/conductor#2091): per-run permission allow-list. Headless is
     // fail-closed (AddAndyCliPermissions(services, null) → no interactive broker),

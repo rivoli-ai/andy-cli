@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://rivoli-ai.com/schemas/andy-cli/headless-config.v1.json",
   "title": "Andy CLI headless run config v1",
-  "description": "Schema for the config file consumed by `andy-cli run --headless --config <path>`. See Epic AQ (rivoli-ai/andy-cli#44) and docs/headless-runtime.md for the full semantics.",
+  "description": "Schema for the config file consumed by `andy-cli run --headless --config <path>`. Every field here is applied or verified by the runtime; there are no silent no-ops. `policy_id` and `boundaries` were REMOVED from v1 because the runtime enforced neither and their presence created false security assurance (rivoli-ai/andy-cli#180) - configs carrying them are now rejected as unknown properties. See docs/headless-runtime.md, docs/adr/0002-headless-v1-inactive-fields.md, and Epic AQ (rivoli-ai/andy-cli#44) for the full semantics.",
   "type": "object",
   "required": [
     "schema_version",
@@ -48,7 +48,7 @@
         },
         "output_format": {
           "type": "string",
-          "description": "Optional hint for the agent's final output: a free-form label like 'plain' or a schema reference like 'json-triage-output-v1'."
+          "description": "Enforced format for the agent's final output. A label beginning with 'json' (case-insensitive, e.g. 'json', 'json-triage-output-v1') requires the final output to be syntactically valid JSON; the run fails (exit 1) if it is not. Any other label (e.g. 'plain') is treated as free-form and not enforced by the runtime."
         }
       }
     },
@@ -68,7 +68,8 @@
         },
         "api_key_ref": {
           "type": "string",
-          "description": "How to resolve the API key. Supported prefixes: 'env:NAME' (read env var), 'secret-store:NAME' (future). Never the bare key value."
+          "pattern": "^env:[A-Za-z_][A-Za-z0-9_]*$",
+          "description": "How to resolve the API key. The ONLY form implemented in v1 is 'env:NAME' (read env var NAME). 'secret-store:NAME' and bare key values are rejected at load time (exit 2). When present, the referenced env var's value is loaded into the provider's API key; the value is never logged or emitted."
         }
       }
     },
@@ -132,14 +133,14 @@
         },
         "branch": {
           "type": "string",
-          "description": "Git branch the run operates on."
+          "description": "Git branch the run is expected to operate on. The container runtime checks this branch out before launch; the headless runtime VERIFIES it: if set, workspace.root must be a git work tree whose current branch matches, otherwise the run fails fast (exit 1). It does not itself check out or switch branches."
         }
       }
     },
     "env_vars": {
       "type": "object",
       "additionalProperties": { "type": "string" },
-      "description": "Additional env vars injected into the agent process. Reserved: ANDY_PROXY_URL, ANDY_TOKEN, ANDY_MCP_URL are always set by the container runtime (Epic Y5)."
+      "description": "Additional env vars set into the agent process environment before provider/tool wiring. Reserved names ANDY_PROXY_URL, ANDY_TOKEN, ANDY_MCP_URL are always set by the container runtime and MUST NOT appear here; a config that tries to shadow one is rejected at load time (exit 2)."
     },
     "output": {
       "type": "object",
@@ -152,7 +153,7 @@
         },
         "stream": {
           "enum": ["stdout", "fifo"],
-          "description": "Where the structured event stream goes. 'stdout' is the default; 'fifo' names a separate path (set via event_sink.path)."
+          "description": "Where the structured event stream goes. 'stdout' (default) writes NDJSON to standard output; 'fifo' writes it to the named FIFO at event_sink.path, which then becomes REQUIRED (see the top-level allOf/if-then). The runtime opens that path for writing and streams every event to it."
         }
       }
     },
@@ -167,19 +168,10 @@
         },
         "path": {
           "type": "string",
-          "description": "Absolute path to a named FIFO when output.stream == 'fifo'."
+          "minLength": 1,
+          "description": "Absolute path to a named FIFO. Required when output.stream == 'fifo'; the runtime opens it for writing and streams every event to it."
         }
       }
-    },
-    "policy_id": {
-      "type": "string",
-      "format": "uuid",
-      "description": "Resolved policy UUID from andy-rbac (Epic V). Null-ish until V lands platform-wide."
-    },
-    "boundaries": {
-      "type": "array",
-      "items": { "type": "string" },
-      "description": "Policy-derived boundary tags (e.g. 'read-only', 'no-prod', 'draft-only'). Runtime uses these as guard-rails; the authoritative evaluation happens server-side at each tool call."
     },
     "permissions": {
       "type": "object",
@@ -216,5 +208,28 @@
         }
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "$comment": "Cross-field requirement: FIFO event streaming needs a sink path. When output.stream is 'fifo', event_sink.path must be present so the runtime knows where to write the event stream.",
+      "if": {
+        "required": ["output"],
+        "properties": {
+          "output": {
+            "required": ["stream"],
+            "properties": { "stream": { "const": "fifo" } }
+          }
+        }
+      },
+      "then": {
+        "required": ["event_sink"],
+        "properties": {
+          "event_sink": {
+            "required": ["path"],
+            "properties": { "path": { "type": "string", "minLength": 1 } }
+          }
+        }
+      }
+    }
+  ]
 }

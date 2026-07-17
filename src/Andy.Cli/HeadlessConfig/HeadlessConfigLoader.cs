@@ -69,6 +69,26 @@ public static class HeadlessConfigLoader
             return HeadlessConfigLoadResult.Fail("Config parsed to null (empty document).");
         }
 
+        // rivoli-ai/andy-cli#180: policy_id and boundaries were removed from v1
+        // because the runtime enforced neither and their presence created false
+        // security assurance. The schema now rejects them as unknown properties,
+        // but that produces a cryptic additionalProperties error; detect them here
+        // first so the operator gets an actionable message.
+        if (node is JsonObject rootObj)
+        {
+            foreach (var removed in RemovedFields)
+            {
+                if (rootObj.ContainsKey(removed))
+                {
+                    return HeadlessConfigLoadResult.Fail(
+                        $"Config field '{removed}' is not supported in headless-config.v1. It was "
+                            + "removed because the runtime enforced no such control, so it created "
+                            + "false security assurance. Remove it. Use permissions.allowed_tools for "
+                            + "enforceable per-run tool controls. See docs/adr/0002-headless-v1-inactive-fields.md.");
+                }
+            }
+        }
+
         // Schema validation must happen against a JsonElement tree; JsonSchema.Net
         // 9.x's primary overload is element-based. Convert once so error formatting
         // and deserialization can share the same underlying bytes.
@@ -105,8 +125,22 @@ public static class HeadlessConfigLoader
             return HeadlessConfigLoadResult.Fail("Config deserialization returned null.");
         }
 
+        // rivoli-ai/andy-cli#180: cross-field and runtime-support checks the JSON
+        // Schema cannot express (api_key_ref scheme, reserved env-var protection,
+        // FIFO-requires-path). Fail fast with a clear, secret-free message.
+        var semanticError = HeadlessConfigValidator.Validate(config);
+        if (semanticError is not null)
+        {
+            return HeadlessConfigLoadResult.Fail(semanticError);
+        }
+
         return HeadlessConfigLoadResult.Ok(config);
     }
+
+    // Fields that were part of an earlier v1 draft but are rejected now. Kept as a
+    // named set so the loader can emit a targeted message instead of a generic
+    // additionalProperties schema error.
+    private static readonly string[] RemovedFields = { "policy_id", "boundaries" };
 
     // Schema $id declared in schemas/headless-config.v1.json. Kept as a local
     // constant so the registry-collision fallback below doesn't re-parse the

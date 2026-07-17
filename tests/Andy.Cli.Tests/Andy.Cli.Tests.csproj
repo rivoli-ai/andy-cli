@@ -156,6 +156,9 @@
     <Compile Include="Headless/HeadlessCapabilityToolExecutorTests.cs" />
     <!-- Headless SWE-style end-to-end task (real model; skips without OPENROUTER_API_KEY) -->
     <Compile Include="Headless/HeadlessSweTaskTests.cs" />
+    <!-- #180 v1 contract: reject/enforce previously-inactive fields -->
+    <Compile Include="HeadlessConfig/HeadlessV1ContractTests.cs" />
+    <Compile Include="Headless/HeadlessInactiveFieldsRuntimeTests.cs" />
     <!-- Interactive ProcessMessageAsync NRE reproduction (real model; skips without OPENROUTER_API_KEY) -->
     <Compile Include="Services/InteractiveAssistantReproTests.cs" />
     <!-- Re-enabled deterministic unit tests (previously excluded during the csproj API migration) -->

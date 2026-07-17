@@ -65,13 +65,21 @@ strongly-typed view is `HeadlessRunConfig` in
 | `agent` | Yes | object | Agent identity and resolved system prompt. See below. |
 | `model` | Yes | object | LLM provider and model selection. See below. |
 | `tools` | Yes | array | Concrete tool bindings the run may call. May be empty. See [Tool transports](#tool-transports). |
-| `workspace` | Yes | object | Mounted workspace root and optional branch. |
-| `env_vars` | No | object (string to string) | Extra env vars injected into the agent process. Reserved names (below) must not be shadowed. |
+| `workspace` | Yes | object | Mounted workspace root and optional (verified) branch. |
+| `env_vars` | No | object (string to string) | Extra env vars set into the agent process environment. Reserved names (below) must not be shadowed; a config that shadows one is rejected (exit 2). |
 | `output` | Yes | object | Where the final output file goes and where the event stream goes. |
-| `event_sink` | No | object | NATS subject and/or FIFO path metadata. |
-| `policy_id` | No | string (uuid) | Resolved policy UUID from andy-rbac. |
-| `boundaries` | No | array of strings | Policy-derived guard-rail tags (e.g. `read-only`, `no-prod`). Authoritative evaluation happens server-side at each tool call. |
+| `event_sink` | No | object | NATS subject and/or FIFO path. Required (with `path`) when `output.stream` is `fifo`. |
+| `permissions` | No | object | Per-run permission allow-list; see [Built-in tools and permission gating](#built-in-tools-and-permission-gating). The only enforceable per-run tool control in v1. |
 | `limits` | Yes | object | Iteration and wall-clock caps. |
+
+> **Removed in v1 (rivoli-ai/andy-cli#180): `policy_id` and `boundaries`.** The
+> runtime enforced neither, so a config tagged `read-only`/`no-prod` was in no way
+> constrained - a silent no-op that created false security assurance. Both fields
+> are now rejected as unknown properties (exit 2) with an actionable message. Use
+> `permissions.allowed_tools` for enforceable per-run tool controls. A real
+> policy/boundary engine, if reintroduced, ships in a future schema version, never
+> by overloading v1. See
+> [ADR 0002](adr/0002-headless-v1-inactive-fields.md).
 
 ### `agent`
 
@@ -82,7 +90,7 @@ Required: `slug`, `instructions`.
 | `slug` | Yes | Agent identifier. Lowercase ASCII, dash-separated, 2-64 chars (`^[a-z][a-z0-9-]{1,63}$`). |
 | `revision` | No | Integer >= 1; pins a specific agent revision. Absent = head. |
 | `instructions` | Yes | The resolved system prompt (agent instructions + delegation objective), 1-100000 chars. Used verbatim as the `SimpleAgent` system prompt. |
-| `output_format` | No | Free-form hint for the agent's final output, e.g. `plain` or `json-triage-output-v1`. |
+| `output_format` | No | Enforced output format. A label beginning with `json` (case-insensitive, e.g. `json`, `json-triage-output-v1`) requires the final output to be syntactically valid JSON; if it is not, the run fails with exit code `1` and **no output file is written**. Any other label (e.g. `plain`) is free-form and not constrained. |
 
 ### `model`
 
@@ -92,14 +100,16 @@ Required: `provider`, `id`.
 | --- | --- | --- |
 | `provider` | Yes | One of `anthropic`, `openai`, `openrouter`, `google`, `cerebras`, `groq`, `local`. |
 | `id` | Yes | Model identifier as recognized by the provider (e.g. `claude-sonnet-4-6`). Non-empty. |
-| `api_key_ref` | No | How to resolve the API key. Supported prefix today: `env:NAME` (read an env var). `secret-store:NAME` is reserved for the future. Never the bare key. |
+| `api_key_ref` | No | How to resolve the API key. The **only** form implemented in v1 is `env:NAME` (read env var `NAME`). `secret-store:NAME` and bare key values are rejected at load time (exit 2). Both the schema `pattern` and the config validator enforce this. |
 
-Key resolution note: the headless runner resolves providers through Andy.Llm's
-factory, which reads provider API keys from environment variables
-(`ConfigureLlmFromEnvironment`). In practice the env var referenced by
-`api_key_ref` must be present in the process environment. Resolution schemes
-beyond `env:` are not yet implemented (see `ResolveLlmProvider` in
-`HeadlessAgentRunner.cs`).
+Key resolution note: when `api_key_ref` is `env:NAME`, the runner loads that env
+var's value into the provider's API key so a config naming a non-default key var
+actually takes effect (`HeadlessAgentRunner.ApplyApiKeyRef`). The value is never
+written to a log or the event stream, and rejection messages never echo an
+offending value. If `NAME` is unset at launch, provider resolution falls back to
+the provider's default env var (`ConfigureLlmFromEnvironment`) or fails as an
+agent failure (exit 1). `secret-store:` is reserved for a future release and is
+not implemented.
 
 Model threading note: `ConfigureLlmFromEnvironment` only populates each
 provider's model from env vars (e.g. `OPENROUTER_MODEL`). Some providers,
@@ -115,7 +125,7 @@ Required: `root`.
 | Field | Required | Notes |
 | --- | --- | --- |
 | `root` | Yes | Absolute path inside the container to the mounted workspace (typically `/workspace`). |
-| `branch` | No | Git branch the run operates on. |
+| `branch` | No | Git branch the run is expected to operate on. **Verified, not applied:** the container runtime checks the branch out before launch; when `branch` is set, the runtime confirms `workspace.root` is a git work tree currently on that branch and fails fast (exit 1) on a mismatch or an unverifiable tree. It does not itself check out or switch branches. |
 
 ### `output`
 
@@ -123,8 +133,8 @@ Required: `file`, `stream`.
 
 | Field | Required | Notes |
 | --- | --- | --- |
-| `file` | Yes | Path to write the final output. Written atomically (temp file + rename) only after a successful run; absent on failure before the output stage. |
-| `stream` | Yes | `stdout` (default) or `fifo`. With `fifo`, the path is named in `event_sink.path`. |
+| `file` | Yes | Path to write the final output. Written atomically (temp file + rename) only after a successful run; absent on failure before the output stage. The temp file is cleaned up if the write fails or is cancelled mid-flight. |
+| `stream` | Yes | `stdout` (default) or `fifo`. `stdout` writes the NDJSON event stream to standard output. `fifo` redirects it to the named FIFO at `event_sink.path`, which then becomes **required** (enforced by the schema's cross-field rule); the runtime opens that path for writing and streams every event to it. |
 
 ### `event_sink`
 
@@ -133,7 +143,7 @@ Optional, closed object.
 | Field | Notes |
 | --- | --- |
 | `nats_subject` | NATS subject the container runtime fans events to (`^andy\.containers\.events\.run\.<run_id>\.<name>$`). The agent does not publish directly. |
-| `path` | Absolute path to a named FIFO when `output.stream == "fifo"`. |
+| `path` | Absolute path to a named FIFO. **Required** when `output.stream == "fifo"` (the schema's top-level `allOf`/`if`-`then` enforces this cross-field requirement). The runtime opens it for writing and streams every event to it. |
 
 ### `limits`
 
@@ -222,11 +232,28 @@ the [event stream](event-stream.md).
 
 ## Tool transports
 
-`tools[]` is a list of concrete bindings the run is allowed to call.
+`tools[]` is a list of concrete `cli`/`mcp` bindings the run may call.
 `HeadlessToolHost` (`src/Andy.Cli/Headless/HeadlessToolHost.cs`) turns each entry
-into an `ITool` adapter and registers it; no built-in tools are registered, so
-the agent's tool surface is exactly what the config lists. Two transports are
-supported.
+into an `ITool` adapter and registers it. Two transports are supported.
+
+### Built-in tools and permission gating
+
+The agent's tool surface is NOT limited to `tools[]`. In addition to the
+config-declared `cli`/`mcp` bindings, the runtime registers the assistant's
+built-in tool catalog (file, command, text, git, web, and utility tools) into the
+same registry (`HeadlessAgentRunner.RegisterBuiltInTools`, mirroring the
+interactive path), so a headless coding agent actually has file and command
+tools. Built-ins and config tools coexist in one registry.
+
+Built-in tools are permission-gated and **fail-closed**. Headless runs wire the
+permission engine with no interactive broker, so any tool that would normally
+prompt ("Ask") is DENIED: the mutating built-ins (`write_file`, `delete_file`,
+`move_file`, `copy_file`, `file_editor`, `replace_text`, `create_directory`) and
+`execute_command` are denied unless explicitly relaxed. Read-only built-ins
+(`read_file`, `list_directory`, `search_text`, `git_diff`, etc.) stay
+auto-allowed. To permit specific mutating tools for a run, list them in
+`permissions.allowed_tools` (see below); anything not listed stays denied. This
+allow-list is the ONLY enforceable per-run tool control in v1.
 
 ### `cli`
 
@@ -257,8 +284,10 @@ clear error rather than letting the LLM silently never call it.
 
 ### Reserved environment variables
 
-The container runtime always sets these; `env_vars` in the config must not
-shadow them:
+The container runtime always sets these. `env_vars` in the config must not
+shadow them; a config that lists any of these keys is rejected at load time
+(exit 2), so a run cannot repoint its own egress proxy, spoof its run token, or
+redirect the MCP gateway:
 
 | Variable | Purpose |
 | --- | --- |
@@ -266,9 +295,39 @@ shadow them:
 | `ANDY_TOKEN` | Run-scoped bearer token. When set, `HeadlessToolHost` attaches it as `Authorization: Bearer <token>` on every MCP request. The config cannot override it. |
 | `ANDY_PROXY_URL` | Egress proxy URL injected by the container runtime. |
 
+## Field enforcement summary
+
+Every v1 config field is applied or verified by the runtime; none is a silent
+no-op (rivoli-ai/andy-cli#180). Fields that could not be enforced were removed
+and are now rejected rather than left to imply a guarantee the runtime does not
+provide.
+
+| Field | Runtime behavior | On violation |
+| --- | --- | --- |
+| `schema_version`, `run_id`, `agent.slug`, `agent.instructions`, `model.provider`, `model.id`, `tools`, `workspace.root`, `output.file`, `limits.*` | Applied. | Schema rejection (exit 2). |
+| `agent.output_format` | Enforced: `json*` labels require valid-JSON output. | Exit 1, no output file. |
+| `model.api_key_ref` | `env:NAME` resolved into the provider key; value never logged. | Non-`env:` forms rejected (exit 2). |
+| `env_vars` | Set into the process environment. | Shadowing a reserved name rejected (exit 2). |
+| `workspace.branch` | Verified against the workspace's git HEAD. | Mismatch/unverifiable fails fast (exit 1). |
+| `output.stream: fifo` + `event_sink.path` | Event stream redirected to the FIFO. | Missing path rejected (schema + validator, exit 2). |
+| `permissions.allowed_tools` | Relaxes named tools from fail-closed default. | Unlisted tools stay denied. |
+| `agent.revision`, `event_sink.nats_subject` | Informational metadata; carried but not acted on by the agent (the container runtime consumes them). | n/a |
+| `policy_id`, `boundaries` | **Removed.** Rejected as unknown properties. | Rejected (exit 2). |
+
+## Versioning
+
+The contract evolves per [ADR 0001](adr/0001-headless-agent-runtime.md): within a
+major version changes are additive, and a breaking change ships as a new schema
+file (`headless-config.v2.json`) with `schema_version: 2`, never by overloading
+v1. The #180 removal of `policy_id`/`boundaries` is a deliberate, documented
+exception justified in [ADR 0002](adr/0002-headless-v1-inactive-fields.md):
+closing off an unenforceable field that created false security assurance takes
+priority over strict additivity, and a real policy engine would arrive as v2.
+
 ## See also
 
 - [Event stream](event-stream.md) — the NDJSON event contract.
 - [ADR 0001: headless agent runtime](adr/0001-headless-agent-runtime.md) — why one binary hosts both modes, and the versioning strategy.
+- [ADR 0002: headless v1 inactive fields](adr/0002-headless-v1-inactive-fields.md) — implement-or-reject decisions for previously no-op v1 fields.
 - [`schemas/headless-config.v1.json`](../schemas/headless-config.v1.json) — the config schema.
 - [`schemas/samples/`](../schemas/samples) — example configs.

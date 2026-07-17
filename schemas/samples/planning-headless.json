@@ -37,7 +37,6 @@
     "file": "/workspace/.andy-run/output.json",
     "stream": "stdout"
   },
-  "boundaries": ["draft-only"],
   "limits": {
     "max_iterations": 120,
     "timeout_seconds": 900

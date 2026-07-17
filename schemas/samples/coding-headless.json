@@ -47,7 +47,6 @@
     "file": "/workspace/.andy-run/output.json",
     "stream": "stdout"
   },
-  "boundaries": ["write-branch", "sandboxed"],
   "permissions": {
     "allowed_tools": [
       "read_file",
