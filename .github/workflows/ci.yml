@@ -1,0 +1,19 @@
+name: CI
+
+# Mandatory validation for every pull request and every push to main. This is
+# the required status check that must pass before a change can merge. It simply
+# delegates to the reusable validate.yml pipeline so that PR CI and the release
+# workflows enforce exactly the same gates.
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate
+    uses: ./.github/workflows/validate.yml
