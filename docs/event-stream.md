@@ -80,16 +80,32 @@ Emitted when a tool call completes, paired by `call_id` with its
 | --- | --- | --- |
 | `call_id` | string | Pairs with the `tool_call_started`. |
 | `tool_name` | string | The tool that finished. |
-| `ok` | boolean | Whether the call succeeded. |
-| `duration_ms` | integer >= 0 | Call duration. |
+| `ok` | boolean | `true` only when `outcome=success`. Any non-success terminal state is `ok=false`. |
+| `outcome` | string | Optional. Terminal state: `success`, `failed`, `denied`, `timed_out`, or `cancelled`. Consumers must tolerate its absence and unknown values. |
+| `duration_ms` | integer >= 0 | Measured call duration (start-to-finish). Never fabricated as 0. |
 | `result_digest` | string | Optional. SHA-256 hex of the canonical-JSON result. May be omitted on error. |
 | `error` | string | Optional short error string when `ok=false`. Consumers must not key on its content. |
 
-Implementation note: `SimpleAgent` does not yet surface a separate
-tool-finished callback. The runner emits the paired `tool_call_finished`
-immediately after `tool_call_started` with `ok=true` and `duration_ms=0`
-(see `WireToolEvents` in `HeadlessAgentRunner.cs`). This is forward-compatible;
-the fields will carry real values once the agent grows a finished callback.
+Implementation note (rivoli-ai/andy-cli#179): the runner observes the ACTUAL
+tool execution and emits `tool_call_finished` only after the tool truly
+completes. The engine's `SimpleAgent` raises `ToolCalled` BEFORE the tool is
+permission-evaluated or executed and exposes no post-execution event, so the
+CLI instead wraps the `IToolExecutor` it hands to the agent (see
+`ObservingToolExecutor`): the engine calls that executor exactly once per tool
+call and awaits the real result or exception. That boundary gives an exact
+start/finish correlation, a measured `duration_ms`, and the real `outcome`:
+
+- `success` -> `ok=true`.
+- `failed` -> the tool ran but returned an unsuccessful result or threw.
+- `denied` -> the permission engine refused the call (distinct from `failed`).
+- `timed_out` -> a per-tool timeout / resource-limit abort.
+- `cancelled` -> the run/caller cancelled while the tool was running.
+
+A denied or still-running tool is never reported `ok=true`.
+
+Cross-repo remainder: a full engine-native `ToolCompleted`/`ToolResult` event
+on `SimpleAgent` (andy-engine) would let hosts that do NOT own the executor
+observe completion. Until then the CLI-owned executor wrap is the exact signal.
 
 ### `output_written`
 
@@ -134,7 +150,7 @@ A typical successful run with one tool call (NDJSON; one object per line):
 ```
 {"schema_version":1,"ts":"2026-04-25T22:31:14.001+00:00","kind":"started","data":{"run_id":"f6c2b0d4-2c1e-4a3f-9b21-2f7e0c5d8a90","agent_slug":"code-reviewer","model_provider":"openrouter","model_id":"xiaomi/mimo-v2.5","tool_count":2}}
 {"schema_version":1,"ts":"2026-04-25T22:31:15.220+00:00","kind":"tool_call_started","data":{"call_id":"a1b2c3d4e5f6","tool_name":"read_file"}}
-{"schema_version":1,"ts":"2026-04-25T22:31:15.221+00:00","kind":"tool_call_finished","data":{"call_id":"a1b2c3d4e5f6","tool_name":"read_file","ok":true,"duration_ms":0}}
+{"schema_version":1,"ts":"2026-04-25T22:31:15.246+00:00","kind":"tool_call_finished","data":{"call_id":"a1b2c3d4e5f6","tool_name":"read_file","ok":true,"outcome":"success","duration_ms":26}}
 {"schema_version":1,"ts":"2026-04-25T22:31:18.540+00:00","kind":"output_written","data":{"path":"/workspace/.andy/output.txt","bytes":2048}}
 {"schema_version":1,"ts":"2026-04-25T22:31:18.541+00:00","kind":"finished","data":{"exit_code":0,"duration_ms":4540,"iterations":3}}
 ```

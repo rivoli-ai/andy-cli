@@ -60,18 +60,26 @@ public sealed class HeadlessEventEmitter : IDisposable
     public void EmitToolCallStarted(string callId, string toolName, string? argsDigest = null)
         => Write(HeadlessEventKind.ToolCallStarted, new { call_id = callId, tool_name = toolName, args_digest = argsDigest });
 
+    // #179: `outcome` distinguishes the terminal state of the ACTUAL execution
+    // (success / failed / denied / cancelled / timed_out). `ok` stays as the
+    // coarse boolean (ok == success); `outcome` lets a consumer tell a
+    // permission denial apart from an execution failure without keying on the
+    // free-form `error` string. `duration_ms` is measured start-to-finish, not
+    // fabricated. See ToolCallOutcome for the closed set of values.
     public void EmitToolCallFinished(
         string callId,
         string toolName,
         bool ok,
         long durationMs,
         string? resultDigest = null,
-        string? error = null)
+        string? error = null,
+        string? outcome = null)
         => Write(HeadlessEventKind.ToolCallFinished, new
         {
             call_id = callId,
             tool_name = toolName,
             ok,
+            outcome,
             duration_ms = durationMs,
             result_digest = resultDigest,
             error
