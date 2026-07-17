@@ -24,6 +24,13 @@ permissions:
   contents: write
 
 jobs:
+  # 0) Full validation gate (build, format, full test suite + coverage, vulnerability
+  #    audit, secret scan, packaged smoke). Nothing is built or published unless this
+  #    passes, so a release can never skip the test suite. Shared with PR CI via ci.yml.
+  validate:
+    name: Validate
+    uses: ./.github/workflows/validate.yml
+
   # 1) Gate: refuse to build/publish a tree that contains secrets. Runs before anything is built,
   #    so a version that leaks a secret is never produced. Scans the working tree as it will be
   #    compiled (--no-git), which is what ends up "in the app".
@@ -47,7 +54,7 @@ jobs:
   # 2) Build all six platform binaries (self-contained, single-file, trimmed) via the shared script.
   build:
     name: Build binaries
-    needs: secret-scan
+    needs: [validate, secret-scan]
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.get_version.outputs.VERSION }}

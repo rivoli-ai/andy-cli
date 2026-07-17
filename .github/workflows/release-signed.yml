@@ -17,8 +17,16 @@ on:
         default: false
 
 jobs:
+  # Full validation gate (build, format, full test suite + coverage, vulnerability
+  # audit, secret scan, packaged smoke) shared with PR CI. Every signed-release
+  # build job depends on this, so a signed release can never skip validation.
+  validate:
+    name: Validate
+    uses: ./.github/workflows/validate.yml
+
   build-macos:
     name: Build and Sign macOS
+    needs: validate
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -113,6 +121,7 @@ jobs:
 
   build-linux:
     name: Build Linux
+    needs: validate
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -187,6 +196,7 @@ jobs:
 
   build-windows:
     name: Build Windows
+    needs: validate
     runs-on: windows-latest
     strategy:
       matrix:
