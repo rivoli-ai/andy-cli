@@ -177,6 +177,26 @@ public class ObservingToolExecutorTests
     [Fact]
     public async Task TimedOutTool_EmitsTimedOut()
     {
+        // #179 (fix 4): a per-tool resource / time cap (HitResourceLimits) is the
+        // reliable timeout signal and maps to timed_out.
+        var inner = new FakeExecutor(() => Task.FromResult(
+            new ToolExecutionResult { IsSuccessful = false, HitResourceLimits = true }));
+        var sut = Build(inner, out var sink, out _, new FakeAuthorizer("execute_command"));
+
+        await sut.ExecuteAsync("execute_command", new Dictionary<string, object?>(), new ToolExecutionContext());
+
+        var finished = Assert.Single(Parse(sink), e => e.Kind == "tool_call_finished");
+        Assert.False(finished.Data.GetProperty("ok").GetBoolean());
+        Assert.Equal("timed_out", finished.Data.GetProperty("outcome").GetString());
+    }
+
+    [Fact]
+    public async Task CancelledResult_EmitsCancelled_NotTimedOut()
+    {
+        // #179 (fix 4): a result flagged WasCancelled cannot be reliably attributed
+        // to a per-tool timeout versus a run-level cancel at this boundary, so it
+        // collapses to `cancelled` (consistent with a thrown OperationCanceledException),
+        // NOT timed_out.
         var inner = new FakeExecutor(() => Task.FromResult(
             new ToolExecutionResult { IsSuccessful = false, WasCancelled = true }));
         var sut = Build(inner, out var sink, out _, new FakeAuthorizer("execute_command"));
@@ -185,7 +205,7 @@ public class ObservingToolExecutorTests
 
         var finished = Assert.Single(Parse(sink), e => e.Kind == "tool_call_finished");
         Assert.False(finished.Data.GetProperty("ok").GetBoolean());
-        Assert.Equal("timed_out", finished.Data.GetProperty("outcome").GetString());
+        Assert.Equal("cancelled", finished.Data.GetProperty("outcome").GetString());
     }
 
     [Fact]
@@ -258,5 +278,117 @@ public class ObservingToolExecutorTests
         var events = Parse(sink);
         Assert.Single(events, e => e.Kind == "tool_call_started");
         Assert.Single(events, e => e.Kind == "tool_call_finished");
+    }
+
+    [Fact]
+    public async Task DeniedTool_DoesNotInvokeInnerExecutor_AndEmitsDenied()
+    {
+        // #179 (fix 1): a hard Deny is ENFORCED, not merely labeled. The inner
+        // executor must never run (no side effect) and the emitted verdict
+        // (outcome=denied, ok=false) must agree with the fact that nothing ran.
+        var invoked = false;
+        var inner = new FakeExecutor(() =>
+        {
+            invoked = true;
+            return Task.FromResult(new ToolExecutionResult { IsSuccessful = true, Data = "ran" });
+        });
+        var sut = Build(inner, out var sink, out var auditor, new FakeAuthorizer(/* nothing allowed */));
+
+        var result = await sut.ExecuteAsync(
+            "delete_file", new Dictionary<string, object?>(), new ToolExecutionContext());
+
+        Assert.False(invoked); // the tool did NOT execute
+        Assert.False(result.IsSuccessful);
+
+        var events = Parse(sink);
+        Assert.Single(events, e => e.Kind == "tool_call_started");
+        var finished = Assert.Single(events, e => e.Kind == "tool_call_finished");
+        Assert.False(finished.Data.GetProperty("ok").GetBoolean());
+        Assert.Equal("denied", finished.Data.GetProperty("outcome").GetString());
+
+        var entry = Assert.Single(auditor.BuildEntries(authorizer: null, registry: null));
+        Assert.False(entry.Permitted);
+    }
+
+    [Fact]
+    public async Task AllowedTool_InvokesInnerExecutor_AndEmitsSuccess()
+    {
+        // #179 (fix 1) counterpart: an Allow verdict runs the tool and reports success.
+        var invoked = false;
+        var inner = new FakeExecutor(() =>
+        {
+            invoked = true;
+            return Task.FromResult(new ToolExecutionResult { IsSuccessful = true, Data = "ran" });
+        });
+        var sut = Build(inner, out var sink, out _, new FakeAuthorizer("read_file"));
+
+        await sut.ExecuteAsync("read_file", new Dictionary<string, object?>(), new ToolExecutionContext());
+
+        Assert.True(invoked);
+        var finished = Assert.Single(Parse(sink), e => e.Kind == "tool_call_finished");
+        Assert.True(finished.Data.GetProperty("ok").GetBoolean());
+        Assert.Equal("success", finished.Data.GetProperty("outcome").GetString());
+    }
+
+    // A payload with a reference cycle: System.Text.Json throws when serializing it,
+    // exercising the digest guard (#179 fix 2 / fix 3).
+    private sealed class Cyclic
+    {
+        public Cyclic? Self { get; set; }
+    }
+
+    [Fact]
+    public async Task NonSerializableResultData_StillEmitsExactlyOneSuccess()
+    {
+        // #179 (fix 2): digesting a non-serializable result Data must be non-fatal.
+        // A successful tool must NOT be turned into a failure, and there must be
+        // exactly one finished=success (no second, failed event from the catch).
+        var cyclic = new Cyclic();
+        cyclic.Self = cyclic;
+        var inner = new FakeExecutor(() => Task.FromResult(
+            new ToolExecutionResult { IsSuccessful = true, Data = cyclic }));
+        var sut = Build(inner, out var sink, out _, new FakeAuthorizer("read_file"));
+
+        var result = await sut.ExecuteAsync(
+            "read_file", new Dictionary<string, object?>(), new ToolExecutionContext());
+
+        Assert.True(result.IsSuccessful);
+        var events = Parse(sink);
+        Assert.Single(events, e => e.Kind == "tool_call_started");
+        var finished = Assert.Single(events, e => e.Kind == "tool_call_finished");
+        Assert.True(finished.Data.GetProperty("ok").GetBoolean());
+        Assert.Equal("success", finished.Data.GetProperty("outcome").GetString());
+        // The digest is omitted (not present) when it cannot be computed.
+        Assert.False(finished.Data.TryGetProperty("result_digest", out var digest)
+            && digest.ValueKind != JsonValueKind.Null);
+    }
+
+    [Fact]
+    public async Task NonSerializableArgs_StillEmitsStartFinish_AndExecutes()
+    {
+        // #179 (fix 3): a non-serializable args bag must never prevent the started
+        // event, the finished event, or the execution itself.
+        var invoked = false;
+        var inner = new FakeExecutor(() =>
+        {
+            invoked = true;
+            return Task.FromResult(new ToolExecutionResult { IsSuccessful = true });
+        });
+        var sut = Build(inner, out var sink, out _, new FakeAuthorizer("read_file"));
+
+        var cyclic = new Cyclic();
+        cyclic.Self = cyclic;
+        var parameters = new Dictionary<string, object?> { ["payload"] = cyclic };
+
+        await sut.ExecuteAsync("read_file", parameters, new ToolExecutionContext());
+
+        Assert.True(invoked);
+        var events = Parse(sink);
+        var started = Assert.Single(events, e => e.Kind == "tool_call_started");
+        var finished = Assert.Single(events, e => e.Kind == "tool_call_finished");
+        Assert.Equal("success", finished.Data.GetProperty("outcome").GetString());
+        // args_digest is omitted when it cannot be computed, but the call still runs.
+        Assert.False(started.Data.TryGetProperty("args_digest", out var digest)
+            && digest.ValueKind != JsonValueKind.Null);
     }
 }

@@ -95,6 +95,13 @@ public sealed class ObservingToolExecutor : IToolExecutor
             () => _inner.ExecuteAsync(request));
     }
 
+    // The permission decision reached BEFORE execution. Only a definitive verdict
+    // from a wired authorizer is authoritative: Allow runs the tool, Deny enforces
+    // a short-circuit, and Unknown (no authorizer wired, or an evaluator that could
+    // not resolve) declines to make an authoritative deny and defers to the inner
+    // executor's capability profile.
+    private enum PermissionDecision { Allow, Deny, Unknown }
+
     // Runs the delegated execution while emitting exactly one tool_call_started
     // and exactly one tool_call_finished. The finished event carries the real
     // outcome and a measured duration; the auditor is updated with the actual
@@ -107,19 +114,47 @@ public sealed class ObservingToolExecutor : IToolExecutor
         Func<Task<ToolExecutionResult>> execute)
     {
         var callId = Guid.NewGuid().ToString("N")[..12];
-        var permitted = EvaluateVerdict(toolId, parameters, contextWorkingDirectory);
-        _auditor.RecordInvocation(toolId, permitted);
+        var decision = EvaluateDecision(toolId, parameters, contextWorkingDirectory);
+        _auditor.RecordInvocation(toolId, permitted: decision == PermissionDecision.Allow);
 
-        var argsDigest = parameters is null ? null : HeadlessEventEmitter.ComputeDigest(parameters);
+        // #179 (fix 3): the args digest must never prevent emission or execution.
+        // A non-serializable parameter bag would otherwise throw here — before any
+        // started/finished event and before the tool runs — silently dropping the
+        // call. SafeDigest degrades a serialization failure to an omitted digest.
+        var argsDigest = SafeDigest(parameters);
         _emitter.EmitToolCallStarted(callId, toolId, argsDigest);
 
         var stopwatch = Stopwatch.StartNew();
+
+        // #179 (fix 1): a hard Deny (or, in non-interactive headless, an Ask that
+        // has no broker) is ENFORCED here, not merely labeled. Short-circuit
+        // WITHOUT calling execute() so a denied tool cannot run side effects while
+        // being reported outcome=denied — the emitted verdict now agrees with what
+        // actually executed (nothing). Only a definitive verdict from a wired
+        // authorizer triggers this; an Unknown verdict defers to the inner
+        // executor, whose capability profile stays the enforcement point, and is
+        // reported by its ACTUAL result (never denied).
+        if (decision == PermissionDecision.Deny)
+        {
+            stopwatch.Stop();
+            _emitter.EmitToolCallFinished(
+                callId,
+                toolId,
+                ok: false,
+                durationMs: stopwatch.ElapsedMilliseconds,
+                error: "permission denied",
+                outcome: ToolCallOutcome.Denied);
+            return new ToolExecutionResult
+            {
+                IsSuccessful = false,
+                ErrorMessage = "permission denied",
+            };
+        }
+
+        ToolExecutionResult result;
         try
         {
-            var result = await execute().ConfigureAwait(false);
-            stopwatch.Stop();
-            EmitFinish(callId, toolId, stopwatch.ElapsedMilliseconds, result, permitted);
-            return result;
+            result = await execute().ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -145,36 +180,50 @@ public sealed class ObservingToolExecutor : IToolExecutor
                 outcome: ToolCallOutcome.Failed);
             throw;
         }
+
+        // #179 (fix 2): emit the terminal event for a completed execution OUTSIDE
+        // the try above. A throw while classifying / digesting a SUCCESSFUL result
+        // must not be caught by the general catch and turned into a SECOND
+        // (failed) finished event that also masks the real result. Combined with
+        // SafeDigest (which never throws) and the exactly-one emission on the deny,
+        // cancel, and failure branches, this guarantees one finished per start.
+        stopwatch.Stop();
+        EmitFinish(callId, toolId, stopwatch.ElapsedMilliseconds, result);
+        return result;
     }
 
-    // Maps the concrete ToolExecutionResult to a single terminal outcome. A
-    // permission denial (verdict != Allow, which in headless includes Ask since
-    // there is no interactive broker) is never reported as success and is
-    // distinguishable from an execution failure via the `outcome` field.
+    // Maps a COMPLETED ToolExecutionResult to a single terminal outcome. (Permission
+    // denials never reach here — they short-circuit in ObserveAsync — so this method
+    // only distinguishes success / failure / cancellation / timeout.)
     private void EmitFinish(
         string callId,
         string toolId,
         long durationMs,
-        ToolExecutionResult result,
-        bool permitted)
+        ToolExecutionResult result)
     {
         string outcome;
         bool ok;
         string? error;
 
-        if (!permitted)
+        if (result.HitResourceLimits)
         {
-            outcome = ToolCallOutcome.Denied;
-            ok = false;
-            error = FirstNonEmpty(result.ErrorMessage, "permission denied");
-        }
-        else if (result.WasCancelled || result.HitResourceLimits)
-        {
-            // A per-tool timeout / resource-limit abort surfaces here (the tool's
-            // own timeout token fired rather than throwing to the caller).
+            // #179 (fix 4): a per-tool resource / time cap is a RELIABLE timeout
+            // signal — the tool's own limits fired — so it maps to timed_out.
             outcome = ToolCallOutcome.TimedOut;
             ok = false;
-            error = FirstNonEmpty(result.ErrorMessage, "tool execution timed out or hit resource limits");
+            error = FirstNonEmpty(result.ErrorMessage, "tool execution hit resource limits");
+        }
+        else if (result.WasCancelled)
+        {
+            // #179 (fix 4): WasCancelled cannot be reliably attributed to a per-tool
+            // timeout versus a run-level cancel (SIGTERM / wall-clock) at this
+            // boundary — HeadlessAgentRunner documents run cancellation surfacing as
+            // a cancelled result — so it collapses to `cancelled`, matching a thrown
+            // OperationCanceledException. Genuine per-tool timeouts arrive via
+            // HitResourceLimits (handled above), keeping the two outcomes consistent.
+            outcome = ToolCallOutcome.Cancelled;
+            ok = false;
+            error = FirstNonEmpty(result.ErrorMessage, "tool execution cancelled");
         }
         else if (result.IsSuccessful)
         {
@@ -189,11 +238,9 @@ public sealed class ObservingToolExecutor : IToolExecutor
             error = FirstNonEmpty(result.ErrorMessage, "tool execution failed");
         }
 
-        string? resultDigest = null;
-        if (ok && result.Data is not null)
-        {
-            resultDigest = HeadlessEventEmitter.ComputeDigest(result.Data);
-        }
+        // #179 (fix 2): digesting the result payload is best-effort — a
+        // non-serializable Data must not turn a successful tool into a failure.
+        var resultDigest = ok ? SafeDigest(result.Data) : null;
 
         _emitter.EmitToolCallFinished(
             callId,
@@ -206,18 +253,19 @@ public sealed class ObservingToolExecutor : IToolExecutor
     }
 
     // Evaluates the live permission engine with the REAL parameters at execution
-    // time. Only Allow counts as permitted under the headless fail-closed
-    // contract (Ask has no broker, so it is denied). When the authorizer is not
-    // wired the verdict is unknown and treated as not-permitted (fail-closed),
-    // matching the end-of-run audit's prior behavior.
-    private bool EvaluateVerdict(
+    // time. Only Allow is executable under the headless fail-closed contract (Ask
+    // has no broker, so it is a Deny). A missing authorizer or an evaluator that
+    // throws yields Unknown: this decorator will NOT claim an authoritative deny
+    // (which would falsely block tools the engine's capability profile is meant to
+    // gate) and instead defers enforcement to the inner executor.
+    private PermissionDecision EvaluateDecision(
         string toolId,
         IReadOnlyDictionary<string, object?>? parameters,
         string? contextWorkingDirectory)
     {
         if (_authorizer is null)
         {
-            return false;
+            return PermissionDecision.Unknown;
         }
 
         var metadata = _registry?.GetTool(toolId)?.Metadata;
@@ -232,13 +280,36 @@ public sealed class ObservingToolExecutor : IToolExecutor
 
         try
         {
-            return _authorizer.Evaluate(context).Outcome == PermissionOutcome.Allow;
+            return _authorizer.Evaluate(context).Outcome == PermissionOutcome.Allow
+                ? PermissionDecision.Allow
+                : PermissionDecision.Deny;
         }
         catch
         {
-            // An evaluator that cannot resolve should not crash execution; treat
-            // an unresolvable verdict as not-permitted.
-            return false;
+            // An evaluator that cannot resolve should not crash execution and must
+            // not be treated as an authoritative deny; defer to inner enforcement.
+            return PermissionDecision.Unknown;
+        }
+    }
+
+    // Best-effort SHA-256 digest of a payload for the event stream. A serialization
+    // failure (e.g. a reference cycle in a tool's args or result) degrades to an
+    // omitted digest rather than throwing — the digest is a diagnostic aid, never a
+    // reason to drop an event or fail a call. Null payloads omit the digest.
+    private static string? SafeDigest(object? payload)
+    {
+        if (payload is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return HeadlessEventEmitter.ComputeDigest(payload);
+        }
+        catch
+        {
+            return null;
         }
     }
 
