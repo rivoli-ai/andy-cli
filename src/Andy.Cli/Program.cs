@@ -219,6 +219,10 @@ class Program
         // MouseDefaultRegressionTests.
         var rawInput = RawTerminalInput.TryStart();
 
+        // Declared outside the try so it can be disposed deterministically in the
+        // finally below. Remains null unless instrumentation is explicitly enabled.
+        InstrumentationServer? instrumentationServer = null;
+
         try
         {
             bool running = true;
@@ -423,14 +427,36 @@ class Program
 
             // Conversation will be managed internally by AssistantService
 
-            // Start the instrumentation server up front so the real-time dashboard at
-            // http://localhost:5555 is reachable even when provider setup below fails
-            // (e.g. a missing API key). Previously it started only after a provider was
-            // created, so a setup error left the link dead.
-            var instrumentationLogger = serviceProvider.GetService<ILogger<SimpleAssistantService>>();
-            var instrumentationServer = new InstrumentationServer(port: 5555, logger: instrumentationLogger);
-            instrumentationServer.Start();
-            feed.AddMarkdownRich($"[instrumentation] Real-time dashboard available at http://localhost:5555");
+            // Instrumentation exposes live agent activity (user messages, model
+            // responses, tool parameters and results) over a local HTTP/SSE endpoint,
+            // so it is DISABLED BY DEFAULT and only started when explicitly opted in via
+            // ANDY_INSTRUMENTATION=1 or the --instrumentation flag. When enabled it binds
+            // to loopback only, requires a per-process token, and redacts sensitive
+            // fields unless ANDY_INSTRUMENTATION_SENSITIVE / --instrumentation-include-sensitive
+            // is set. Started up front so the dashboard is reachable even when provider
+            // setup below fails (e.g. a missing API key).
+            var instrumentationOptions = InstrumentationOptions.FromEnvironmentAndArgs(args);
+            if (instrumentationOptions.Enabled)
+            {
+                var instrumentationLogger = serviceProvider.GetService<ILogger<SimpleAssistantService>>();
+                instrumentationServer = new InstrumentationServer(instrumentationOptions, instrumentationLogger);
+                if (instrumentationServer.Start())
+                {
+                    // Print the tokenized URL only to the local console/feed.
+                    feed.AddMarkdownRich($"[instrumentation] Real-time dashboard available at {instrumentationServer.DashboardUrl}");
+                    if (instrumentationOptions.IncludeSensitive)
+                    {
+                        feed.AddMarkdownRich("[instrumentation] WARNING: sensitive content (messages, responses, tool I/O) is included in the stream");
+                    }
+                }
+                else
+                {
+                    // Binding failed (e.g. port in use). Do NOT advertise a dead link.
+                    feed.AddMarkdownRich(ConsoleColors.NotePrefix($"[instrumentation] Could not start dashboard on port {instrumentationOptions.Port} (port unavailable); instrumentation disabled"));
+                    instrumentationServer.Dispose();
+                    instrumentationServer = null;
+                }
+            }
 
             try
             {
@@ -1850,6 +1876,10 @@ class Program
         }
         finally
         {
+            // Deterministically stop the instrumentation server (releases the bound
+            // port, unsubscribes from the hub, and closes active SSE streams).
+            instrumentationServer?.Dispose();
+
             // Restore terminal settings + disable mouse before leaving the
             // alternate screen, then re-enable wrap/cursor and exit alt screen.
             rawInput?.Dispose();

@@ -4,6 +4,9 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Andy.Cli.Instrumentation;
@@ -11,155 +14,289 @@ namespace Andy.Cli.Instrumentation;
 /// <summary>
 /// HTTP server that exposes instrumentation events via Server-Sent Events (SSE).
 /// Allows real-time visualization of all Engine/LLM activity in a separate window.
+///
+/// Security posture (see <see cref="InstrumentationOptions"/>):
+///  - Disabled by default; only starts when explicitly opted in.
+///  - Binds to loopback only and does NOT emit wildcard CORS headers.
+///  - Requires a per-process unguessable credential on every request.
+///  - Redacts sensitive fields unless the operator opts in to including them.
 /// </summary>
-public class InstrumentationServer : IDisposable
+public class InstrumentationServer : IDisposable, IAsyncDisposable
 {
-    private readonly int _port;
-    private readonly ILogger? _logger;
-    private WebApplication? _app;
-    private Task? _runTask;
-    private readonly ConcurrentBag<StreamWriter> _activeStreams = new();
+    /// <summary>
+    /// Loopback host advertised in URLs and logs. The server binds the IPv4 loopback
+    /// address explicitly (see <see cref="Start"/>), so we advertise the same literal
+    /// 127.0.0.1 rather than "localhost" (which may resolve to ::1 first and produce a
+    /// dead link).
+    /// </summary>
+    private const string LoopbackHost = "127.0.0.1";
 
-    public InstrumentationServer(int port = 5555, ILogger? logger = null)
+    private readonly int _requestedPort;
+    private readonly bool _includeSensitive;
+    private readonly ILogger? _logger;
+    private readonly string _authToken;
+    private WebApplication? _app;
+    private IDisposable? _subscription;
+    // Keyed by a per-connection id so a disconnecting handler removes exactly the
+    // writer it owns (a ConcurrentBag would remove an arbitrary writer, potentially
+    // dropping a live client while retaining a dead one).
+    private readonly ConcurrentDictionary<Guid, StreamWriter> _activeStreams = new();
+    private int _boundPort;
+
+    public InstrumentationServer(int port = InstrumentationOptions.DefaultPort, ILogger? logger = null, bool includeSensitive = false)
     {
-        _port = port;
+        _requestedPort = port;
+        _includeSensitive = includeSensitive;
         _logger = logger;
+        _authToken = InstrumentationAuth.GenerateToken();
+    }
+
+    public InstrumentationServer(InstrumentationOptions options, ILogger? logger = null)
+        : this(options.Port, logger, options.IncludeSensitive)
+    {
+    }
+
+    /// <summary>Per-process credential required to access any endpoint.</summary>
+    public string AuthToken => _authToken;
+
+    /// <summary>True once the server has successfully bound to a port.</summary>
+    public bool IsRunning { get; private set; }
+
+    /// <summary>The port the server actually bound to (0 until started).</summary>
+    public int BoundPort => _boundPort;
+
+    /// <summary>Number of live SSE client streams. Exposed for diagnostics and testing.</summary>
+    public int ActiveStreamCount => _activeStreams.Count;
+
+    /// <summary>The exception captured if <see cref="Start"/> failed to bind; null on success.</summary>
+    public Exception? LastStartError { get; private set; }
+
+    /// <summary>The loopback dashboard URL including the credential, or null if not running.</summary>
+    public string? DashboardUrl => IsRunning
+        ? $"http://{LoopbackHost}:{_boundPort}/?{InstrumentationAuth.TokenQueryParameter}={_authToken}"
+        : null;
+
+    /// <summary>
+    /// Start the HTTP server. Returns true if the server bound successfully; false if
+    /// binding failed (for example the port was already in use). When binding fails the
+    /// dashboard must NOT be advertised, so callers should check the return value.
+    /// </summary>
+    public bool Start()
+    {
+        try
+        {
+            var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+            {
+                Args = Array.Empty<string>(),
+                WebRootPath = null
+            });
+
+            // Configure logging
+            builder.Logging.ClearProviders();
+            if (_logger != null)
+            {
+                builder.Logging.AddProvider(new DelegateLoggerProvider(_logger));
+            }
+
+            // Configure Kestrel. Bind to the loopback address only so the endpoint is
+            // never reachable from other hosts. A requested port of 0 asks the OS for a
+            // free ephemeral port (ListenLocalhost does not support dynamic ports, so we
+            // bind the loopback IP explicitly).
+            builder.WebHost.ConfigureKestrel(options =>
+            {
+                options.Listen(System.Net.IPAddress.Loopback, _requestedPort);
+            });
+
+            _app = builder.Build();
+
+            _app.UseRouting();
+
+            // Authentication gate: every request must present the per-process token,
+            // either as the "token" query parameter or the auth header. Requests
+            // without a valid credential are rejected with 401 before any handler runs.
+            _app.Use(async (context, next) =>
+            {
+                if (!InstrumentationAuth.IsAuthorized(GetProvidedToken(context), _authToken))
+                {
+                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    await context.Response.WriteAsync("Unauthorized");
+                    return;
+                }
+
+                await next();
+            });
+
+            // Endpoint: SSE stream of events
+            _app.MapGet("/events", async (HttpContext context) =>
+            {
+                context.Response.Headers["Content-Type"] = "text/event-stream";
+                context.Response.Headers["Cache-Control"] = "no-cache";
+                context.Response.Headers["Connection"] = "keep-alive";
+                // No Access-Control-Allow-Origin header: cross-origin reads are denied
+                // by the browser same-origin policy, and there is no wildcard opt-out.
+
+                var streamId = Guid.NewGuid();
+                var writer = new StreamWriter(context.Response.Body, Encoding.UTF8, leaveOpen: true);
+                _activeStreams[streamId] = writer;
+
+                try
+                {
+                    // Send initial connection event
+                    await SendEvent(writer, new DiagnosticEvent
+                    {
+                        Level = "Info",
+                        Source = "InstrumentationServer",
+                        Message = "Connected to instrumentation stream"
+                    });
+
+                    // Send event history
+                    foreach (var evt in InstrumentationHub.Instance.GetEventHistory())
+                    {
+                        await SendEvent(writer, evt);
+                    }
+
+                    // Keep connection alive until client disconnects
+                    while (!context.RequestAborted.IsCancellationRequested)
+                    {
+                        await Task.Delay(1000, context.RequestAborted);
+                        // Send heartbeat
+                        await writer.WriteLineAsync(": heartbeat");
+                        await writer.FlushAsync();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogError(ex, "Error in SSE stream");
+                }
+                finally
+                {
+                    // Remove exactly the writer this connection owns.
+                    _activeStreams.TryRemove(streamId, out _);
+                }
+            });
+
+            // Endpoint: Get event history as JSON. Each event is boxed as object so
+            // System.Text.Json serializes by runtime type (preserving derived fields)
+            // and applies redaction unless sensitive content was opted in.
+            _app.MapGet("/history", () =>
+            {
+                var events = InstrumentationHub.Instance.GetEventHistory()
+                    .Select(e => (object)InstrumentationRedactor.ForOutput(e, _includeSensitive))
+                    .ToList();
+                var json = JsonSerializer.Serialize(events, new JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                    WriteIndented = true
+                });
+                return Results.Content(json, "application/json");
+            });
+
+            // Endpoint: Clear event history
+            _app.MapPost("/clear", () =>
+            {
+                InstrumentationHub.Instance.Clear();
+                return Results.Ok(new { message = "Event history cleared" });
+            });
+
+            // Endpoint: Get system prompt. The system prompt can embed user/project
+            // context, so it honors the same redaction mode as /events and /history:
+            // its content is only returned verbatim when sensitive output was opted in.
+            _app.MapGet("/system-prompt", () =>
+            {
+                var systemPrompt = InstrumentationHub.Instance.GetSystemPrompt();
+                string value;
+                if (_includeSensitive)
+                {
+                    value = systemPrompt ?? string.Empty;
+                }
+                else
+                {
+                    // Preserve the "a prompt exists" signal but withhold its contents.
+                    value = string.IsNullOrEmpty(systemPrompt)
+                        ? string.Empty
+                        : InstrumentationRedactor.Placeholder;
+                }
+                return Results.Json(new { systemPrompt = value });
+            });
+
+            // Endpoint: Serve the dashboard HTML. The credential is injected so the
+            // page's own fetch/EventSource calls carry the token.
+            _app.MapGet("/", () => Results.Content(GetDashboardHtml(_authToken), "text/html"));
+
+            // Subscribe to instrumentation hub
+            _subscription = InstrumentationHub.Instance.Subscribe(async evt =>
+            {
+                foreach (var stream in _activeStreams.Values)
+                {
+                    try
+                    {
+                        await SendEvent(stream, evt);
+                    }
+                    catch
+                    {
+                        // Client disconnected - ignore
+                    }
+                }
+            });
+
+            // Start synchronously so a bind failure surfaces here (rather than on a
+            // detached background task) and we can report it to the caller.
+            _app.StartAsync().GetAwaiter().GetResult();
+
+            _boundPort = ResolveBoundPort(_app) ?? _requestedPort;
+            IsRunning = true;
+
+            _logger?.LogInformation("Instrumentation server started on http://{Host}:{Port} (token required)", LoopbackHost, _boundPort);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LastStartError = ex;
+            _logger?.LogWarning(ex, "Instrumentation server failed to bind on port {Port}; dashboard disabled", _requestedPort);
+            IsRunning = false;
+            // Tear down any partially-initialized app so we do not leak resources.
+            try { _app?.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { /* ignore */ }
+            _app = null;
+            return false;
+        }
     }
 
     /// <summary>
-    /// Start the HTTP server
+    /// Extract the actual bound port from the running server's address feature.
     /// </summary>
-    public void Start()
+    private static int? ResolveBoundPort(WebApplication app)
     {
-        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        var addresses = app.Services.GetService<IServer>()?.Features.Get<IServerAddressesFeature>()?.Addresses;
+        if (addresses == null)
         {
-            Args = Array.Empty<string>(),
-            WebRootPath = null
-        });
-
-        // Configure logging
-        builder.Logging.ClearProviders();
-        if (_logger != null)
-        {
-            builder.Logging.AddProvider(new DelegateLoggerProvider(_logger));
+            return null;
         }
 
-        // Configure Kestrel
-        builder.WebHost.ConfigureKestrel(options =>
+        foreach (var address in addresses)
         {
-            options.ListenLocalhost(_port);
-        });
-
-        _app = builder.Build();
-
-        // Enable routing for minimal APIs
-        _app.UseRouting();
-
-        // Endpoint: SSE stream of events
-        _app.MapGet("/events", async (HttpContext context) =>
-        {
-            context.Response.Headers["Content-Type"] = "text/event-stream";
-            context.Response.Headers["Cache-Control"] = "no-cache";
-            context.Response.Headers["Connection"] = "keep-alive";
-            context.Response.Headers["Access-Control-Allow-Origin"] = "*";
-
-            var writer = new StreamWriter(context.Response.Body, Encoding.UTF8, leaveOpen: true);
-            _activeStreams.Add(writer);
-
-            try
+            if (Uri.TryCreate(address, UriKind.Absolute, out var uri) && uri.Port > 0)
             {
-                // Send initial connection event
-                await SendEvent(writer, new DiagnosticEvent
-                {
-                    Level = "Info",
-                    Source = "InstrumentationServer",
-                    Message = "Connected to instrumentation stream"
-                });
-
-                // Send event history
-                foreach (var evt in InstrumentationHub.Instance.GetEventHistory())
-                {
-                    await SendEvent(writer, evt);
-                }
-
-                // Keep connection alive until client disconnects
-                while (!context.RequestAborted.IsCancellationRequested)
-                {
-                    await Task.Delay(1000, context.RequestAborted);
-                    // Send heartbeat
-                    await writer.WriteLineAsync(": heartbeat");
-                    await writer.FlushAsync();
-                }
+                return uri.Port;
             }
-            catch (Exception ex)
-            {
-                _logger?.LogError(ex, "Error in SSE stream");
-            }
-            finally
-            {
-                _activeStreams.TryTake(out _);
-            }
-        });
+        }
+        return null;
+    }
 
-        // Endpoint: Get event history as JSON
-        _app.MapGet("/history", () =>
+    private static string? GetProvidedToken(HttpContext context)
+    {
+        if (context.Request.Query.TryGetValue(InstrumentationAuth.TokenQueryParameter, out var queryToken)
+            && !string.IsNullOrEmpty(queryToken))
         {
-            var events = InstrumentationHub.Instance.GetEventHistory();
-            return Results.Json(events, new JsonSerializerOptions
-            {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                WriteIndented = true
-            });
-        });
+            return queryToken.ToString();
+        }
 
-        // Endpoint: Clear event history
-        _app.MapPost("/clear", () =>
+        if (context.Request.Headers.TryGetValue(InstrumentationAuth.TokenHeaderName, out var headerToken)
+            && !string.IsNullOrEmpty(headerToken))
         {
-            InstrumentationHub.Instance.Clear();
-            return Results.Ok(new { message = "Event history cleared" });
-        });
+            return headerToken.ToString();
+        }
 
-        // Endpoint: Get system prompt
-        _app.MapGet("/system-prompt", () =>
-        {
-            var systemPrompt = InstrumentationHub.Instance.GetSystemPrompt();
-            return Results.Json(new { systemPrompt = systemPrompt ?? string.Empty });
-        });
-
-        // Endpoint: Serve the dashboard HTML
-        _app.MapGet("/", () => Results.Content(GetDashboardHtml(), "text/html"));
-
-        // Subscribe to instrumentation hub
-        InstrumentationHub.Instance.Subscribe(async evt =>
-        {
-            foreach (var stream in _activeStreams)
-            {
-                try
-                {
-                    await SendEvent(stream, evt);
-                }
-                catch
-                {
-                    // Client disconnected - ignore
-                }
-            }
-        });
-
-        // Start server in background
-        _runTask = Task.Run(async () =>
-        {
-            try
-            {
-                await _app.RunAsync();
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogError(ex, "Error running instrumentation server");
-            }
-        });
-
-        _logger?.LogInformation("Instrumentation server started on http://localhost:{Port}", _port);
-        _logger?.LogInformation("Open http://localhost:{Port} in your browser to view real-time instrumentation", _port);
+        return null;
     }
 
     /// <summary>
@@ -167,30 +304,42 @@ public class InstrumentationServer : IDisposable
     /// </summary>
     public async Task StopAsync()
     {
+        _subscription?.Dispose();
+        _subscription = null;
+
+        foreach (var stream in _activeStreams.Values)
+        {
+            try { stream.Dispose(); } catch { /* ignore */ }
+        }
+        _activeStreams.Clear();
+
         if (_app != null)
         {
-            await _app.StopAsync();
+            try
+            {
+                await _app.StopAsync();
+            }
+            catch { /* ignore */ }
             await _app.DisposeAsync();
+            _app = null;
         }
 
-        if (_runTask != null)
-        {
-            await _runTask;
-        }
+        IsRunning = false;
     }
 
     private async Task SendEvent(StreamWriter writer, InstrumentationEvent evt)
     {
-        var json = InstrumentationHub.Instance.SerializeEvent(evt);
-        await writer.WriteLineAsync($"event: {evt.EventType}");
+        var forOutput = InstrumentationRedactor.ForOutput(evt, _includeSensitive);
+        var json = InstrumentationHub.Instance.SerializeEvent(forOutput);
+        await writer.WriteLineAsync($"event: {forOutput.EventType}");
         await writer.WriteLineAsync($"data: {json}");
         await writer.WriteLineAsync();
         await writer.FlushAsync();
     }
 
-    private static string GetDashboardHtml()
+    private static string GetDashboardHtml(string authToken)
     {
-        return @"<!DOCTYPE html>
+        var html = @"<!DOCTYPE html>
 <html lang=""en"">
 <head>
     <meta charset=""UTF-8"">
@@ -834,6 +983,13 @@ public class InstrumentationServer : IDisposable
     <div class=""event-list"" id=""eventList""></div>
 
     <script>
+        // Per-process credential injected by the server. Required on every request.
+        const AUTH_TOKEN = '__ANDY_INSTRUMENTATION_TOKEN__';
+        function withToken(path) {
+            const sep = path.indexOf('?') >= 0 ? '&' : '?';
+            return path + sep + 'token=' + encodeURIComponent(AUTH_TOKEN);
+        }
+
         let eventCount = 0;
         let llmRequestCount = 0;
         let toolCallCount = 0;
@@ -843,7 +999,7 @@ public class InstrumentationServer : IDisposable
         let hasConnected = false;
         let seenEventSequences = new Set();
 
-        const eventSource = new EventSource('/events');
+        const eventSource = new EventSource(withToken('/events'));
 
         eventSource.onopen = () => {
             // If this is a reconnection, clear the event list to avoid duplicates
@@ -1091,7 +1247,7 @@ public class InstrumentationServer : IDisposable
         }
 
         function clearEvents() {
-            fetch('/clear', { method: 'POST' })
+            fetch(withToken('/clear'), { method: 'POST' })
                 .then(() => {
                     document.getElementById('eventList').innerHTML = '';
                     eventCount = 0;
@@ -1170,7 +1326,7 @@ public class InstrumentationServer : IDisposable
         });
 
         // Fetch system prompt on page load
-        fetch('/system-prompt')
+        fetch(withToken('/system-prompt'))
             .then(response => response.json())
             .then(data => {
                 const content = document.getElementById('systemPromptContent');
@@ -1243,11 +1399,20 @@ public class InstrumentationServer : IDisposable
     </script>
 </body>
 </html>";
+
+        // Inject the per-process credential into the page so its own requests are
+        // authorized. The token is URL-safe (base64url), so no escaping is required.
+        return html.Replace("__ANDY_INSTRUMENTATION_TOKEN__", authToken);
     }
 
     public void Dispose()
     {
         StopAsync().GetAwaiter().GetResult();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await StopAsync();
     }
 
     private class DelegateLoggerProvider : ILoggerProvider
