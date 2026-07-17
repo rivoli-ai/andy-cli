@@ -194,6 +194,84 @@ public class CodeIndexingServiceTests : IDisposable
             () => svc.IndexDirectoryAsync(_root, cts.Token));
     }
 
+    // #175 review: a wildcard must broaden (not narrow) recall - it keeps substring/match-anywhere
+    // semantics, so an internal wildcard matches names that merely contain the surrounding fragments.
+    [Fact]
+    public async Task SearchSymbols_InternalWildcard_MatchesAnywhere()
+    {
+        WriteFile("A.cs", "namespace N { public class C { public void MyGetFooAsyncHelper() { } } }");
+        var svc = new CodeIndexingService();
+        await svc.IndexDirectoryAsync(_root);
+
+        var matches = await svc.SearchSymbolsAsync("Get*Async");
+        Assert.Contains(matches, m => m.Name == "MyGetFooAsyncHelper");
+    }
+
+    // #175 review: a wildcard must never return fewer results than the equivalent plain substring.
+    [Fact]
+    public async Task SearchSymbols_Wildcard_IsSupersetOfSubstring()
+    {
+        WriteFile("A.cs",
+            "namespace N { public class GetHandler { } public class MyGetter { } public class Other { } }");
+        var svc = new CodeIndexingService();
+        await svc.IndexDirectoryAsync(_root);
+
+        var plain = (await svc.SearchSymbolsAsync("Get")).Select(m => m.Name).ToHashSet();
+        var wild = (await svc.SearchSymbolsAsync("Get*")).Select(m => m.Name).ToHashSet();
+
+        Assert.True(plain.IsSubsetOf(wild), "wildcard search must not narrow recall");
+        Assert.Contains("GetHandler", wild);
+        Assert.Contains("MyGetter", wild);
+    }
+
+    // #175 review: a nested blocked path under the workspace must NOT be indexed (containment is
+    // enforced on every directory/file visited, not just on the index root).
+    [Fact]
+    public async Task IndexDirectory_BlockedNestedPath_IsNotIndexed()
+    {
+        WriteFile("Good.cs", "namespace N { public class GoodClass { } }");
+        // Use a non-hidden name so the block is proven by the path policy, not the hidden-dir skip.
+        var secretDir = Path.Combine(_root, "secrets");
+        Directory.CreateDirectory(secretDir);
+        File.WriteAllText(Path.Combine(secretDir, "Secret.cs"),
+            "namespace N { public class SecretClass { } }");
+
+        var svc = new CodeIndexingService();
+        var policy = new CodeIndexPathPolicy(allowedPaths: null, blockedPaths: new[] { secretDir });
+        await svc.IndexDirectoryAsync(_root, policy);
+
+        Assert.NotEmpty(await svc.SearchSymbolsAsync("GoodClass"));
+        Assert.Empty(await svc.SearchSymbolsAsync("SecretClass"));
+    }
+
+    // #175 review: a directory symlink cycle must not spin the walk forever - the walk terminates and
+    // still indexes the real files (Unix only; symlink creation).
+    [Fact]
+    public async Task IndexDirectory_SymlinkCycle_Terminates()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return; // symlink creation is unreliable without privileges on Windows.
+        }
+
+        WriteFile("Real.cs", "namespace N { public class RealClass { } }");
+        var sub = Path.Combine(_root, "sub");
+        Directory.CreateDirectory(sub);
+
+        // sub/loop -> _root, forming a cycle _root -> sub -> loop(-> _root) -> ...
+        var loop = Path.Combine(sub, "loop");
+        Directory.CreateSymbolicLink(loop, _root);
+
+        var svc = new CodeIndexingService();
+        var indexTask = svc.IndexDirectoryAsync(_root);
+        var finished = await Task.WhenAny(indexTask, Task.Delay(TimeSpan.FromSeconds(30)));
+        Assert.Same(indexTask, finished); // completed rather than looping until the timeout
+        await indexTask;
+
+        Assert.True(svc.IsIndexed);
+        Assert.NotEmpty(await svc.SearchSymbolsAsync("RealClass"));
+    }
+
     [Fact]
     public async Task Hierarchy_ReportsBaseAndDerived()
     {

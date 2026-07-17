@@ -34,6 +34,11 @@ public class CodeIndexingService : IHostedService, IDisposable
     private string _indexedDirectory = "";
     private readonly List<string> _indexErrors = new();
 
+    // Allowed/blocked path policy for the current workspace. Applied to every directory and file
+    // visited during the walk (and by the incremental watcher) so a blocked subtree nested under the
+    // workspace is never indexed. Null means no policy (index everything under the root).
+    private CodeIndexPathPolicy? _pathPolicy;
+
     public bool IsIndexed => _isIndexed;
     public int SymbolCount => _symbolIndex.Count;
 
@@ -68,7 +73,10 @@ public class CodeIndexingService : IHostedService, IDisposable
         return Task.CompletedTask;
     }
 
-    public async Task IndexDirectoryAsync(string directoryPath, CancellationToken cancellationToken = default)
+    public Task IndexDirectoryAsync(string directoryPath, CancellationToken cancellationToken = default)
+        => IndexDirectoryAsync(directoryPath, null, cancellationToken);
+
+    public async Task IndexDirectoryAsync(string directoryPath, CodeIndexPathPolicy? pathPolicy, CancellationToken cancellationToken = default)
     {
         var fullPath = Path.GetFullPath(directoryPath);
         await _indexLock.WaitAsync(cancellationToken);
@@ -76,13 +84,14 @@ public class CodeIndexingService : IHostedService, IDisposable
         {
             _logger?.LogInformation("Indexing directory: {Directory}", fullPath);
             _indexedDirectory = fullPath;
+            _pathPolicy = pathPolicy;
 
             // Clear existing index
             _symbolIndex.Clear();
             lock (_indexErrors) { _indexErrors.Clear(); }
 
             // Enumerate C# files without letting a single inaccessible directory abort the whole walk.
-            var csFiles = EnumerateCSharpFiles(fullPath);
+            var csFiles = EnumerateCSharpFiles(fullPath, pathPolicy);
 
             _logger?.LogInformation("Found {Count} C# files to index", csFiles.Count);
 
@@ -95,35 +104,58 @@ public class CodeIndexingService : IHostedService, IDisposable
 
             _isIndexed = true;
             _logger?.LogInformation("Indexing complete. {SymbolCount} symbols indexed", _symbolIndex.Count);
+
+            // Wire up (or re-point) the incremental file watcher under the index lock so concurrent or
+            // overlapping IndexDirectoryAsync calls cannot race the single _fileWatcher field (dispose
+            // the previous watcher and install exactly one live watcher for the current workspace).
+            SetupFileWatcher(fullPath);
         }
         finally
         {
             _indexLock.Release();
         }
-
-        // Wire up (or re-point) the incremental file watcher for the indexed directory. Done outside
-        // the lock so watcher callbacks never contend with the initial index pass.
-        SetupFileWatcher(fullPath);
     }
 
     /// <summary>
-    /// Recursively enumerate .cs files, skipping obj/bin/hidden directories, and continuing past
-    /// directories that cannot be read (permissions, races) instead of throwing.
+    /// Recursively enumerate .cs files, skipping obj/bin/hidden directories, blocked subtrees, and
+    /// anything outside the allowed roots, and continuing past directories that cannot be read
+    /// (permissions, races) instead of throwing. Directory symlinks are not followed and already
+    /// visited (canonical) directories are skipped so a symlink cycle cannot spin the walk forever.
     /// </summary>
-    private List<string> EnumerateCSharpFiles(string root)
+    private List<string> EnumerateCSharpFiles(string root, CodeIndexPathPolicy? policy)
     {
         var results = new List<string>();
-        var stack = new Stack<string>();
-        stack.Push(root);
+        var stack = new Stack<(string Dir, int Depth)>();
+        var visited = new HashSet<string>(CodeIndexPaths.Comparer);
+        const int maxDepth = 256; // final safety valve against pathological trees
+
+        stack.Push((root, 0));
 
         while (stack.Count > 0)
         {
-            var dir = stack.Pop();
+            var (dir, depth) = stack.Pop();
+
+            // Skip any real directory we have already walked (guards against symlink cycles even if a
+            // symlink slips through the reparse-point check below).
+            if (!visited.Add(Canonicalize(dir)))
+            {
+                continue;
+            }
+
+            if (depth > maxDepth)
+            {
+                RecordError($"Maximum directory depth exceeded at {dir}; deeper directories skipped");
+                continue;
+            }
 
             try
             {
                 foreach (var file in Directory.EnumerateFiles(dir, "*.cs"))
                 {
+                    if (policy != null && !policy.IsPathAllowed(file))
+                    {
+                        continue;
+                    }
                     results.Add(file);
                 }
             }
@@ -144,7 +176,22 @@ public class CodeIndexingService : IHostedService, IDisposable
                     {
                         continue;
                     }
-                    stack.Push(sub);
+
+                    // Do not follow directory symlinks: they are the usual source of traversal cycles
+                    // and can point outside the workspace.
+                    if (IsSymlink(sub))
+                    {
+                        continue;
+                    }
+
+                    // Enforce the allowed/blocked path policy on every subdirectory so blocked subtrees
+                    // nested under the workspace are never descended into.
+                    if (policy != null && !policy.IsPathAllowed(sub))
+                    {
+                        continue;
+                    }
+
+                    stack.Push((sub, depth + 1));
                 }
             }
             catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or DirectoryNotFoundException)
@@ -154,6 +201,34 @@ public class CodeIndexingService : IHostedService, IDisposable
         }
 
         return results;
+    }
+
+    /// <summary>Resolve a directory to its canonical (symlink-resolved) full path for cycle detection.</summary>
+    private static string Canonicalize(string path)
+    {
+        try
+        {
+            var info = new DirectoryInfo(path);
+            var target = info.ResolveLinkTarget(returnFinalTarget: true);
+            return target?.FullName ?? info.FullName;
+        }
+        catch
+        {
+            try { return Path.GetFullPath(path); } catch { return path; }
+        }
+    }
+
+    /// <summary>True when the directory entry is a symbolic link / reparse point.</summary>
+    private static bool IsSymlink(string path)
+    {
+        try
+        {
+            return (new DirectoryInfo(path).Attributes & FileAttributes.ReparsePoint) != 0;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private void RecordError(string message)
@@ -169,7 +244,7 @@ public class CodeIndexingService : IHostedService, IDisposable
     private void RemoveSymbolsForFile(string filePath)
     {
         var toRemove = _symbolIndex
-            .Where(kvp => string.Equals(kvp.Value.FilePath, filePath, StringComparison.OrdinalIgnoreCase))
+            .Where(kvp => string.Equals(kvp.Value.FilePath, filePath, CodeIndexPaths.Comparison))
             .Select(kvp => kvp.Key)
             .ToList();
 
@@ -296,7 +371,7 @@ public class CodeIndexingService : IHostedService, IDisposable
         }
     }
 
-    public Task<List<SymbolInfo>> SearchSymbolsAsync(string pattern, CancellationToken cancellationToken = default)
+    public async Task<List<SymbolInfo>> SearchSymbolsAsync(string pattern, CancellationToken cancellationToken = default)
     {
         var results = new List<SymbolInfo>();
         pattern ??= "";
@@ -312,7 +387,11 @@ public class CodeIndexingService : IHostedService, IDisposable
             regex = TryBuildWildcardRegex(pattern);
         }
 
-        foreach (var symbol in _symbolIndex.Values)
+        // Read a snapshot under the lock so a query issued during a re-index (which clears then
+        // repopulates the index under the same lock) never observes a half-cleared index.
+        var symbols = await SnapshotSymbolsAsync(cancellationToken);
+
+        foreach (var symbol in symbols)
         {
             if (regex != null)
             {
@@ -341,12 +420,15 @@ public class CodeIndexingService : IHostedService, IDisposable
             }
         }
 
-        return Task.FromResult(results);
+        return results;
     }
 
     /// <summary>
-    /// Convert a glob pattern (supporting * and ?) into an anchored, case-insensitive regex without
-    /// ever throwing on malformed input. Returns null if a valid regex cannot be built.
+    /// Convert a glob pattern (supporting * and ?) into an UNANCHORED, case-insensitive regex without
+    /// ever throwing on malformed input. Matching is unanchored so wildcard search keeps the same
+    /// substring (match-anywhere) semantics as a plain pattern - adding a wildcard broadens recall
+    /// rather than narrowing it (e.g. "Get*Async" matches "MyGetFooAsyncHelper"). Returns null if a
+    /// valid regex cannot be built.
     /// </summary>
     private Regex? TryBuildWildcardRegex(string pattern)
     {
@@ -358,7 +440,8 @@ public class CodeIndexingService : IHostedService, IDisposable
                 .Replace("\\*", ".*")
                 .Replace("\\?", ".");
 
-            return new Regex("^" + escaped + "$",
+            // No ^...$ anchors: match if the pattern occurs anywhere in the symbol name.
+            return new Regex(escaped,
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
                 TimeSpan.FromSeconds(1));
         }
@@ -369,15 +452,35 @@ public class CodeIndexingService : IHostedService, IDisposable
         }
     }
 
-    public Task<ProjectStructure> GetProjectStructureAsync(CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Take a consistent snapshot of the indexed symbols under the index lock so read queries never
+    /// observe the index mid-rebuild (Clear + repopulate happen while the lock is held).
+    /// </summary>
+    private async Task<List<SymbolInfo>> SnapshotSymbolsAsync(CancellationToken cancellationToken)
     {
+        await _indexLock.WaitAsync(cancellationToken);
+        try
+        {
+            return _symbolIndex.Values.ToList();
+        }
+        finally
+        {
+            _indexLock.Release();
+        }
+    }
+
+    public async Task<ProjectStructure> GetProjectStructureAsync(CancellationToken cancellationToken = default)
+    {
+        // Snapshot under the lock so the structure is never computed against a half-cleared index.
+        var symbols = await SnapshotSymbolsAsync(cancellationToken);
+
         var structure = new ProjectStructure
         {
             RootPath = _indexedDirectory
         };
 
         // Group symbols by namespace
-        var namespaceGroups = _symbolIndex.Values
+        var namespaceGroups = symbols
             .Where(s => s.Kind == "class" || s.Kind == "interface")
             .GroupBy(s => s.Namespace)
             .OrderBy(g => g.Key);
@@ -395,7 +498,7 @@ public class CodeIndexingService : IHostedService, IDisposable
         }
 
         // Add file structure
-        var files = _symbolIndex.Values.Select(s => s.FilePath).Distinct();
+        var files = symbols.Select(s => s.FilePath).Distinct();
         foreach (var file in files)
         {
             var fileInfo = new FileInfo(file);
@@ -404,19 +507,22 @@ public class CodeIndexingService : IHostedService, IDisposable
                 Path = file,
                 Name = fileInfo.Name,
                 RelativePath = string.IsNullOrEmpty(_indexedDirectory) ? file : Path.GetRelativePath(_indexedDirectory, file),
-                SymbolCount = _symbolIndex.Values.Count(s => s.FilePath == file)
+                SymbolCount = symbols.Count(s => s.FilePath == file)
             });
         }
 
-        return Task.FromResult(structure);
+        return structure;
     }
 
-    public Task<ClassHierarchy> GetClassHierarchyAsync(string className, CancellationToken cancellationToken = default)
+    public async Task<ClassHierarchy> GetClassHierarchyAsync(string className, CancellationToken cancellationToken = default)
     {
         var hierarchy = new ClassHierarchy { ClassName = className };
 
+        // Snapshot under the lock so the hierarchy is never computed against a half-cleared index.
+        var symbols = await SnapshotSymbolsAsync(cancellationToken);
+
         // Find the class (or interface) by simple name.
-        var typeSymbol = _symbolIndex.Values.FirstOrDefault(s =>
+        var typeSymbol = symbols.FirstOrDefault(s =>
             (s.Kind == "class" || s.Kind == "interface") && s.Name == className);
 
         if (typeSymbol != null)
@@ -442,7 +548,7 @@ public class CodeIndexingService : IHostedService, IDisposable
         }
 
         // Derived types: any indexed class/interface whose base list references this name.
-        hierarchy.DerivedClasses = _symbolIndex.Values
+        hierarchy.DerivedClasses = symbols
             .Where(s => (s.Kind == "class" || s.Kind == "interface") && s.Name != className)
             .Where(s => s.BaseTypes.Any(b => string.Equals(StripGenericArity(b), className, StringComparison.Ordinal)))
             .Select(s => s.Name)
@@ -450,7 +556,7 @@ public class CodeIndexingService : IHostedService, IDisposable
             .OrderBy(n => n)
             .ToList();
 
-        return Task.FromResult(hierarchy);
+        return hierarchy;
     }
 
     private static bool LooksLikeInterface(string name)
@@ -485,6 +591,8 @@ public class CodeIndexingService : IHostedService, IDisposable
         return names;
     }
 
+    // Must be called while holding _indexLock: it disposes and reassigns the single _fileWatcher field,
+    // so overlapping IndexDirectoryAsync calls would otherwise race and leak/oust watchers.
     private void SetupFileWatcher(string directory)
     {
         try
@@ -523,9 +631,16 @@ public class CodeIndexingService : IHostedService, IDisposable
             || path.Contains("/bin/", StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>True when a path is permitted by the current workspace path policy (no policy = allow).</summary>
+    private bool IsWithinPolicy(string path)
+    {
+        var policy = _pathPolicy;
+        return policy == null || policy.IsPathAllowed(path);
+    }
+
     private async void OnFileChanged(object sender, FileSystemEventArgs e)
     {
-        if (IsExcludedPath(e.FullPath))
+        if (IsExcludedPath(e.FullPath) || !IsWithinPolicy(e.FullPath))
             return;
 
         _logger?.LogDebug("File changed: {FilePath}", e.FullPath);
@@ -581,7 +696,7 @@ public class CodeIndexingService : IHostedService, IDisposable
             _indexLock.Release();
         }
 
-        if (!IsExcludedPath(e.FullPath) && File.Exists(e.FullPath))
+        if (!IsExcludedPath(e.FullPath) && IsWithinPolicy(e.FullPath) && File.Exists(e.FullPath))
         {
             await _indexLock.WaitAsync();
             try
@@ -679,6 +794,97 @@ public class CodeIndexingService : IHostedService, IDisposable
     {
         _fileWatcher?.Dispose();
         _indexLock?.Dispose();
+    }
+}
+
+/// <summary>
+/// OS-appropriate path comparison and containment helpers. Paths compare case-insensitively on
+/// Windows/macOS (case-preserving filesystems) and case-sensitively on Linux, so containment checks do
+/// not wrongly match differently-cased paths on a case-sensitive filesystem.
+/// </summary>
+public static class CodeIndexPaths
+{
+    /// <summary>String comparison to use for filesystem paths on the current OS.</summary>
+    public static readonly StringComparison Comparison =
+        OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+
+    /// <summary>String comparer to use for filesystem paths on the current OS.</summary>
+    public static readonly StringComparer Comparer =
+        OperatingSystem.IsLinux() ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase;
+
+    /// <summary>True when <paramref name="candidate"/> is equal to or nested under <paramref name="baseDir"/>.</summary>
+    public static bool IsContained(string candidate, string baseDir)
+    {
+        if (string.IsNullOrWhiteSpace(baseDir) || string.IsNullOrWhiteSpace(candidate))
+        {
+            return false;
+        }
+
+        string fullBase;
+        string fullCandidate;
+        try { fullBase = Path.GetFullPath(baseDir); } catch { return false; }
+        try { fullCandidate = Path.GetFullPath(candidate); } catch { return false; }
+
+        var normalizedBase = fullBase.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var normalizedCandidate = fullCandidate.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        if (string.Equals(normalizedCandidate, normalizedBase, Comparison))
+        {
+            return true;
+        }
+
+        return normalizedCandidate.StartsWith(normalizedBase + Path.DirectorySeparatorChar, Comparison);
+    }
+}
+
+/// <summary>
+/// Allowed/blocked path policy applied while indexing. A directory or file may be indexed only when it
+/// is not inside any blocked subtree and (if an allow-list is configured) is within one of the allowed
+/// roots. Enforced on every directory and file visited during the walk - not just the index root - so a
+/// blocked path nested under the workspace is never indexed and its symbols/paths are never exposed.
+/// </summary>
+public sealed class CodeIndexPathPolicy
+{
+    private readonly List<string> _allowed;
+    private readonly List<string> _blocked;
+
+    public CodeIndexPathPolicy(IEnumerable<string>? allowedPaths, IEnumerable<string>? blockedPaths)
+    {
+        _allowed = Normalize(allowedPaths);
+        _blocked = Normalize(blockedPaths);
+    }
+
+    /// <summary>True when an allow-list is configured.</summary>
+    public bool HasAllowList => _allowed.Count > 0;
+
+    /// <summary>True when the path is inside a blocked subtree.</summary>
+    public bool IsBlocked(string path) => _blocked.Any(b => CodeIndexPaths.IsContained(path, b));
+
+    /// <summary>True when no allow-list is configured or the path is within an allowed root.</summary>
+    public bool IsWithinAllowed(string path) =>
+        _allowed.Count == 0 || _allowed.Any(a => CodeIndexPaths.IsContained(path, a));
+
+    /// <summary>A directory/file may be indexed when it is not blocked and is within the allowed roots.</summary>
+    public bool IsPathAllowed(string path) => !IsBlocked(path) && IsWithinAllowed(path);
+
+    private static List<string> Normalize(IEnumerable<string>? paths)
+    {
+        var list = new List<string>();
+        if (paths == null)
+        {
+            return list;
+        }
+
+        foreach (var p in paths)
+        {
+            if (string.IsNullOrWhiteSpace(p))
+            {
+                continue;
+            }
+            try { list.Add(Path.GetFullPath(p)); } catch { /* skip unparseable entries */ }
+        }
+
+        return list;
     }
 }
 

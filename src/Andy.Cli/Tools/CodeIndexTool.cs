@@ -122,9 +122,11 @@ public class CodeIndexTool : ToolBase
         // headless runs index the tree they are pointed at. Fall back to the process cwd only when the
         // context does not carry a working directory.
         string indexRoot;
+        CodeIndexPathPolicy? pathPolicy;
         try
         {
             indexRoot = ResolveIndexRoot(context);
+            pathPolicy = BuildPathPolicy(context);
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -136,9 +138,9 @@ public class CodeIndexTool : ToolBase
             // Re-index when nothing is indexed yet or the requested workspace differs from what is
             // currently indexed (e.g. a different headless run / different context).
             if (!_indexingService.IsIndexed ||
-                !string.Equals(_indexingService.IndexedDirectory, indexRoot, StringComparison.OrdinalIgnoreCase))
+                !string.Equals(_indexingService.IndexedDirectory, indexRoot, CodeIndexPaths.Comparison))
             {
-                await _indexingService.IndexDirectoryAsync(indexRoot, cancellationToken);
+                await _indexingService.IndexDirectoryAsync(indexRoot, pathPolicy, cancellationToken);
             }
         }
         catch (OperationCanceledException)
@@ -304,7 +306,7 @@ public class CodeIndexTool : ToolBase
         {
             // Blocked paths are always blocked, regardless of allowed paths.
             if (permissions.BlockedPaths is { Count: > 0 } blocked &&
-                blocked.Any(b => IsContained(root, b)))
+                blocked.Any(b => CodeIndexPaths.IsContained(root, b)))
             {
                 throw new UnauthorizedAccessException(
                     $"Code index root '{root}' is inside a blocked path and cannot be indexed");
@@ -312,7 +314,7 @@ public class CodeIndexTool : ToolBase
 
             // If an allow-list is configured, the root must be contained within one of the entries.
             if (permissions.AllowedPaths is { Count: > 0 } allowed &&
-                !allowed.Any(a => IsContained(root, a)))
+                !allowed.Any(a => CodeIndexPaths.IsContained(root, a)))
             {
                 throw new UnauthorizedAccessException(
                     $"Code index root '{root}' is outside the allowed paths and cannot be indexed");
@@ -322,33 +324,20 @@ public class CodeIndexTool : ToolBase
         return root;
     }
 
-    /// <summary>True when <paramref name="candidate"/> is equal to or nested under <paramref name="baseDir"/>.</summary>
-    private static bool IsContained(string candidate, string baseDir)
+    /// <summary>
+    /// Build the allowed/blocked path policy from the execution context so the policy is enforced on
+    /// every directory and file visited during the walk, not just on the index root. Returns null when
+    /// the context carries no permissions.
+    /// </summary>
+    private static CodeIndexPathPolicy? BuildPathPolicy(ToolExecutionContext? context)
     {
-        if (string.IsNullOrWhiteSpace(baseDir))
+        var permissions = context?.Permissions;
+        if (permissions == null)
         {
-            return false;
+            return null;
         }
 
-        string fullBase;
-        try
-        {
-            fullBase = Path.GetFullPath(baseDir);
-        }
-        catch
-        {
-            return false;
-        }
-
-        var normalizedBase = fullBase.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var normalizedCandidate = candidate.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-
-        if (string.Equals(normalizedCandidate, normalizedBase, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        return normalizedCandidate.StartsWith(normalizedBase + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        return new CodeIndexPathPolicy(permissions.AllowedPaths, permissions.BlockedPaths);
     }
 
     private ProjectStructure FilterStructureByScope(ProjectStructure structure, string scope)

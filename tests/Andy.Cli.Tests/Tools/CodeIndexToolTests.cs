@@ -378,6 +378,46 @@ namespace Hier
         }
     }
 
+    // #175 review: a BlockedPaths entry NESTED under the indexed workspace must not be indexed - its
+    // symbols must never surface even though the root itself is allowed.
+    [Fact]
+    public async Task Execute_BlockedNestedPath_IsNotIndexed()
+    {
+        var workspace = Path.Combine(Path.GetTempPath(), $"CodeIndexBlk_{Guid.NewGuid():N}");
+        // Non-hidden name so the block is proven by the path policy, not the hidden-dir skip.
+        var secret = Path.Combine(workspace, "secrets");
+        Directory.CreateDirectory(secret);
+        try
+        {
+            File.WriteAllText(Path.Combine(workspace, "Public.cs"),
+                "namespace Ws { public class PublicClass { } }");
+            File.WriteAllText(Path.Combine(secret, "Secret.cs"),
+                "namespace Ws { public class SecretClass { } }");
+
+            var context = new ToolExecutionContext
+            {
+                WorkingDirectory = workspace,
+                Permissions = new ToolPermissions { BlockedPaths = new HashSet<string> { secret } }
+            };
+
+            var tool = new CodeIndexTool(_serviceProvider);
+            await tool.InitializeAsync();
+
+            var result = await tool.ExecuteAsync(
+                new Dictionary<string, object?> { ["query_type"] = "symbols", ["pattern"] = "*" },
+                context);
+
+            Assert.True(result.IsSuccessful, result.Message);
+            var names = ClassNames(result);
+            Assert.Contains("PublicClass", names);
+            Assert.DoesNotContain("SecretClass", names);
+        }
+        finally
+        {
+            TryDelete(workspace);
+        }
+    }
+
     private static Dictionary<string, object?> ExtractData(ToolResult result)
     {
         var resultDict = result.Data as Dictionary<string, object?>;
