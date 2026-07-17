@@ -155,6 +155,95 @@ public class InstrumentationSecurityTests
         Assert.Same(evt, result);
     }
 
+    [Fact]
+    public void Redactor_HidesStateChangeMemoryAndSubgoals()
+    {
+        var evt = new StateChangeEvent
+        {
+            ChangeType = "update",
+            TurnIndex = 3,
+            WorkingMemory = { ["objective"] = "SECRET-MEMORY-VALUE" },
+            Subgoals = { "SECRET-SUBGOAL" }
+        };
+
+        var redacted = (StateChangeEvent)InstrumentationRedactor.ForOutput(evt, includeSensitive: false);
+
+        // Structural metadata preserved.
+        Assert.Equal("update", redacted.ChangeType);
+        Assert.Equal(3, redacted.TurnIndex);
+        // Key preserved, value masked.
+        Assert.True(redacted.WorkingMemory.ContainsKey("objective"));
+        Assert.Equal(InstrumentationRedactor.Placeholder, redacted.WorkingMemory["objective"]);
+        // Subgoal count preserved, contents masked.
+        Assert.Single(redacted.Subgoals);
+        Assert.Equal(InstrumentationRedactor.Placeholder, redacted.Subgoals[0]);
+    }
+
+    [Fact]
+    public void Redactor_HidesCritiqueFreeText()
+    {
+        var evt = new CritiqueEvent
+        {
+            GoalSatisfied = true,
+            Assessment = "SECRET-ASSESSMENT",
+            KnownGaps = { "SECRET-GAP" },
+            Recommendation = "SECRET-RECOMMENDATION"
+        };
+
+        var redacted = (CritiqueEvent)InstrumentationRedactor.ForOutput(evt, includeSensitive: false);
+
+        Assert.True(redacted.GoalSatisfied);
+        Assert.Equal(InstrumentationRedactor.Placeholder, redacted.Assessment);
+        Assert.Single(redacted.KnownGaps);
+        Assert.Equal(InstrumentationRedactor.Placeholder, redacted.KnownGaps[0]);
+        Assert.Equal(InstrumentationRedactor.Placeholder, redacted.Recommendation);
+    }
+
+    [Fact]
+    public void Redactor_HidesDiagnosticMessageAndData()
+    {
+        var evt = new DiagnosticEvent
+        {
+            Level = "Warning",
+            Source = "Engine",
+            Message = "SECRET-DIAGNOSTIC-MESSAGE",
+            Data = { ["detail"] = "SECRET-DATA-VALUE" }
+        };
+
+        var redacted = (DiagnosticEvent)InstrumentationRedactor.ForOutput(evt, includeSensitive: false);
+
+        // Level and Source identify the component; kept.
+        Assert.Equal("Warning", redacted.Level);
+        Assert.Equal("Engine", redacted.Source);
+        // Free-text message and data masked.
+        Assert.Equal(InstrumentationRedactor.Placeholder, redacted.Message);
+        Assert.True(redacted.Data.ContainsKey("detail"));
+        Assert.Equal(InstrumentationRedactor.Placeholder, redacted.Data["detail"]);
+    }
+
+    [Fact]
+    public void Redactor_UnknownEventTypeIsRedactedByDefault()
+    {
+        var evt = new LeakyUnknownEvent();
+        var result = InstrumentationRedactor.ForOutput(evt, includeSensitive: false);
+
+        // Fail-safe: an unhandled event type must not pass through verbatim.
+        Assert.IsType<RedactedEvent>(result);
+        var redacted = (RedactedEvent)result;
+        Assert.Equal("LeakyUnknown", redacted.OriginalEventType);
+
+        // The masked event must not carry the sensitive payload anywhere.
+        var json = InstrumentationHub.Instance.SerializeEvent(redacted);
+        Assert.DoesNotContain("SECRET-UNKNOWN-PAYLOAD", json);
+    }
+
+    /// <summary>Stand-in for a future event type the redactor has not been taught about.</summary>
+    private sealed class LeakyUnknownEvent : InstrumentationEvent
+    {
+        public override string EventType => "LeakyUnknown";
+        public string Secret { get; set; } = "SECRET-UNKNOWN-PAYLOAD";
+    }
+
     // ---- Bounded history --------------------------------------------------
 
     [Fact]
@@ -380,5 +469,160 @@ public class InstrumentationSecurityTests
 
         await server.StopAsync();
         Assert.Equal(before, InstrumentationHub.Instance.SubscriberCount);
+    }
+
+    // ---- System prompt honors redaction mode -----------------------------
+
+    [Fact]
+    public async Task Server_SystemPromptRedactedWhenSensitiveNotOptedIn()
+    {
+        InstrumentationHub.Instance.SetSystemPrompt("SECRET-SYSTEM-PROMPT-CONTENT");
+
+        using var server = new InstrumentationServer(port: 0, includeSensitive: false);
+        Assert.True(server.Start());
+
+        using var client = new HttpClient();
+        var body = await client.GetStringAsync(
+            $"http://127.0.0.1:{server.BoundPort}/system-prompt?token={server.AuthToken}");
+
+        Assert.DoesNotContain("SECRET-SYSTEM-PROMPT-CONTENT", body);
+        Assert.Contains(InstrumentationRedactor.Placeholder, body);
+
+        await server.StopAsync();
+        InstrumentationHub.Instance.SetSystemPrompt(string.Empty);
+    }
+
+    [Fact]
+    public async Task Server_SystemPromptVisibleWhenSensitiveOptedIn()
+    {
+        InstrumentationHub.Instance.SetSystemPrompt("VISIBLE-SYSTEM-PROMPT-CONTENT");
+
+        using var server = new InstrumentationServer(port: 0, includeSensitive: true);
+        Assert.True(server.Start());
+
+        using var client = new HttpClient();
+        var body = await client.GetStringAsync(
+            $"http://127.0.0.1:{server.BoundPort}/system-prompt?token={server.AuthToken}");
+
+        Assert.Contains("VISIBLE-SYSTEM-PROMPT-CONTENT", body);
+
+        await server.StopAsync();
+        InstrumentationHub.Instance.SetSystemPrompt(string.Empty);
+    }
+
+    // ---- Advertised host matches the actual loopback bind ----------------
+
+    [Fact]
+    public void Server_AdvertisesBoundLoopbackIpNotLocalhost()
+    {
+        using var server = new InstrumentationServer(port: 0);
+        Assert.True(server.Start());
+
+        Assert.NotNull(server.DashboardUrl);
+        Assert.Contains("127.0.0.1", server.DashboardUrl!);
+        Assert.DoesNotContain("localhost", server.DashboardUrl!);
+
+        server.Dispose();
+    }
+
+    // ---- SSE cleanup removes the specific disconnecting writer ------------
+
+    [Fact]
+    public async Task Server_SecondSubscriberStillReceivesAfterFirstDisconnects()
+    {
+        InstrumentationHub.Instance.Clear();
+
+        // includeSensitive: true so Diagnostic messages are streamed verbatim and the
+        // marker below is directly observable.
+        using var server = new InstrumentationServer(port: 0, includeSensitive: true);
+        Assert.True(server.Start());
+        var eventsUrl = $"http://127.0.0.1:{server.BoundPort}/events?token={server.AuthToken}";
+
+        var client1 = new HttpClient();
+        var client2 = new HttpClient();
+        var buffer2 = new System.Text.StringBuilder();
+        var reader2Cts = new CancellationTokenSource();
+
+        try
+        {
+            // Open the first stream and keep it live.
+            var response1 = await client1.GetAsync(eventsUrl, HttpCompletionOption.ResponseHeadersRead);
+            var stream1 = await response1.Content.ReadAsStreamAsync();
+            var reader1 = new StreamReader(stream1);
+            var read1Cts = new CancellationTokenSource();
+            var read1 = ReadLinesAsync(reader1, new System.Text.StringBuilder(), read1Cts.Token);
+
+            // Open the second stream and collect everything it receives.
+            var response2 = await client2.GetAsync(eventsUrl, HttpCompletionOption.ResponseHeadersRead);
+            var stream2 = await response2.Content.ReadAsStreamAsync();
+            var reader2 = new StreamReader(stream2);
+            var read2 = ReadLinesAsync(reader2, buffer2, reader2Cts.Token);
+
+            // Wait until both streams are registered server-side.
+            await WaitUntilAsync(() => server.ActiveStreamCount == 2, TimeSpan.FromSeconds(5));
+
+            // Disconnect the first client and wait for the server to drop exactly its writer.
+            read1Cts.Cancel();
+            client1.Dispose();
+            await WaitUntilAsync(() => server.ActiveStreamCount == 1, TimeSpan.FromSeconds(5));
+
+            // Publish a distinctive event; the surviving client must still receive it.
+            InstrumentationHub.Instance.Publish(new DiagnosticEvent
+            {
+                Level = "Info",
+                Source = "Test",
+                Message = "MARKER-AFTER-DISCONNECT"
+            });
+
+            var received = await WaitUntilAsync(
+                () => { lock (buffer2) { return buffer2.ToString().Contains("MARKER-AFTER-DISCONNECT"); } },
+                TimeSpan.FromSeconds(5));
+
+            Assert.True(received, "surviving subscriber should still receive events after the other disconnects");
+        }
+        finally
+        {
+            reader2Cts.Cancel();
+            client2.Dispose();
+            await server.StopAsync();
+            InstrumentationHub.Instance.Clear();
+        }
+    }
+
+    private static async Task ReadLinesAsync(StreamReader reader, System.Text.StringBuilder sink, CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                var line = await reader.ReadLineAsync(ct);
+                if (line == null)
+                {
+                    break;
+                }
+                lock (sink)
+                {
+                    sink.AppendLine(line);
+                }
+            }
+        }
+        catch
+        {
+            // Stream aborted/cancelled - expected on disconnect.
+        }
+    }
+
+    private static async Task<bool> WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            if (condition())
+            {
+                return true;
+            }
+            await Task.Delay(50);
+        }
+        return condition();
     }
 }

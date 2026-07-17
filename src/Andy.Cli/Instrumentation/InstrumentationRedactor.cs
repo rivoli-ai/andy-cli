@@ -113,10 +113,46 @@ public static class InstrumentationRedactor
                     StructuredData = null
                 };
 
-            // StateChange, Critique and Diagnostic events carry operational metadata
-            // rather than user/model payloads, so they pass through unchanged.
+            case StateChangeEvent e:
+                return new StateChangeEvent
+                {
+                    // ChangeType and TurnIndex are structural metadata; WorkingMemory
+                    // values and Subgoals are model/user-derived free text and must be
+                    // masked. Keys and counts are preserved for diagnostic shape.
+                    ChangeType = e.ChangeType,
+                    TurnIndex = e.TurnIndex,
+                    WorkingMemory = e.WorkingMemory.ToDictionary(kv => kv.Key, _ => Placeholder),
+                    Subgoals = e.Subgoals.Select(_ => Placeholder).ToList()
+                };
+
+            case CritiqueEvent e:
+                return new CritiqueEvent
+                {
+                    // GoalSatisfied is a boolean signal; Assessment, KnownGaps and
+                    // Recommendation are model-authored free text and must be masked.
+                    GoalSatisfied = e.GoalSatisfied,
+                    Assessment = string.IsNullOrEmpty(e.Assessment) ? e.Assessment : Placeholder,
+                    KnownGaps = e.KnownGaps.Select(_ => Placeholder).ToList(),
+                    Recommendation = string.IsNullOrEmpty(e.Recommendation) ? e.Recommendation : Placeholder
+                };
+
+            case DiagnosticEvent e:
+                return new DiagnosticEvent
+                {
+                    // Level and Source identify the emitting component; Message and Data
+                    // may carry model/user-derived text and must be masked.
+                    Level = e.Level,
+                    Source = e.Source,
+                    Message = string.IsNullOrEmpty(e.Message) ? e.Message : Placeholder,
+                    Data = e.Data.ToDictionary(kv => kv.Key, _ => (object?)Placeholder)
+                };
+
+            // Fail-safe default: any event type not explicitly handled above is masked
+            // down to a marker rather than passed through verbatim, so newly added
+            // event types cannot leak sensitive payloads before redaction is taught
+            // about them.
             default:
-                return evt;
+                return new RedactedEvent(evt.EventType);
         }
     }
 

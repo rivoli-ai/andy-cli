@@ -23,13 +23,24 @@ namespace Andy.Cli.Instrumentation;
 /// </summary>
 public class InstrumentationServer : IDisposable, IAsyncDisposable
 {
+    /// <summary>
+    /// Loopback host advertised in URLs and logs. The server binds the IPv4 loopback
+    /// address explicitly (see <see cref="Start"/>), so we advertise the same literal
+    /// 127.0.0.1 rather than "localhost" (which may resolve to ::1 first and produce a
+    /// dead link).
+    /// </summary>
+    private const string LoopbackHost = "127.0.0.1";
+
     private readonly int _requestedPort;
     private readonly bool _includeSensitive;
     private readonly ILogger? _logger;
     private readonly string _authToken;
     private WebApplication? _app;
     private IDisposable? _subscription;
-    private readonly ConcurrentBag<StreamWriter> _activeStreams = new();
+    // Keyed by a per-connection id so a disconnecting handler removes exactly the
+    // writer it owns (a ConcurrentBag would remove an arbitrary writer, potentially
+    // dropping a live client while retaining a dead one).
+    private readonly ConcurrentDictionary<Guid, StreamWriter> _activeStreams = new();
     private int _boundPort;
 
     public InstrumentationServer(int port = InstrumentationOptions.DefaultPort, ILogger? logger = null, bool includeSensitive = false)
@@ -54,12 +65,15 @@ public class InstrumentationServer : IDisposable, IAsyncDisposable
     /// <summary>The port the server actually bound to (0 until started).</summary>
     public int BoundPort => _boundPort;
 
+    /// <summary>Number of live SSE client streams. Exposed for diagnostics and testing.</summary>
+    public int ActiveStreamCount => _activeStreams.Count;
+
     /// <summary>The exception captured if <see cref="Start"/> failed to bind; null on success.</summary>
     public Exception? LastStartError { get; private set; }
 
     /// <summary>The loopback dashboard URL including the credential, or null if not running.</summary>
     public string? DashboardUrl => IsRunning
-        ? $"http://localhost:{_boundPort}/?{InstrumentationAuth.TokenQueryParameter}={_authToken}"
+        ? $"http://{LoopbackHost}:{_boundPort}/?{InstrumentationAuth.TokenQueryParameter}={_authToken}"
         : null;
 
     /// <summary>
@@ -121,8 +135,9 @@ public class InstrumentationServer : IDisposable, IAsyncDisposable
                 // No Access-Control-Allow-Origin header: cross-origin reads are denied
                 // by the browser same-origin policy, and there is no wildcard opt-out.
 
+                var streamId = Guid.NewGuid();
                 var writer = new StreamWriter(context.Response.Body, Encoding.UTF8, leaveOpen: true);
-                _activeStreams.Add(writer);
+                _activeStreams[streamId] = writer;
 
                 try
                 {
@@ -155,7 +170,8 @@ public class InstrumentationServer : IDisposable, IAsyncDisposable
                 }
                 finally
                 {
-                    _activeStreams.TryTake(out _);
+                    // Remove exactly the writer this connection owns.
+                    _activeStreams.TryRemove(streamId, out _);
                 }
             });
 
@@ -182,11 +198,25 @@ public class InstrumentationServer : IDisposable, IAsyncDisposable
                 return Results.Ok(new { message = "Event history cleared" });
             });
 
-            // Endpoint: Get system prompt
+            // Endpoint: Get system prompt. The system prompt can embed user/project
+            // context, so it honors the same redaction mode as /events and /history:
+            // its content is only returned verbatim when sensitive output was opted in.
             _app.MapGet("/system-prompt", () =>
             {
                 var systemPrompt = InstrumentationHub.Instance.GetSystemPrompt();
-                return Results.Json(new { systemPrompt = systemPrompt ?? string.Empty });
+                string value;
+                if (_includeSensitive)
+                {
+                    value = systemPrompt ?? string.Empty;
+                }
+                else
+                {
+                    // Preserve the "a prompt exists" signal but withhold its contents.
+                    value = string.IsNullOrEmpty(systemPrompt)
+                        ? string.Empty
+                        : InstrumentationRedactor.Placeholder;
+                }
+                return Results.Json(new { systemPrompt = value });
             });
 
             // Endpoint: Serve the dashboard HTML. The credential is injected so the
@@ -196,7 +226,7 @@ public class InstrumentationServer : IDisposable, IAsyncDisposable
             // Subscribe to instrumentation hub
             _subscription = InstrumentationHub.Instance.Subscribe(async evt =>
             {
-                foreach (var stream in _activeStreams)
+                foreach (var stream in _activeStreams.Values)
                 {
                     try
                     {
@@ -216,7 +246,7 @@ public class InstrumentationServer : IDisposable, IAsyncDisposable
             _boundPort = ResolveBoundPort(_app) ?? _requestedPort;
             IsRunning = true;
 
-            _logger?.LogInformation("Instrumentation server started on http://localhost:{Port} (token required)", _boundPort);
+            _logger?.LogInformation("Instrumentation server started on http://{Host}:{Port} (token required)", LoopbackHost, _boundPort);
             return true;
         }
         catch (Exception ex)
@@ -277,10 +307,11 @@ public class InstrumentationServer : IDisposable, IAsyncDisposable
         _subscription?.Dispose();
         _subscription = null;
 
-        foreach (var stream in _activeStreams)
+        foreach (var stream in _activeStreams.Values)
         {
             try { stream.Dispose(); } catch { /* ignore */ }
         }
+        _activeStreams.Clear();
 
         if (_app != null)
         {

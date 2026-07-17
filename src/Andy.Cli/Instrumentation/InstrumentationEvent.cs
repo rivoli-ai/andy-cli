@@ -156,3 +156,25 @@ public class DiagnosticEvent : InstrumentationEvent
     public string Message { get; set; } = string.Empty;
     public Dictionary<string, object?> Data { get; set; } = new();
 }
+
+/// <summary>
+/// Fail-safe placeholder emitted by <see cref="InstrumentationRedactor"/> for event
+/// types it does not explicitly know how to redact. Rather than passing an unknown
+/// event through verbatim (which could leak sensitive payloads), the redactor masks
+/// it down to this marker, preserving only the original event type name.
+/// </summary>
+public class RedactedEvent : InstrumentationEvent
+{
+    public RedactedEvent(string originalEventType)
+    {
+        OriginalEventType = originalEventType;
+    }
+
+    public override string EventType => "Redacted";
+
+    /// <summary>The event type that was redacted; retained for diagnostics only.</summary>
+    public string OriginalEventType { get; }
+
+    /// <summary>Constant note indicating the payload was withheld.</summary>
+    public string Note { get; set; } = InstrumentationRedactor.Placeholder;
+}
