@@ -154,6 +154,9 @@
     <Compile Include="Headless/HeadlessPermissionAllowListTests.cs" />
     <!-- #157 headless execute_command capability grant (scoped + fail-closed) -->
     <Compile Include="Headless/HeadlessCapabilityToolExecutorTests.cs" />
+    <!-- #179 tool_call_finished emitted only after actual execution completes -->
+    <Compile Include="Headless/ObservingToolExecutorTests.cs" />
+    <Compile Include="Headless/ToolUsageAuditorVerdictTests.cs" />
     <!-- Headless SWE-style end-to-end task (real model; skips without OPENROUTER_API_KEY) -->
     <Compile Include="Headless/HeadlessSweTaskTests.cs" />
     <!-- Interactive ProcessMessageAsync NRE reproduction (real model; skips without OPENROUTER_API_KEY) -->

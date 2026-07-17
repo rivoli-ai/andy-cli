@@ -121,6 +121,28 @@ public static class HeadlessAgentRunner
         var allowedToolsIncludeExecuteCommand = allowedTools.Contains("execute_command");
         toolExecutor = new HeadlessCapabilityToolExecutor(toolExecutor, allowedToolsIncludeExecuteCommand);
 
+        // #179: observe the ACTUAL tool execution. SimpleAgent calls this executor
+        // exactly once per tool call and awaits the real result (or exception), so
+        // wrapping it is the CLI's only exact start/finish signal — the engine's
+        // ToolCalled event fires pre-execution and there is no engine ToolCompleted
+        // event. The observer emits tool_call_started/finished with a measured
+        // duration and the real outcome, and records the actual permission verdict
+        // (evaluated with the real parameters) into the auditor. Placed OUTERMOST so
+        // the measured span covers the permission gate and the observed result
+        // reflects a synthesized deny. Resolved here (before the agent is built) so
+        // the same auditor feeds the end-of-run tool-usage audit.
+        var auditor = new ToolUsageAuditor();
+        var toolAuthorizer = services
+            .GetService(typeof(Andy.Permissions.Authorization.IToolPermissionAuthorizer))
+            as Andy.Permissions.Authorization.IToolPermissionAuthorizer;
+        toolExecutor = new ObservingToolExecutor(
+            toolExecutor,
+            emitter,
+            auditor,
+            toolAuthorizer,
+            toolHost.Registry,
+            workingDirectory: !string.IsNullOrWhiteSpace(config.Workspace.Root) ? config.Workspace.Root : null);
+
         var maxTurns = config.Limits.MaxIterations > 0 ? config.Limits.MaxIterations : 10;
 
         // Operate in the configured workspace root, not the process cwd. SimpleAgent
@@ -140,9 +162,6 @@ public static class HeadlessAgentRunner
             maxTurns: maxTurns,
             workingDirectory: workingDirectory,
             logger: loggerFactory.CreateLogger<SimpleAgent>());
-
-        var auditor = new ToolUsageAuditor();
-        WireToolEvents(agent, emitter, auditor);
 
         // Finalize a run that has reached the agent loop: emit the AX.4 tool-usage
         // audit (once, just before `finished`) then the terminal `finished` event.
@@ -273,28 +292,6 @@ public static class HeadlessAgentRunner
         HeadlessExitCode code)
     {
         emitter.EmitFinished((int)code, stopwatch.ElapsedMilliseconds, iterations);
-    }
-
-    // SimpleAgent fires ToolCalled when the LLM emits a tool call but doesn't
-    // surface a per-call duration; we time it on our side by stamping started
-    // and finishing in the same handler chain. The args themselves stay out
-    // of the event stream (digest only) — the producer can't be sure they
-    // don't carry secrets.
-    private static void WireToolEvents(SimpleAgent agent, HeadlessEventEmitter emitter, ToolUsageAuditor auditor)
-    {
-        agent.ToolCalled += (_, e) =>
-        {
-            // AX.4: tally every tool the agent invokes for the end-of-run audit.
-            auditor.RecordInvocation(e.ToolName);
-
-            var callId = Guid.NewGuid().ToString("N")[..12];
-            emitter.EmitToolCallStarted(callId, e.ToolName, argsDigest: null);
-            // SimpleAgent does not emit a ToolFinished today; until it does,
-            // emit a paired finished event with ok=true and duration_ms=0.
-            // Consumers compute end-of-call from the next event in the
-            // stream. Upgrade this when SimpleAgent grows ToolFinished.
-            emitter.EmitToolCallFinished(callId, e.ToolName, ok: true, durationMs: 0);
-        };
     }
 
     // AX.4: emit the end-of-run tool-usage audit just before `finished`, resolving

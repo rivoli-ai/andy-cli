@@ -66,12 +66,14 @@
     },
     "tool_call_finished": {
       "type": "object",
+      "description": "Emitted once per tool_call_started, ONLY after the tool's actual execution has completed (succeeded, failed, was denied by the permission engine, timed out, or was cancelled). `duration_ms` is measured start-to-finish by the producer. Exactly one tool_call_finished pairs with each tool_call_started via `call_id`.",
       "required": ["call_id", "tool_name", "ok", "duration_ms"],
       "properties": {
         "call_id":     { "type": "string" },
         "tool_name":   { "type": "string" },
-        "ok":          { "type": "boolean" },
-        "duration_ms": { "type": "integer", "minimum": 0 },
+        "ok":          { "type": "boolean", "description": "true only when outcome=success. Any non-success terminal state (failed, denied, timed_out, cancelled) is ok=false. A denied or still-running tool is never reported ok=true." },
+        "outcome":     { "type": "string", "enum": ["success", "failed", "denied", "timed_out", "cancelled"], "description": "The terminal state of the actual execution. `denied` is a permission-engine refusal (distinct from `failed`, an execution error); `timed_out` is a per-tool timeout / resource-limit abort; `cancelled` is a caller/run cancellation. Additive field; consumers MUST tolerate its absence and unknown values." },
+        "duration_ms": { "type": "integer", "minimum": 0, "description": "Wall-clock milliseconds measured by the producer from tool_call_started to the observed completion. Never fabricated as 0." },
         "result_digest": { "type": "string", "description": "SHA-256 hex of the canonical-JSON-serialized result. Optional; producers MAY omit on error." },
         "error":       { "type": "string", "description": "Short error string when ok=false. Producers SHOULD redact or truncate; consumers MUST NOT key on its content." }
       }
