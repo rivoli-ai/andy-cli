@@ -1,9 +1,11 @@
 using System.Collections.Concurrent;
+using Andy.Permissions.Authorization;
 using Andy.Permissions.DependencyInjection;
 using Andy.Permissions.Model;
 using Andy.Permissions.Prompt;
 using Andy.Permissions.Store;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Andy.Cli.Services;
 
@@ -211,6 +213,15 @@ public static class CliPermissionServiceExtensions
             services.AddSingleton<IPermissionPrompt>(sp =>
                 new CliPermissionPrompt(interactiveBroker, sp.GetService<IPermissionStore>()));
         }
+
+        // Teach the action resolver to extract create_directory's target as a Path resource. The
+        // packaged DefaultToolActionResolver does not register create_directory, so without this its
+        // path is invisible to permission evaluation and path-scoped rules cannot match it. Registered
+        // before AddAndyPermissions (which uses TryAddSingleton) so this instance wins while retaining
+        // every built-in tool mapping.
+        var actionResolver = new DefaultToolActionResolver();
+        actionResolver.Register("create_directory", ("path", ResourceKind.Path));
+        services.TryAddSingleton<IToolActionResolver>(actionResolver);
 
         services.AddAndyPermissions(options =>
         {
