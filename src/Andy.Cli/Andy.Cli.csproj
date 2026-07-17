@@ -11,6 +11,8 @@
     <SelfContained>false</SelfContained>
     <!-- Enable JSON reflection for trimming compatibility -->
     <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+    <!-- Reproducible restore: pin the package graph via packages.lock.json (see dependency-manifest.json). -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <!--
       Default date-based version for the Andy ecosystem. The release workflow
       (.github/workflows/release.yml) overrides this at publish time via
