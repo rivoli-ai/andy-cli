@@ -117,6 +117,40 @@ public class CreateDirectoryToolTests : IDisposable
     }
 
     [Fact]
+    public async Task DenialMessage_DoesNotDiscloseResolvedAbsolutePath()
+    {
+        // A relative traversal path resolves to an absolute location outside the workspace. The denial
+        // text must echo only the user-supplied relative path, never the resolved absolute target that
+        // would leak the real filesystem location outside the workspace.
+        var suppliedPath = Path.Combine("..", "outside", "leaked");
+        var parameters = new Dictionary<string, object?> { ["path"] = suppliedPath };
+
+        var result = await _tool.ExecuteAsync(parameters, Context(_root));
+
+        Assert.False(result.IsSuccessful);
+        Assert.Contains("outside the allowed workspace", result.ErrorMessage);
+        Assert.Contains(suppliedPath, result.ErrorMessage);
+        Assert.DoesNotContain("resolves to", result.ErrorMessage);
+        // The resolved outside root must not be leaked back to the caller.
+        Assert.DoesNotContain(_outside, result.ErrorMessage);
+    }
+
+    [Fact]
+    public void Containment_NoWorkingDirectoryAndNoAllowedPaths_FailsClosed()
+    {
+        // No boundary can be computed (empty working directory, no allowed paths). The helper must fail
+        // closed and deny rather than allowing creation at an arbitrary absolute path.
+        var permissions = new ToolPermissions { FileSystemAccess = true };
+
+        var allowed = CreateDirectoryTool.IsWithinAllowedRoots(
+            Path.Combine(_outside, "anywhere"),
+            workingDirectory: string.Empty,
+            permissions);
+
+        Assert.False(allowed);
+    }
+
+    [Fact]
     public async Task DotDotTraversalEscape_IsDenied()
     {
         // ".." climbs out of the workspace into the sibling "outside" directory.

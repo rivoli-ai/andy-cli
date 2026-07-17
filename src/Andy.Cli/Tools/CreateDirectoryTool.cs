@@ -97,8 +97,11 @@ public class CreateDirectoryTool : ToolBase
             // funnel through this shared tool.
             if (!IsWithinAllowedRoots(fullPath, workingDirectory, context.Permissions))
             {
+                // Report only the user-supplied path. Do not echo the resolved absolute path: for a
+                // denied traversal or symlink escape that would disclose the real canonical filesystem
+                // location outside the workspace back to the caller.
                 return Task.FromResult(ToolResult.Failure(
-                    $"Access denied: '{path}' resolves to '{fullPath}', which is outside the allowed directories"));
+                    $"Access denied: '{path}' is outside the allowed workspace"));
             }
 
             // Check if directory already exists
@@ -180,7 +183,7 @@ public class CreateDirectoryTool : ToolBase
     /// real, symlink-free locations (with the deepest existing ancestor canonicalised) before the
     /// boundary comparison, so a symlink inside an allowed root that points outside cannot be abused.
     /// </summary>
-    private static bool IsWithinAllowedRoots(
+    internal static bool IsWithinAllowedRoots(
         string fullPath,
         string workingDirectory,
         ToolPermissions? permissions)
@@ -193,12 +196,12 @@ public class CreateDirectoryTool : ToolBase
             return ToolHelpers.IsPathWithinAllowedPaths(fullPath, permissions);
         }
 
-        // No explicit roots configured: confine to the working directory. If neither is available we
-        // cannot compute a boundary, so fall back to allowing the operation (preserves prior behaviour
-        // for callers that supply no context at all).
+        // No explicit roots configured: confine to the working directory. If neither a working directory
+        // nor allowed paths are available we cannot compute a boundary, so fail closed and deny rather
+        // than allowing creation at an arbitrary absolute path.
         if (string.IsNullOrEmpty(workingDirectory))
         {
-            return true;
+            return false;
         }
 
         return ToolHelpers.IsPathWithinBoundary(
