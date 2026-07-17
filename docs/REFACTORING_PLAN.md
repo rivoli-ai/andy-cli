@@ -3,6 +3,60 @@
 ## Overview
 This document outlines the refactoring strategy for the Andy CLI to improve maintainability, testability, and consistency.
 
+## Current file sizes (issue #177 baseline)
+
+Measured on the `fix/177-composition-root-refactor` branch:
+
+- `src/Andy.Cli/Program.cs` - ~2,180 lines (was ~2,244 before this pass).
+  Combines DI composition, provider/permission setup, headless/ACP/command
+  dispatch, input handling, TUI lifecycle, and rendering.
+- `src/Andy.Cli/Widgets/FeedView.cs` - ~3,150 lines, ~15 types in one file.
+  See `docs/feedview-inventory.md` for the per-component inventory and the
+  reusable-vs-CLI-only classification.
+
+## Issue #177 first increment (composition-root extraction)
+
+Safe, behaviour-preserving extractions landed on this branch. Logic was moved
+**verbatim**; the whole existing test suite still passes.
+
+- **`src/Andy.Cli/Hosting/CliMode.cs` + `CliModeSelector.cs`** - the top-level
+  mode-dispatch decision (`version` / `acp` / `headless` / `command` /
+  `interactive`) that used to be a chain of `if` blocks at the top of
+  `Program.Main`. Now a single pure `CliModeSelector.Select(args)` consumed by a
+  `switch` in `Main`. Unit tested (`Hosting/CliModeSelectorTests.cs`), including
+  the branch-precedence cases.
+- **`src/Andy.Cli/Hosting/AppCompositionRoot.cs`** - the single application
+  composition root for the tool service graph. `AddCoreToolServices(services,
+  broker)` and `InitializeToolRegistry(provider)` replace a ~25-line block of
+  Andy.Tools registrations plus a registry-init loop that were **duplicated
+  verbatim in three places** (interactive `Main`, `RunAcpServerModeAsync`,
+  `HandleCommandLineArgs`). All three call sites now share one definition. Unit
+  tested (`Hosting/AppCompositionRootTests.cs`).
+- **`src/Andy.Cli/Hosting/ProviderUrlResolver.cs`** - the provider-URL mapping
+  (with env overrides) extracted from the private `Program.GetProviderUrl`. Unit
+  tested (`Hosting/ProviderUrlResolverTests.cs`).
+
+### Frame-scheduler recreation (documented, not changed)
+
+`Program.Main` recreates `new Andy.Tui.Core.FrameScheduler(...)` on every reflow/
+scroll (the `reflowSig != lastReflowSig` branch) to force a full clear + repaint,
+because `FrameScheduler` exposes no "reset" hook. Hoisting this to a single
+lifecycle-owned instance is **not** a trivially safe change: the full-repaint
+behaviour currently *depends* on a fresh instance having no previous grid.
+A safe fix requires a reset/invalidate API on `FrameScheduler` (an `andy-tui2`
+change). **Recommendation:** add `FrameScheduler.Invalidate()` (or a
+`ForceFullRepaint()` flag) in andy-tui2, then replace the recreation with a call
+to it here. Left unchanged on this branch.
+
+### Direct Console output mixed with TUI rendering (noted)
+
+`Program.Main` writes cursor-position / DECSCUSR escapes directly via
+`Console.Write` after each frame (see the "NOTE" comment near the end of the
+render loop) instead of routing through the PTY. This is called out in #177 as a
+mixed-output concern. Routing cursor ops through the TUI/PTY interface is an
+andy-tui2-facing change and was left unchanged (out of scope for a safe first
+increment).
+
 ## Completed
 
 ### 1. Centralized Theme System ✓
@@ -79,18 +133,29 @@ Update all widgets to use `Theme.Current` instead of hardcoded colors:
 
 ### 4. Program.cs Refactoring
 **Current Issues**:
-- 1450+ lines in a single method (Main)
+- ~2,180 lines; `Main` is still a very large method
 - Mixed concerns: initialization, rendering, input handling
 - Hard to test
 
-**Target State**:
+**Landed (issue #177 first increment)** - see the "Issue #177 first increment"
+section above:
+- `Hosting/CliModeSelector.cs` - mode dispatch (tested)
+- `Hosting/AppCompositionRoot.cs` - shared tool-service DI graph (tested)
+- `Hosting/ProviderUrlResolver.cs` - provider URL mapping (tested)
+
+**Remaining target state** (subsequent, larger increments):
 ```
-Services/
-  AppBootstrap.cs - Service initialization
-  RenderLoop.cs - Main rendering loop
-  InputHandler.cs - Keyboard input handling
+Hosting/ (or Services/)
+  AppBootstrap.cs   - LLM + configuration service initialization
+  RenderLoop.cs     - Main rendering loop
+  InputHandler.cs   - Keyboard input handling (the HandleKey local function)
   HeaderRenderer.cs - Header rendering logic
+  Dialogs/          - ShowExitConfirmationAsync / ShowPermissionDialogAsync
 ```
+Note: the render loop, input handling, and modal dialogs are tightly coupled to
+local closures over `viewport`, `scheduler`, `feed`, `prompt`, etc. Extracting
+them is higher-risk and should follow only after the composition-root pieces are
+stable.
 
 ## Guidelines
 
@@ -169,4 +234,10 @@ Once theme system is fully integrated:
 - [ ] Update 5 key widgets to use Theme
 - [ ] Extract 3 feed item classes
 - [ ] Write tests for extracted classes
-- [ ] Document migration for remaining classes
+- [x] Document migration for remaining classes (see `docs/feedview-inventory.md`)
+- [x] Extract CLI mode-dispatch into `Hosting/CliModeSelector` (#177)
+- [x] Extract shared tool-service DI into `Hosting/AppCompositionRoot` (#177)
+- [x] Extract provider URL mapping into `Hosting/ProviderUrlResolver` (#177)
+- [ ] Extract render loop / input handler / dialogs out of `Program.Main` (#177, follow-up)
+- [ ] Cross-repo: add `FrameScheduler` reset/invalidate API in andy-tui2 and stop recreating it per reflow (#177)
+- [ ] Cross-repo: move REUSABLE feed items into andy-tui2 (#177, see inventory)

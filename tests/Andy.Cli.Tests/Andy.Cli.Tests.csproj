@@ -173,6 +173,10 @@
     <Compile Include="Services/ToolResultDisplayTest.cs" />
     <Compile Include="Services/UnifiedDiffTests.cs" />
     <Compile Include="Widgets/FileDiffItemTests.cs" />
+    <!-- #177 composition-root extraction: mode selection, provider URL, shared tool DI -->
+    <Compile Include="Hosting/CliModeSelectorTests.cs" />
+    <Compile Include="Hosting/ProviderUrlResolverTests.cs" />
+    <Compile Include="Hosting/AppCompositionRootTests.cs" />
   </ItemGroup>
 
   <ItemGroup>
