@@ -66,7 +66,7 @@ public class TypeConversionTests
     }
 
     [Fact]
-    public void ContentPipeline_ProcessesSystemMessageBlock()
+    public async Task ContentPipeline_ProcessesSystemMessageBlock()
     {
         // Arrange
         var feed = new FeedView();
@@ -78,7 +78,7 @@ public class TypeConversionTests
 
         // Act
         pipeline.AddSystemMessage("Test message", SystemMessageType.Context);
-        pipeline.FinalizeAsync().Wait();
+        await pipeline.FinalizeAsync();
 
         // Assert - Just verify no exception is thrown
         Assert.True(true);

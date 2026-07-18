@@ -67,7 +67,7 @@ public class OrderingTests
     }
 
     [Fact]
-    public void ContentPipeline_Ordering_ShouldNotThrow()
+    public async Task ContentPipeline_Ordering_ShouldNotThrow()
     {
         // Arrange
         var processor = new MarkdownContentProcessor();
@@ -86,7 +86,7 @@ public class OrderingTests
         Exception? caughtException = null;
         try
         {
-            pipeline.FinalizeAsync().Wait();
+            await pipeline.FinalizeAsync();
         }
         catch (Exception ex)
         {
