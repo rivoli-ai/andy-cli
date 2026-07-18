@@ -89,7 +89,7 @@ public class HeadlessEventEmitterTests
     }
 
     [Fact]
-    public void Emit_FromMultipleThreads_LinesNeverInterleave()
+    public async Task Emit_FromMultipleThreads_LinesNeverInterleave()
     {
         var (sw, emitter) = NewEmitter();
         var workers = Enumerable.Range(0, 8).Select(i => Task.Run(() =>
@@ -99,7 +99,7 @@ public class HeadlessEventEmitterTests
                 emitter.EmitLlmChunk($"thread-{i}-msg-{j}");
             }
         })).ToArray();
-        Task.WaitAll(workers);
+        await Task.WhenAll(workers);
 
         // Each line must be a complete JSON document; no partial writes
         // would otherwise show up as a JsonReaderException.
