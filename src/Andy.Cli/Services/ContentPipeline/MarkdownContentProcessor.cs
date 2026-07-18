@@ -23,11 +23,11 @@ public class MarkdownContentProcessor : IContentProcessor
 
         // Split content by code blocks first
         var parts = SplitByCodeBlocks(rawContent);
-        
+
         foreach (var part in parts)
         {
             var blockId = $"{blockIdPrefix}block_{blockCounter++}";
-            
+
             if (part.IsCodeBlock)
             {
                 // Only add code blocks with meaningful content
@@ -210,7 +210,7 @@ public class MarkdownContentProcessor : IContentProcessor
 
         return parts;
     }
-    
+
     private class ContentPart
     {
         public string Content { get; set; } = string.Empty;

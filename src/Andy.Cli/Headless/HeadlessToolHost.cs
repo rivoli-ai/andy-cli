@@ -54,49 +54,49 @@ public sealed class HeadlessToolHost : IAsyncDisposable
             switch (tool.Transport)
             {
                 case "cli":
-                {
-                    var adapter = new CliSubprocessTool(tool, loggerFactory?.CreateLogger<CliSubprocessTool>());
-                    Register(registry, adapter);
-                    break;
-                }
+                    {
+                        var adapter = new CliSubprocessTool(tool, loggerFactory?.CreateLogger<CliSubprocessTool>());
+                        Register(registry, adapter);
+                        break;
+                    }
                 case "mcp":
-                {
-                    if (string.IsNullOrEmpty(tool.Endpoint))
                     {
-                        // Schema enforces endpoint on mcp transport; defensive guard
-                        // surfaces a clearer message than a NRE deeper in.
-                        throw new InvalidOperationException(
-                            $"MCP tool '{tool.Name}' has no endpoint; schema validation should have rejected this.");
-                    }
+                        if (string.IsNullOrEmpty(tool.Endpoint))
+                        {
+                            // Schema enforces endpoint on mcp transport; defensive guard
+                            // surfaces a clearer message than a NRE deeper in.
+                            throw new InvalidOperationException(
+                                $"MCP tool '{tool.Name}' has no endpoint; schema validation should have rejected this.");
+                        }
 
-                    if (!mcpSessionsByEndpoint.TryGetValue(tool.Endpoint, out var session))
-                    {
-                        var client = await ConnectMcpAsync(tool.Endpoint, loggerFactory, ct);
-                        host._mcpClients.Add(client);
-                        var remoteTools = await client.ListToolsAsync(ct);
-                        session = (client, remoteTools);
-                        mcpSessionsByEndpoint[tool.Endpoint] = session;
-                    }
+                        if (!mcpSessionsByEndpoint.TryGetValue(tool.Endpoint, out var session))
+                        {
+                            var client = await ConnectMcpAsync(tool.Endpoint, loggerFactory, ct);
+                            host._mcpClients.Add(client);
+                            var remoteTools = await client.ListToolsAsync(ct);
+                            session = (client, remoteTools);
+                            mcpSessionsByEndpoint[tool.Endpoint] = session;
+                        }
 
-                    var remote = session.RemoteTools.FirstOrDefault(t =>
-                        string.Equals(t.Name, tool.Name, StringComparison.Ordinal));
-                    if (remote is null)
-                    {
-                        // The configurator (Epic AP3) and the agent registry (Epic W)
-                        // are supposed to agree on tool names; surface a hard error
-                        // here so the operator sees the mismatch instead of the LLM
-                        // silently never calling the tool.
-                        throw new InvalidOperationException(
-                            $"MCP endpoint {tool.Endpoint} does not advertise a tool named '{tool.Name}'. "
-                                + $"Available: [{string.Join(", ", session.RemoteTools.Select(t => t.Name))}]");
-                    }
+                        var remote = session.RemoteTools.FirstOrDefault(t =>
+                            string.Equals(t.Name, tool.Name, StringComparison.Ordinal));
+                        if (remote is null)
+                        {
+                            // The configurator (Epic AP3) and the agent registry (Epic W)
+                            // are supposed to agree on tool names; surface a hard error
+                            // here so the operator sees the mismatch instead of the LLM
+                            // silently never calling the tool.
+                            throw new InvalidOperationException(
+                                $"MCP endpoint {tool.Endpoint} does not advertise a tool named '{tool.Name}'. "
+                                    + $"Available: [{string.Join(", ", session.RemoteTools.Select(t => t.Name))}]");
+                        }
 
-                    var adapter = new McpRemoteTool(
-                        tool, session.Client, remote,
-                        loggerFactory?.CreateLogger<McpRemoteTool>());
-                    Register(registry, adapter);
-                    break;
-                }
+                        var adapter = new McpRemoteTool(
+                            tool, session.Client, remote,
+                            loggerFactory?.CreateLogger<McpRemoteTool>());
+                        Register(registry, adapter);
+                        break;
+                    }
                 default:
                     throw new InvalidOperationException(
                         $"Unsupported transport '{tool.Transport}' on tool '{tool.Name}'.");

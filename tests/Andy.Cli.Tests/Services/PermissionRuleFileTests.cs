@@ -63,7 +63,7 @@ public class PermissionRuleFileTests
         Assert.Contains("execute_command(*)", f.Deny);
 
         f.Set("execute_command(*)", PermissionOutcome.Deny); // idempotent
-        Assert.Single(f.Deny.Where(r => r == "execute_command(*)"));
+        Assert.Single(f.Deny, r => r == "execute_command(*)");
     }
 
     [Fact]

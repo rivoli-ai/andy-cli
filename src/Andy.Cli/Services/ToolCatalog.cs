@@ -88,7 +88,7 @@ public static class ToolCatalog
     /// </summary>
     private static void RegisterTool<
         [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)]
-        TTool>(IServiceCollection services)
+    TTool>(IServiceCollection services)
         where TTool : class
     {
         services.AddSingleton(new ToolRegistrationInfo

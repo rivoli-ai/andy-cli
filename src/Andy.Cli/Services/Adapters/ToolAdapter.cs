@@ -279,7 +279,7 @@ public class ToolAdapter : Andy.Model.Tooling.ITool
                 // Try to use Data if available, otherwise use Message (cleaned git_diff included).
                 object? resultData = trackedData;
 
-                 if (resultData == null && !string.IsNullOrEmpty(trackedMessage))
+                if (resultData == null && !string.IsNullOrEmpty(trackedMessage))
                 {
                     resultData = new { message = trackedMessage };
                 }

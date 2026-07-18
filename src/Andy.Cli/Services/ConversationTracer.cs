@@ -25,7 +25,7 @@ public class ConversationTracer : IDisposable
     {
         _enabled = enabled;
         _consoleOutput = consoleOutput;
-        
+
         if (!_enabled) return;
 
         // Create trace file in temp directory or custom path
@@ -46,9 +46,9 @@ public class ConversationTracer : IDisposable
             {
                 AutoFlush = true
             };
-            
+
             WriteHeader();
-            
+
             if (_consoleOutput)
             {
                 Console.WriteLine($"[TRACE] Logging to: {_traceFilePath}");
@@ -74,7 +74,7 @@ public class ConversationTracer : IDisposable
             pid = Environment.ProcessId,
             machine = Environment.MachineName
         };
-        
+
         WriteEntry(header);
     }
 
@@ -94,7 +94,7 @@ public class ConversationTracer : IDisposable
         };
 
         WriteEntry(entry);
-        
+
         if (_consoleOutput)
         {
             Console.ForegroundColor = ConsoleColor.Cyan;
@@ -123,7 +123,7 @@ public class ConversationTracer : IDisposable
         };
 
         WriteEntry(entry);
-        
+
         if (_consoleOutput)
         {
             Console.ForegroundColor = ConsoleColor.Yellow;
@@ -152,7 +152,7 @@ public class ConversationTracer : IDisposable
         };
 
         WriteEntry(entry);
-        
+
         if (_consoleOutput)
         {
             Console.ForegroundColor = ConsoleColor.Green;
@@ -186,7 +186,7 @@ public class ConversationTracer : IDisposable
         };
 
         WriteEntry(entry);
-        
+
         if (_consoleOutput)
         {
             Console.ForegroundColor = ConsoleColor.Magenta;
@@ -220,7 +220,7 @@ public class ConversationTracer : IDisposable
         };
 
         WriteEntry(entry);
-        
+
         if (_consoleOutput)
         {
             Console.ForegroundColor = success ? ConsoleColor.Blue : ConsoleColor.Red;
@@ -250,7 +250,7 @@ public class ConversationTracer : IDisposable
         };
 
         WriteEntry(entry);
-        
+
         if (_consoleOutput)
         {
             Console.ForegroundColor = ConsoleColor.White;
@@ -278,7 +278,7 @@ public class ConversationTracer : IDisposable
         };
 
         WriteEntry(entry);
-        
+
         if (_consoleOutput)
         {
             Console.ForegroundColor = ConsoleColor.Red;
@@ -304,7 +304,7 @@ public class ConversationTracer : IDisposable
         };
 
         WriteEntry(entry);
-        
+
         if (_consoleOutput)
         {
             Console.ForegroundColor = ConsoleColor.DarkGray;
@@ -331,7 +331,7 @@ public class ConversationTracer : IDisposable
         };
 
         WriteEntry(entry);
-        
+
         if (_consoleOutput)
         {
             Console.ForegroundColor = ConsoleColor.DarkYellow;
@@ -353,7 +353,7 @@ public class ConversationTracer : IDisposable
                     WriteIndented = false,
                     DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
                 });
-                
+
                 _traceWriter.WriteLine(json);
             }
             catch
@@ -374,9 +374,9 @@ public class ConversationTracer : IDisposable
     private List<object> SimplifyMessages(dynamic? messages)
     {
         if (messages == null) return new List<object>();
-        
+
         var result = new List<object>();
-        try 
+        try
         {
             foreach (var msg in messages)
             {
@@ -423,9 +423,9 @@ public class ConversationTracer : IDisposable
                     total_entries = _sequenceNumber
                 };
                 WriteEntry(footer);
-                
+
                 _traceWriter.Dispose();
-                
+
                 if (_consoleOutput && _enabled)
                 {
                     Console.WriteLine($"[TRACE] Trace saved to: {_traceFilePath}");

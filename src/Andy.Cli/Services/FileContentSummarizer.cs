@@ -13,7 +13,7 @@ public static class FileContentSummarizer
 {
     private const int MaxPreviewLines = 50;
     private const int MaxPreviewChars = 2000;
-    
+
     /// <summary>
     /// Intelligently summarize file content for LLM processing
     /// </summary>
@@ -21,23 +21,23 @@ public static class FileContentSummarizer
     {
         if (string.IsNullOrEmpty(content))
             return content;
-        
+
         var extension = System.IO.Path.GetExtension(filePath).ToLowerInvariant();
         var lines = content.Split('\n');
         var totalLines = lines.Length;
         var totalChars = content.Length;
-        
+
         // For small files, return as-is
         if (totalChars <= MaxPreviewChars)
             return content;
-        
+
         var summary = new StringBuilder();
-        
+
         // Add file statistics
         summary.AppendLine($"[File: {filePath}]");
         summary.AppendLine($"[Size: {totalChars:N0} characters, {totalLines:N0} lines]");
         summary.AppendLine();
-        
+
         // For code files, extract structure
         if (IsCodeFile(extension))
         {
@@ -49,7 +49,7 @@ public static class FileContentSummarizer
                 summary.AppendLine();
             }
         }
-        
+
         // Add first N lines as preview
         summary.AppendLine("=== Content Preview (first 50 lines) ===");
         var previewLines = Math.Min(MaxPreviewLines, lines.Length);
@@ -57,13 +57,13 @@ public static class FileContentSummarizer
         {
             summary.AppendLine(lines[i]);
         }
-        
+
         if (totalLines > MaxPreviewLines)
         {
             summary.AppendLine();
             summary.AppendLine($"[... {totalLines - MaxPreviewLines} more lines omitted ...]");
             summary.AppendLine();
-            
+
             // Add last few lines for context
             summary.AppendLine("=== Last 10 lines ===");
             var startLine = Math.Max(0, totalLines - 10);
@@ -72,20 +72,20 @@ public static class FileContentSummarizer
                 summary.AppendLine(lines[i]);
             }
         }
-        
+
         return summary.ToString();
     }
-    
+
     private static bool IsCodeFile(string extension)
     {
         var codeExtensions = new[] { ".cs", ".js", ".ts", ".py", ".java", ".cpp", ".c", ".h", ".go", ".rs", ".rb", ".php" };
         return codeExtensions.Contains(extension);
     }
-    
+
     private static string ExtractCodeStructure(string content, string extension)
     {
         var structure = new StringBuilder();
-        
+
         if (extension == ".cs")
         {
             // Extract C# structure
@@ -93,7 +93,7 @@ public static class FileContentSummarizer
             var classes = ExtractMatches(content, @"(?:public|private|internal|protected)?\s*(?:static|abstract|sealed)?\s*(?:partial\s+)?class\s+(\w+)");
             var interfaces = ExtractMatches(content, @"(?:public|private|internal)?\s*interface\s+(\w+)");
             var methods = ExtractMatches(content, @"(?:public|private|protected|internal)?\s*(?:static|virtual|override|async)?\s*(?:void|Task|[\w<>]+)\s+(\w+)\s*\(");
-            
+
             if (namespaces.Any())
             {
                 structure.AppendLine($"Namespaces: {string.Join(", ", namespaces.Distinct())}");
@@ -116,10 +116,10 @@ public static class FileContentSummarizer
                     structure.AppendLine($"  ... and {methods.Count - 10} more");
             }
         }
-        
+
         return structure.ToString();
     }
-    
+
     private static List<string> ExtractMatches(string content, string pattern)
     {
         var matches = new List<string>();

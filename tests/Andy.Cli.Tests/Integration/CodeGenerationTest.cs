@@ -94,7 +94,7 @@ And you will see the message ""Hello, World!"" printed in the terminal.";
         // Should not have hallucination warnings
         // var errors = result.Ast.Children.OfType<ErrorNode>().ToList();
         // var hallucinationWarnings = errors.Where(e => e.ErrorCode == "HALLUCINATION_DETECTED").ToList();
-        
+
         // Debug: write error details to file
         // if (hallucinationWarnings.Any())
         // {
@@ -106,7 +106,7 @@ And you will see the message ""Hello, World!"" printed in the terminal.";
         //     }
         //     File.WriteAllText(debugFile, debugContent);
         // }
-        
+
         // Assert.Empty(hallucinationWarnings);
     }
 

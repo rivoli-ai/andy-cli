@@ -55,8 +55,8 @@ public class MouseReportingTests
         // Same modes, terminated with 'l' (reset) instead of 'h' (set).
         Assert.Equal("\u001b[?1000l\u001b[?1006l", MouseReporting.DisableSeq);
         Assert.Equal(
-            MouseReporting.EnableSeq.Replace('h', 'l'),
-            MouseReporting.DisableSeq);
+            MouseReporting.DisableSeq,
+            MouseReporting.EnableSeq.Replace('h', 'l'));
     }
 
     [Fact]

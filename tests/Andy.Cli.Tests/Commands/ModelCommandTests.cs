@@ -51,7 +51,7 @@ public class ModelCommandTests
         // Arrange
         var command = new ModelCommand(_serviceProvider);
         var arguments = args.Split(' ');
-        
+
         // Set up environment variables for API keys to avoid validation errors
         Environment.SetEnvironmentVariable("OPENAI_API_KEY", "test-key");
         Environment.SetEnvironmentVariable("ANTHROPIC_API_KEY", "test-key");
@@ -82,7 +82,7 @@ public class ModelCommandTests
     {
         // Arrange
         var command = new ModelCommand(_serviceProvider);
-        
+
         // Ensure no API key is set
         Environment.SetEnvironmentVariable("OPENAI_API_KEY", null);
 
@@ -120,7 +120,7 @@ public class ModelCommandTests
     {
         // Arrange
         var command = new ModelCommand(_serviceProvider);
-        
+
         // Set up API keys (except for ollama which doesn't need one)
         if (providerName != "ollama")
         {

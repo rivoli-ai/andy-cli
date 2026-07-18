@@ -28,15 +28,15 @@ public class FeedContentRenderer : IContentRenderer
                 case TextBlock textBlock:
                     RenderTextBlock(textBlock);
                     break;
-                    
+
                 case CodeBlock codeBlock:
                     RenderCodeBlock(codeBlock);
                     break;
-                    
+
                 case SystemMessageBlock systemBlock:
                     RenderSystemMessageBlock(systemBlock);
                     break;
-                    
+
                 default:
                     _logger?.LogWarning("Unknown block type: {BlockType}", block.GetType().Name);
                     break;

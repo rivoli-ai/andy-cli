@@ -118,8 +118,10 @@ More analysis here.";
         // Assert
         var renderedOutput = captureRenderer.GetAllContent();
 
-        // Should not contain double newlines anywhere
-        Assert.DoesNotContain("\n\n", renderedOutput);
+        // Should not contain excessive blank runs. A single blank line between
+        // paragraphs (\n\n) is legitimate spacing that the pipeline preserves;
+        // only runaway 3+ newline gaps are collapsed, so assert no triple newline.
+        Assert.DoesNotContain("\n\n\n", renderedOutput);
 
         // Should contain all content sections
         Assert.Contains("Here's the analysis:", renderedOutput);

@@ -33,7 +33,7 @@ public class ResponseFormattingTests
         // Hide internal tool mentions - remove lines that are just tool references
         var lines = sanitized.Split('\n');
         var filteredLines = new List<string>();
-        
+
         foreach (var line in lines)
         {
             var trimmedLine = line.Trim();
@@ -47,7 +47,7 @@ public class ResponseFormattingTests
 
         // Trim excessive whitespace and remove multiple consecutive blank lines
         sanitized = sanitized.Trim();
-        
+
         // Replace multiple consecutive newlines with at most two
         while (sanitized.Contains("\n\n\n"))
         {
@@ -80,77 +80,77 @@ public class ResponseFormattingTests
 
         return patterns.Any(pattern => Regex.IsMatch(line, pattern, RegexOptions.IgnoreCase));
     }
-    
+
     [Fact]
     public void SanitizeAssistantText_RemovesExcessiveBlankLines()
     {
         // Arrange
         var input = "Line 1\n\n\n\n\nLine 2\n\n\n\nLine 3";
-        
+
         // Act
         var result = SanitizeAssistantText(input);
-        
+
         // Assert
         Assert.DoesNotContain("\n\n\n", result);
         Assert.Contains("Line 1", result);
         Assert.Contains("Line 2", result);
         Assert.Contains("Line 3", result);
     }
-    
+
     [Fact]
     public void SanitizeAssistantText_PreservesNormalLineBreaks()
     {
         // Arrange
         var input = "Line 1\nLine 2\n\nLine 3";
-        
+
         // Act
         var result = SanitizeAssistantText(input);
-        
+
         // Assert
         Assert.Equal("Line 1\nLine 2\n\nLine 3", result);
     }
-    
+
     [Fact]
     public void SanitizeAssistantText_RemovesOuterQuotes()
     {
         // Arrange
         var input = "\"This is quoted text\"";
-        
+
         // Act
         var result = SanitizeAssistantText(input);
-        
+
         // Assert
         Assert.Equal("This is quoted text", result);
     }
-    
+
     [Fact]
     public void SanitizeAssistantText_UnescapesSequences()
     {
         // Arrange
         var input = "Line 1\\nLine 2\\t\\\"quoted\\\"";
-        
+
         // Act
         var result = SanitizeAssistantText(input);
-        
+
         // Assert
         Assert.Contains("Line 1\nLine 2", result);
         Assert.Contains("\t", result);
         Assert.Contains("\"quoted\"", result);
     }
-    
+
     [Fact]
     public void SanitizeAssistantText_TrimsWhitespace()
     {
         // Arrange
         var input = "  \n\n  Some text  \n\n  ";
-        
+
         // Act
         var result = SanitizeAssistantText(input);
-        
+
         // Assert
         Assert.Equal("Some text", result);
     }
-    
+
     [Fact]
     public void SanitizeAssistantText_HandlesComplexFormattingIssues()
     {
@@ -185,10 +185,10 @@ Then update project files:
 
 
 Done!";
-        
+
         // Act
         var result = SanitizeAssistantText(input);
-        
+
         // Assert
         // Should not have more than 2 consecutive newlines
         Assert.DoesNotContain("\n\n\n", result);
@@ -196,7 +196,7 @@ Done!";
         Assert.Contains("```json", result);
         Assert.Contains("```xml", result);
     }
-    
+
     [Fact]
     public void SanitizeAssistantText_RemovesToolMentions()
     {
@@ -211,10 +211,10 @@ I'm going to use the list_directory tool
 Here are the results:
 - File1.cs
 - File2.cs";
-        
+
         // Act
         var result = SanitizeAssistantText(input);
-        
+
         // Assert
         Assert.DoesNotContain("[Tool Execution", result);
         Assert.DoesNotContain("use the list_directory tool", result);

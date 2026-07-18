@@ -7,10 +7,10 @@ public interface IContentBlock
 {
     /// <summary>Unique identifier for this block</summary>
     string Id { get; }
-    
+
     /// <summary>Priority for rendering order (lower = rendered first)</summary>
     int Priority { get; }
-    
+
     /// <summary>Whether this block is complete and ready for rendering</summary>
     bool IsComplete { get; }
 }
@@ -24,7 +24,7 @@ public class TextBlock : IContentBlock
     public int Priority { get; }
     public bool IsComplete { get; set; }
     public string Content { get; set; }
-    
+
     public TextBlock(string id, string content, int priority = 100)
     {
         Id = id;
@@ -44,7 +44,7 @@ public class CodeBlock : IContentBlock
     public bool IsComplete { get; set; }
     public string Code { get; set; }
     public string? Language { get; set; }
-    
+
     public CodeBlock(string id, string code, string? language = null, int priority = 100)
     {
         Id = id;
@@ -65,7 +65,7 @@ public class SystemMessageBlock : IContentBlock
     public bool IsComplete { get; set; }
     public string Message { get; set; }
     public SystemMessageType Type { get; set; }
-    
+
     public SystemMessageBlock(string id, string message, SystemMessageType type, int priority = 1000)
     {
         Id = id;

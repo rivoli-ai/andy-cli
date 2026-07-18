@@ -29,4 +29,4 @@ public static class ErrorPolicy
     {
         if (IsStrict) throw ex;
     }
-} 
+}
