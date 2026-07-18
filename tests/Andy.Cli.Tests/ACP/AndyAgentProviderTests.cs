@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Andy.Acp.Core.Agent;
@@ -261,5 +262,337 @@ public class AndyAgentProviderTests
         var afterCreate = DateTime.UtcNow.AddSeconds(1);
         Assert.True(session.CreatedAt >= beforeCreate);
         Assert.True(session.CreatedAt <= afterCreate);
+    }
+
+    // ----- Logger creation (fixes the null-cast bug) -----
+
+    [Fact]
+    public void CreateAgentLogger_ReturnsTypedLogger_WhenFactoryProvided()
+    {
+        using var factory = LoggerFactory.Create(b => { });
+
+        var logger = AndyAgentProvider.CreateAgentLogger(factory);
+
+        Assert.NotNull(logger);
+        Assert.IsAssignableFrom<ILogger<SimpleAgent>>(logger);
+    }
+
+    [Fact]
+    public void CreateAgentLogger_ReturnsNull_WhenFactoryMissing()
+    {
+        Assert.Null(AndyAgentProvider.CreateAgentLogger(null));
+    }
+
+    // ----- Streaming (no artificial word-splitting + delay) -----
+
+    [Fact]
+    public async Task ProcessPromptAsync_StreamsResponse_AsSingleOrderedBlock()
+    {
+        // Arrange: a fake engine agent returns a completed multi-word response.
+        const string responseText = "Hello world from andy";
+        var factory = new FakeAgentFactory(_ => FakeAgent.ReturningSuccess(responseText));
+        var provider = NewProvider(factory);
+
+        var chunks = new List<string>();
+        var streamer = new Mock<IResponseStreamer>();
+        streamer.Setup(s => s.SendMessageChunkAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns((string t, CancellationToken _) => { chunks.Add(t); return Task.CompletedTask; });
+
+        var session = await provider.CreateSessionAsync(null, CancellationToken.None);
+
+        // Act
+        var response = await provider.ProcessPromptAsync(
+            session.SessionId, new PromptMessage { Text = "hi" }, streamer.Object, CancellationToken.None);
+
+        // Assert: one ordered block, not one chunk per word.
+        Assert.Equal(StopReason.Completed, response.StopReason);
+        Assert.Single(chunks);
+        Assert.Equal(responseText, chunks[0]);
+    }
+
+    [Fact]
+    public async Task ProcessPromptAsync_FoldsEmbeddedContext_IntoPrompt()
+    {
+        // Arrange: capture the message the engine receives.
+        string? seen = null;
+        var factory = new FakeAgentFactory(_ => FakeAgent.Capturing(msg => seen = msg, "ok"));
+        var provider = NewProvider(factory);
+        var streamer = new Mock<IResponseStreamer>();
+
+        var session = await provider.CreateSessionAsync(null, CancellationToken.None);
+        var prompt = new PromptMessage
+        {
+            Text = "answer this",
+            Context = new List<ContextItem>
+            {
+                new() { Type = "file", Content = "embedded content here" }
+            }
+        };
+
+        // Act
+        await provider.ProcessPromptAsync(session.SessionId, prompt, streamer.Object, CancellationToken.None);
+
+        // Assert: the embedded context and the user text both reach the engine.
+        Assert.NotNull(seen);
+        Assert.Contains("embedded content here", seen);
+        Assert.Contains("answer this", seen);
+    }
+
+    // ----- Cancellation reaches the engine operation -----
+
+    [Fact]
+    public async Task CancelSessionAsync_CancelsActiveEngineOperation()
+    {
+        // Arrange: the engine call blocks on its token and records the token it
+        // received, proving cancellation reaches the running engine operation.
+        CancellationToken tokenSeenByEngine = default;
+        var engineStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var factory = new FakeAgentFactory(_ => FakeAgent.Blocking(ct =>
+        {
+            tokenSeenByEngine = ct;
+            engineStarted.TrySetResult(true);
+        }));
+        var provider = NewProvider(factory);
+
+        var session = await provider.CreateSessionAsync(null, CancellationToken.None);
+        var streamer = new Mock<IResponseStreamer>();
+
+        // Act
+        var promptTask = provider.ProcessPromptAsync(
+            session.SessionId, new PromptMessage { Text = "long running" }, streamer.Object, CancellationToken.None);
+
+        await engineStarted.Task; // engine call is now in flight
+        await provider.CancelSessionAsync(session.SessionId, CancellationToken.None);
+        var response = await promptTask;
+
+        // Assert: the token threaded into the engine was cancelled, work stopped,
+        // and completion is reported as Cancelled per the protocol.
+        Assert.True(tokenSeenByEngine.IsCancellationRequested);
+        Assert.Equal(StopReason.Cancelled, response.StopReason);
+    }
+
+    [Fact]
+    public async Task ProcessPromptAsync_HonorsTransportCancellation()
+    {
+        var engineStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var factory = new FakeAgentFactory(_ => FakeAgent.Blocking(_ => engineStarted.TrySetResult(true)));
+        var provider = NewProvider(factory);
+
+        var session = await provider.CreateSessionAsync(null, CancellationToken.None);
+        var streamer = new Mock<IResponseStreamer>();
+        using var transportCts = new CancellationTokenSource();
+
+        var promptTask = provider.ProcessPromptAsync(
+            session.SessionId, new PromptMessage { Text = "hi" }, streamer.Object, transportCts.Token);
+
+        await engineStarted.Task;
+        transportCts.Cancel();
+        var response = await promptTask;
+
+        Assert.Equal(StopReason.Cancelled, response.StopReason);
+    }
+
+    // ----- Concurrent prompts on one session are serialized (fix 4) -----
+
+    [Fact]
+    public async Task ProcessPromptAsync_RejectsSecondConcurrentPrompt_WithoutBreakingTheFirst()
+    {
+        // Arrange: the first prompt blocks in the engine, keeping the session
+        // busy. A second prompt arriving on the same session must be rejected
+        // cleanly and must NOT dispose the first prompt's cancellation source.
+        var engineStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        CancellationToken firstToken = default;
+        var factory = new FakeAgentFactory(_ => FakeAgent.Blocking(ct =>
+        {
+            firstToken = ct;
+            engineStarted.TrySetResult(true);
+        }));
+        var provider = NewProvider(factory);
+        var streamer = new Mock<IResponseStreamer>();
+
+        var session = await provider.CreateSessionAsync(null, CancellationToken.None);
+
+        var firstTask = provider.ProcessPromptAsync(
+            session.SessionId, new PromptMessage { Text = "long" }, streamer.Object, CancellationToken.None);
+        await engineStarted.Task; // first prompt is in flight
+
+        // Act: a second concurrent prompt on the same session.
+        var second = await provider.ProcessPromptAsync(
+            session.SessionId, new PromptMessage { Text = "again" }, streamer.Object, CancellationToken.None);
+
+        // Assert: the second prompt is a clean protocol error, not an exception.
+        Assert.Equal(StopReason.Error, second.StopReason);
+        Assert.Contains("already in progress", second.Error);
+
+        // The first prompt's token is intact (not disposed by the rejection) and
+        // still cancellable through the session.
+        Assert.False(firstToken.IsCancellationRequested);
+        await provider.CancelSessionAsync(session.SessionId, CancellationToken.None);
+        var first = await firstTask;
+        Assert.True(firstToken.IsCancellationRequested);
+        Assert.Equal(StopReason.Cancelled, first.StopReason);
+    }
+
+    // ----- Concurrent dispose race yields a clean error, not an exception (fix 3) -----
+
+    [Fact]
+    public async Task ProcessPromptAsync_ReturnsCleanError_WhenSessionDisposedConcurrently()
+    {
+        var provider = NewProvider(new FakeAgentFactory(_ => FakeAgent.ReturningSuccess("ok")));
+        var streamer = new Mock<IResponseStreamer>();
+        var session = await provider.CreateSessionAsync(null, CancellationToken.None);
+
+        // Simulate the race where the entry is disposed after it is resolved but
+        // before/at the moment BeginPrompt runs. Reach into the registry and
+        // dispose the still-retained entry (dispose does not remove it), so the
+        // provider resolves it via TryGet but BeginPrompt throws
+        // ObjectDisposedException.
+        var registryField = typeof(AndyAgentProvider)
+            .GetField("_sessions", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(registryField);
+        var registry = (AndySessionRegistry)registryField!.GetValue(provider)!;
+        Assert.True(registry.TryGet(session.SessionId, out var entry));
+        entry.Dispose();
+
+        // Act: must not throw an unhandled ObjectDisposedException.
+        var response = await provider.ProcessPromptAsync(
+            session.SessionId, new PromptMessage { Text = "hi" }, streamer.Object, CancellationToken.None);
+
+        // Assert: a clean protocol error.
+        Assert.Equal(StopReason.Error, response.StopReason);
+        Assert.Contains("no longer available", response.Error);
+    }
+
+    // ----- Error handling -----
+
+    [Fact]
+    public async Task ProcessPromptAsync_ReportsError_WhenEngineThrows()
+    {
+        var factory = new FakeAgentFactory(_ => FakeAgent.Throwing(new InvalidOperationException("boom")));
+        var provider = NewProvider(factory);
+        var streamer = new Mock<IResponseStreamer>();
+
+        var session = await provider.CreateSessionAsync(null, CancellationToken.None);
+        var response = await provider.ProcessPromptAsync(
+            session.SessionId, new PromptMessage { Text = "hi" }, streamer.Object, CancellationToken.None);
+
+        Assert.Equal(StopReason.Error, response.StopReason);
+        Assert.Contains("boom", response.Error);
+    }
+
+    // ----- Shutdown / dispose cleans up sessions -----
+
+    [Fact]
+    public async Task Dispose_CleansUpSessions()
+    {
+        var agent = FakeAgent.ReturningSuccess("ok");
+        var provider = NewProvider(new FakeAgentFactory(_ => agent));
+        var session = await provider.CreateSessionAsync(null, CancellationToken.None);
+
+        provider.Dispose();
+
+        // After disposal the session is gone and the agent has been disposed.
+        var loaded = await provider.LoadSessionAsync(session.SessionId, CancellationToken.None);
+        Assert.Null(loaded);
+        Assert.True(agent.IsDisposed);
+    }
+
+    // ----- Bounded retention evicts old sessions -----
+
+    [Fact]
+    public async Task CreateSessionAsync_EvictsAndDisposesOldSessions_WhenCapReached()
+    {
+        var created = new List<FakeAgent>();
+        var factory = new FakeAgentFactory(_ =>
+        {
+            var a = FakeAgent.ReturningSuccess("ok");
+            created.Add(a);
+            return a;
+        });
+        var provider = NewProvider(factory, maxSessions: 2);
+
+        var first = await provider.CreateSessionAsync(null, CancellationToken.None);
+        await provider.CreateSessionAsync(null, CancellationToken.None);
+        await provider.CreateSessionAsync(null, CancellationToken.None);
+
+        // The oldest (least-recently-used) session must have been evicted and its
+        // agent disposed.
+        var loadedFirst = await provider.LoadSessionAsync(first.SessionId, CancellationToken.None);
+        Assert.Null(loadedFirst);
+        Assert.True(created[0].IsDisposed);
+
+        provider.Dispose();
+    }
+
+    // ----- Concurrent sessions are isolated -----
+
+    [Fact]
+    public async Task ConcurrentSessions_HaveIsolatedState()
+    {
+        var provider = NewProvider(new FakeAgentFactory(_ => FakeAgent.ReturningSuccess("ok")));
+        var streamer = new Mock<IResponseStreamer>();
+
+        var s1 = await provider.CreateSessionAsync(null, CancellationToken.None);
+        var s2 = await provider.CreateSessionAsync(null, CancellationToken.None);
+
+        await provider.ProcessPromptAsync(s1.SessionId, new PromptMessage { Text = "a" }, streamer.Object, CancellationToken.None);
+
+        var loaded1 = await provider.LoadSessionAsync(s1.SessionId, CancellationToken.None);
+        var loaded2 = await provider.LoadSessionAsync(s2.SessionId, CancellationToken.None);
+
+        // s1 processed a message; s2 did not. State is per-session.
+        Assert.NotNull(loaded1);
+        Assert.NotNull(loaded2);
+        Assert.Equal(1, loaded1!.MessageCount);
+        Assert.Equal(0, loaded2!.MessageCount);
+    }
+
+    private AndyAgentProvider NewProvider(ISessionAgentFactory factory, int maxSessions = AndySessionRegistry.DefaultMaxSessions)
+        => new(
+            _mockLlmProvider.Object,
+            _mockToolRegistry.Object,
+            _mockToolExecutor.Object,
+            _mockLogger.Object,
+            loggerFactory: null,
+            maxSessions: maxSessions,
+            defaultModel: null,
+            agentFactory: factory);
+
+    private sealed class FakeAgentFactory : ISessionAgentFactory
+    {
+        private readonly Func<string, FakeAgent> _create;
+        public FakeAgentFactory(Func<string, FakeAgent> create) => _create = create;
+        public ISessionAgent Create(string systemPrompt) => _create(systemPrompt);
+    }
+
+    private sealed class FakeAgent : ISessionAgent
+    {
+        private readonly Func<string, CancellationToken, Task<SimpleAgentResult>> _behavior;
+        public bool IsDisposed { get; private set; }
+
+        private FakeAgent(Func<string, CancellationToken, Task<SimpleAgentResult>> behavior) => _behavior = behavior;
+
+        public static FakeAgent ReturningSuccess(string response) =>
+            new((_, _) => Task.FromResult(new SimpleAgentResult(true, response, 1, TimeSpan.Zero, "stop")));
+
+        public static FakeAgent Capturing(Action<string> onMessage, string response) =>
+            new((msg, _) => { onMessage(msg); return Task.FromResult(new SimpleAgentResult(true, response, 1, TimeSpan.Zero, "stop")); });
+
+        public static FakeAgent Throwing(Exception ex) =>
+            new((_, _) => throw ex);
+
+        public static FakeAgent Blocking(Action<CancellationToken> onStart) =>
+            new(async (_, ct) =>
+            {
+                onStart(ct);
+                await Task.Delay(Timeout.Infinite, ct);
+                return new SimpleAgentResult(true, "unreachable", 1, TimeSpan.Zero, "stop");
+            });
+
+        public Task<SimpleAgentResult> ProcessMessageAsync(string userMessage, CancellationToken cancellationToken)
+            => _behavior(userMessage, cancellationToken);
+
+        public void Dispose() => IsDisposed = true;
     }
 }

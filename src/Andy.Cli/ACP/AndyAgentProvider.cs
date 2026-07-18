@@ -1,7 +1,7 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Andy.Acp.Core.Agent;
@@ -13,34 +13,59 @@ using Microsoft.Extensions.Logging;
 namespace Andy.Cli.ACP;
 
 /// <summary>
-/// Agent provider that integrates Andy.CLI with ACP protocol for Zed
+/// Agent provider that integrates Andy.CLI with the ACP protocol for Zed.
+/// Owns per-session engine agents with an explicit create/load/cancel/dispose
+/// lifecycle, bounded retention, and cancellation that reaches the running
+/// engine operation.
 /// </summary>
-public class AndyAgentProvider : IAgentProvider
+public class AndyAgentProvider : IAgentProvider, IDisposable
 {
-    private readonly ILlmProvider _llmProvider;
     private readonly IToolRegistry _toolRegistry;
-    private readonly IToolExecutor _toolExecutor;
     private readonly ILogger<AndyAgentProvider>? _logger;
-    private readonly ConcurrentDictionary<string, SimpleAgent> _sessions = new();
+    private readonly ISessionAgentFactory _agentFactory;
+    private readonly AndySessionRegistry _sessions;
     private readonly string _systemPrompt;
+    private readonly string _defaultModel;
 
     public AndyAgentProvider(
         ILlmProvider llmProvider,
         IToolRegistry toolRegistry,
         IToolExecutor toolExecutor,
-        ILogger<AndyAgentProvider>? logger = null)
+        ILogger<AndyAgentProvider>? logger = null,
+        ILoggerFactory? loggerFactory = null,
+        int maxSessions = AndySessionRegistry.DefaultMaxSessions,
+        string? defaultModel = null,
+        ISessionAgentFactory? agentFactory = null)
     {
-        _llmProvider = llmProvider ?? throw new ArgumentNullException(nameof(llmProvider));
+        if (llmProvider == null) throw new ArgumentNullException(nameof(llmProvider));
         _toolRegistry = toolRegistry ?? throw new ArgumentNullException(nameof(toolRegistry));
-        _toolExecutor = toolExecutor ?? throw new ArgumentNullException(nameof(toolExecutor));
+        if (toolExecutor == null) throw new ArgumentNullException(nameof(toolExecutor));
         _logger = logger;
+        _defaultModel = string.IsNullOrWhiteSpace(defaultModel) ? "andy-cli" : defaultModel!;
+        _agentFactory = agentFactory
+            ?? new SimpleAgentSessionAgentFactory(llmProvider, toolRegistry, toolExecutor, loggerFactory);
+        _sessions = new AndySessionRegistry(maxSessions, logger);
 
         // Build system prompt
         _systemPrompt = Andy.Cli.Services.Prompts.SystemPrompts.GetDefaultCliPrompt();
     }
 
+    /// <summary>
+    /// Creates a typed logger for the engine agent using the injected logger
+    /// factory. Returns null when no factory is available. Fixes the previous
+    /// bug where an <c>as ILogger&lt;SimpleAgent&gt;</c> cast of an
+    /// <c>ILogger&lt;AndyAgentProvider&gt;</c> always produced null.
+    /// </summary>
+    public static ILogger<SimpleAgent>? CreateAgentLogger(ILoggerFactory? loggerFactory)
+        => loggerFactory?.CreateLogger<SimpleAgent>();
+
     public AgentCapabilities GetCapabilities()
     {
+        // Advertise only operations that are actually implemented.
+        // - LoadSession: supported for sessions still retained in-memory;
+        //   unknown ids are rejected (see LoadSessionAsync).
+        // - EmbeddedContext: honored by folding context items into the prompt.
+        // - Audio/Image prompts: not implemented.
         return new AgentCapabilities
         {
             LoadSession = true,
@@ -52,28 +77,32 @@ public class AndyAgentProvider : IAgentProvider
 
     public Task<SessionMetadata> CreateSessionAsync(NewSessionParams? parameters, CancellationToken cancellationToken)
     {
-        var sessionId = $"session-{Guid.NewGuid():N}";
+        var sessionId = string.IsNullOrWhiteSpace(parameters?.SessionId)
+            ? $"session-{Guid.NewGuid():N}"
+            : parameters!.SessionId;
 
-        // Create a new SimpleAgent for this session
-        var agent = new SimpleAgent(
-            _llmProvider,
-            _toolRegistry,
-            _toolExecutor,
-            _systemPrompt,
-            maxTurns: 10,
-            logger: _logger as ILogger<SimpleAgent>
-        );
+        var mode = string.IsNullOrWhiteSpace(parameters?.Mode) ? "assistant" : parameters!.Mode;
+        var model = string.IsNullOrWhiteSpace(parameters?.Model) ? _defaultModel : parameters!.Model;
+        var systemPrompt = string.IsNullOrWhiteSpace(parameters?.SystemPrompt) ? _systemPrompt : parameters!.SystemPrompt;
 
-        _sessions[sessionId] = agent;
+        // Create a new engine agent for this session.
+        var agent = _agentFactory.Create(systemPrompt);
 
-        _logger?.LogInformation("Created new Andy session: {SessionId}", sessionId);
+        var entry = new AcpSessionEntry(sessionId, agent, mode, model);
+        _sessions.Add(entry);
+
+        _logger?.LogInformation(
+            "Created ACP session {SessionId} (retained {Count}/{Max})",
+            sessionId, _sessions.Count, _sessions.MaxSessions);
 
         return Task.FromResult(new SessionMetadata
         {
             SessionId = sessionId,
-            CreatedAt = DateTime.UtcNow,
-            Mode = "assistant",
-            Model = "andy-cli",
+            CreatedAt = entry.CreatedAt,
+            LastAccessedAt = entry.LastAccessedAt,
+            Mode = mode,
+            Model = model,
+            MessageCount = entry.MessageCount,
             Metadata = new Dictionary<string, object>
             {
                 ["provider"] = "andy-cli",
@@ -84,22 +113,25 @@ public class AndyAgentProvider : IAgentProvider
 
     public Task<SessionMetadata?> LoadSessionAsync(string sessionId, CancellationToken cancellationToken)
     {
-        if (_sessions.TryGetValue(sessionId, out var agent))
+        // Session state lives in-memory only; a session that is no longer
+        // retained (evicted, disposed, or from a previous process) cannot be
+        // resumed. Reject unknown ids rather than fabricating an empty session.
+        if (_sessions.TryGet(sessionId, out var entry))
         {
-            _logger?.LogInformation("Loaded existing session: {SessionId}", sessionId);
+            _logger?.LogInformation("Loaded existing ACP session: {SessionId}", sessionId);
 
             return Task.FromResult<SessionMetadata?>(new SessionMetadata
             {
                 SessionId = sessionId,
-                CreatedAt = DateTime.UtcNow, // We don't track this currently
-                LastAccessedAt = DateTime.UtcNow,
-                MessageCount = 0, // SimpleAgent doesn't expose this
-                Mode = "assistant",
-                Model = "andy-cli"
+                CreatedAt = entry.CreatedAt,
+                LastAccessedAt = entry.LastAccessedAt,
+                MessageCount = entry.MessageCount,
+                Mode = entry.Mode,
+                Model = entry.Model
             });
         }
 
-        _logger?.LogWarning("Session not found: {SessionId}", sessionId);
+        _logger?.LogWarning("Cannot load unknown ACP session: {SessionId}", sessionId);
         return Task.FromResult<SessionMetadata?>(null);
     }
 
@@ -109,7 +141,7 @@ public class AndyAgentProvider : IAgentProvider
         IResponseStreamer streamer,
         CancellationToken cancellationToken)
     {
-        if (!_sessions.TryGetValue(sessionId, out var agent))
+        if (!_sessions.TryGet(sessionId, out var entry) || entry.Agent == null)
         {
             _logger?.LogError("Session not found for prompt: {SessionId}", sessionId);
             return new AgentResponse
@@ -120,18 +152,58 @@ public class AndyAgentProvider : IAgentProvider
             };
         }
 
+        // BeginPrompt is called INSIDE the try so a session that was
+        // concurrently disposed/evicted (ObjectDisposedException) or already
+        // busy with another prompt (InvalidOperationException) is turned into a
+        // clean protocol error instead of an unhandled exception. EndPrompt runs
+        // in the finally only when BeginPrompt actually succeeded, so a rejected
+        // second prompt never tears down the first prompt's cancellation source.
+        CancellationToken linkedToken = default;
+        var promptStarted = false;
         try
         {
-            _logger?.LogInformation("Processing prompt for session {SessionId}: {Prompt}",
-                sessionId, prompt.Text.Substring(0, Math.Min(100, prompt.Text.Length)));
+            try
+            {
+                // Link the transport token with the session's cancel source so an
+                // explicit ACP cancel request reaches the running engine operation.
+                linkedToken = entry.BeginPrompt(cancellationToken);
+                promptStarted = true;
+            }
+            catch (ObjectDisposedException)
+            {
+                _logger?.LogWarning(
+                    "Session {SessionId} was disposed before the prompt could start", sessionId);
+                return new AgentResponse
+                {
+                    Message = "Error: Session no longer available",
+                    StopReason = StopReason.Error,
+                    Error = "Session no longer available"
+                };
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger?.LogWarning(
+                    "Rejected concurrent prompt for session {SessionId}: {Reason}", sessionId, ex.Message);
+                return new AgentResponse
+                {
+                    Message = $"Error: {ex.Message}",
+                    StopReason = StopReason.Error,
+                    Error = ex.Message
+                };
+            }
 
-            // Process the message through the agent
-            var result = await agent.ProcessMessageAsync(prompt.Text, cancellationToken);
+            var effectivePrompt = BuildPrompt(prompt);
+            _logger?.LogInformation("Processing prompt for session {SessionId}: {Preview}",
+                sessionId, effectivePrompt.Substring(0, Math.Min(100, effectivePrompt.Length)));
 
-            // Stream the response word by word
+            // Thread the linked cancellation token into the engine call.
+            var result = await entry.Agent.ProcessMessageAsync(effectivePrompt, linkedToken);
+
+            entry.IncrementMessageCount();
+
             if (result.Success && !string.IsNullOrEmpty(result.Response))
             {
-                await StreamResponse(result.Response, streamer, cancellationToken);
+                await StreamResponse(result.Response, streamer, linkedToken);
             }
 
             return new AgentResponse
@@ -160,41 +232,94 @@ public class AndyAgentProvider : IAgentProvider
                 Error = ex.Message
             };
         }
+        finally
+        {
+            if (promptStarted)
+            {
+                entry.EndPrompt();
+            }
+        }
     }
 
-    private async Task StreamResponse(string response, IResponseStreamer streamer, CancellationToken cancellationToken)
+    /// <summary>
+    /// Folds any embedded context items into the prompt text (honoring the
+    /// advertised EmbeddedContext capability).
+    /// </summary>
+    private static string BuildPrompt(PromptMessage prompt)
     {
-        // Split response into words and stream them
-        var words = response.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-
-        foreach (var word in words)
+        var text = prompt.Text ?? string.Empty;
+        if (prompt.Context == null || prompt.Context.Count == 0)
         {
-            await streamer.SendMessageChunkAsync(word + " ", cancellationToken);
-
-            // Small delay to simulate streaming (optional)
-            await Task.Delay(10, cancellationToken);
+            return text;
         }
+
+        var sb = new StringBuilder();
+        foreach (var item in prompt.Context)
+        {
+            if (!string.IsNullOrWhiteSpace(item?.Content))
+            {
+                var label = string.IsNullOrWhiteSpace(item!.Type) ? "context" : item.Type;
+                sb.Append('[').Append(label).Append("]\n").Append(item.Content).Append("\n\n");
+            }
+        }
+
+        sb.Append(text);
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Forwards the model response to the client as a single ordered block.
+    /// The engine's <see cref="SimpleAgent.ProcessMessageAsync"/> returns a
+    /// complete response and exposes no incremental chunk/token API, so real
+    /// token-level streaming is not possible without an engine capability.
+    /// The previous artificial word-splitting with Task.Delay (which faked
+    /// token cadence over an already-complete string) has been removed.
+    /// </summary>
+    private static async Task StreamResponse(string response, IResponseStreamer streamer, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        await streamer.SendMessageChunkAsync(response, cancellationToken);
     }
 
     public Task<bool> SetSessionModeAsync(string sessionId, string mode, CancellationToken cancellationToken)
     {
-        // Mode switching not supported yet
-        _logger?.LogInformation("Mode switch requested for session {SessionId}: {Mode} (not implemented)", sessionId, mode);
+        // Mode switching is not supported by the engine agent. Explicitly
+        // decline (returning false) instead of silently accepting the request.
+        _logger?.LogInformation(
+            "Rejecting unsupported mode switch for session {SessionId}: {Mode}", sessionId, mode);
         return Task.FromResult(false);
     }
 
     public Task<bool> SetSessionModelAsync(string sessionId, string model, CancellationToken cancellationToken)
     {
-        // Model switching not supported yet
-        _logger?.LogInformation("Model switch requested for session {SessionId}: {Model} (not implemented)", sessionId, model);
+        // Model switching would require rebuilding the engine agent against a
+        // different provider/model, which SimpleAgent does not support at
+        // runtime. Explicitly decline instead of silently no-op'ing.
+        _logger?.LogInformation(
+            "Rejecting unsupported model switch for session {SessionId}: {Model}", sessionId, model);
         return Task.FromResult(false);
     }
 
     public Task CancelSessionAsync(string sessionId, CancellationToken cancellationToken)
     {
-        _logger?.LogInformation("Cancel requested for session {SessionId}", sessionId);
+        if (_sessions.TryGet(sessionId, out var entry))
+        {
+            var cancelled = entry.CancelActivePrompt();
+            _logger?.LogInformation(
+                "Cancel requested for session {SessionId} (active operation cancelled: {Cancelled})",
+                sessionId, cancelled);
+        }
+        else
+        {
+            _logger?.LogWarning("Cancel requested for unknown session {SessionId}", sessionId);
+        }
 
-        // SimpleAgent doesn't expose cancellation, but we can note it
         return Task.CompletedTask;
+    }
+
+    public void Dispose()
+    {
+        _sessions.Dispose();
+        GC.SuppressFinalize(this);
     }
 }
