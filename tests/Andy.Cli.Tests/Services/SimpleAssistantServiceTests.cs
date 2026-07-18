@@ -32,16 +32,18 @@ public class SimpleAssistantServiceTests
                 It.IsAny<ToolCategory?>(), It.IsAny<ToolCapability?>(),
                 It.IsAny<IEnumerable<string>?>(), It.IsAny<bool>()))
             .Returns(new List<ToolRegistration>());
+        // The engine's SimpleAgent builds its tool declarations from IToolRegistry.Tools
+        // (registry.Tools.Where(t => t.IsEnabled)). A real registry always returns a non-null
+        // list; an unconfigured Moq property returns null, which makes .Where() throw
+        // ArgumentNullException("source") inside the agent loop. Return an empty list so the
+        // agent runs against a valid (tool-less) registry.
+        _mockToolRegistry.Setup(x => x.Tools).Returns(new List<ToolRegistration>());
     }
 
-    // The packaged Andy.Engine SimpleAgent throws ArgumentNullException ("source") when driven with a
-    // minimally-mocked ILlmProvider response, so the end-to-end assertion on the returned assistant
-    // text cannot pass. This is a product/library defect in the Andy.Engine package (the agent loop
-    // does not tolerate a minimal mock response), not a test defect, so it stays skipped here rather
-    // than being relaxed to pass. The fix belongs in the Andy.Engine package; re-enable once that
-    // package guards the null source. The deterministic, non-engine SimpleAssistantService tests below
-    // (cwd shortcut, ClearContext, token-counter flow) run.
-    [Fact(Skip = "Product bug: Andy.Engine SimpleAgent throws ArgumentNullException on a minimal mocked provider response. Fix belongs in the Andy.Engine package; re-enable once it guards the null source. Do not relax this test to pass.")]
+    // End-to-end: a simple assistant response flows through the packaged SimpleAgent loop and is
+    // returned. (Requires the IToolRegistry.Tools mock set up in the constructor; without it the
+    // agent's tool-declaration build throws ArgumentNullException on the null registry list.)
+    [Fact]
     public async Task ProcessMessageAsync_WithSimpleMessage_ReturnsResponse()
     {
         // Arrange
@@ -80,11 +82,9 @@ public class SimpleAssistantServiceTests
         _mockLlmProvider.Verify(x => x.CompleteAsync(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // Same Andy.Engine SimpleAgent product defect as above: the mocked tool-call response does not flow
-    // through the packaged agent loop to _mockToolExecutor because the agent throws on the minimal mock.
-    // This is an Andy.Engine package bug, not a test defect; the fix belongs there. Re-enable once the
-    // package tolerates a minimal mocked provider response. Do not relax this test to pass.
-    [Fact(Skip = "Product bug: Andy.Engine SimpleAgent throws ArgumentNullException on a minimal mocked provider response, so the tool call never reaches the executor. Fix belongs in the Andy.Engine package; re-enable once it guards the null source. Do not relax this test to pass.")]
+    // End-to-end: a tool-call response flows through the packaged SimpleAgent loop to the executor,
+    // and the follow-up response is returned. (Also relies on the IToolRegistry.Tools mock.)
+    [Fact]
     public async Task ProcessMessageAsync_WithToolCall_ExecutesTool()
     {
         // Arrange
