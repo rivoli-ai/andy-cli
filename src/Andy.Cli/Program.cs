@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Andy.Tui.Backend.Terminal;
+using Andy.Cli.Hosting;
 using Andy.Cli.Input;
 using Andy.Cli.Instrumentation;
 using Andy.Cli.Widgets;
@@ -149,37 +150,41 @@ class Program
             File.WriteAllText(debugCheckFile, $"Program.Main() at {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC\nANDY_DEBUG_RAW = '{debugRawEnv}'\nArgs: {string.Join(", ", args)}\n");
         }
 
-        // Print version and exit (non-interactive). Used by the release smoke test to verify the
-        // built binary reports the version it was published as. Handled here because "--version"
-        // starts with '-' and would otherwise fall through to interactive TUI mode.
-        if (args.Length > 0 && (args[0] == "--version" || args[0] == "-v" || args[0] == "version"))
+        // Select the execution mode from the arguments. The branch order is
+        // preserved in CliModeSelector (version -> acp -> headless -> command ->
+        // interactive), so bare words like "version" and "run" are still matched
+        // ahead of the generic non-dash "command" branch.
+        switch (CliModeSelector.Select(args))
         {
-            Console.WriteLine($"andy-cli {VersionInfo.ResolveDisplayVersion()}");
-            return;
-        }
+            case CliMode.Version:
+                // Print version and exit (non-interactive). Used by the release smoke test to verify the
+                // built binary reports the version it was published as. Handled here because "--version"
+                // starts with '-' and would otherwise fall through to interactive TUI mode.
+                Console.WriteLine($"andy-cli {VersionInfo.ResolveDisplayVersion()}");
+                return;
 
-        // Check for --acp flag to run in ACP server mode
-        if (args.Length > 0 && args[0] == "--acp")
-        {
-            await RunAcpServerModeAsync();
-            return;
-        }
+            case CliMode.Acp:
+                await RunAcpServerModeAsync();
+                return;
 
-        // AQ2: `andy-cli run --headless --config <path>` — non-interactive.
-        // Handled here (not via HandleCommandLineArgs) because it needs the
-        // structured exit-code contract from rivoli-ai/andy-cli#47, which
-        // doesn't fit the ICommand Success/Fail → exit 0|1 scheme.
-        if (args.Length > 0 && args[0] == "run")
-        {
-            var exitCode = await RunHeadlessAsync(args);
-            Environment.Exit((int)exitCode);
-        }
+            case CliMode.Headless:
+                // AQ2: `andy-cli run --headless --config <path>` — non-interactive.
+                // Handled here (not via HandleCommandLineArgs) because it needs the
+                // structured exit-code contract from rivoli-ai/andy-cli#47, which
+                // doesn't fit the ICommand Success/Fail → exit 0|1 scheme.
+                var exitCode = await RunHeadlessAsync(args);
+                Environment.Exit((int)exitCode);
+                return;
 
-        // Check if we have command-line arguments for non-TUI commands
-        if (args.Length > 0 && !args[0].StartsWith("-"))
-        {
-            await HandleCommandLineArgs(args);
-            return;
+            case CliMode.Command:
+                // Non-TUI one-shot commands (model, tools, permissions, help, ...).
+                await HandleCommandLineArgs(args);
+                return;
+
+            case CliMode.Interactive:
+            default:
+                // Fall through to the interactive TUI setup below.
+                break;
         }
         // Apply the persisted theme (falling back to an ANDY_THEME env default,
         // then the built-in dark theme) before the first frame is rendered.
@@ -359,30 +364,9 @@ class Program
             // main input-owning loop (which renders the modal). Same instance used by DI and the loop.
             var permissionBroker = new Andy.Cli.Services.PermissionRequestBroker();
 
-            // Configure Tool services - manually register to avoid HostedService requirement
-            // Core services from AddAndyTools
-            services.AddSingleton<Andy.Tools.Validation.IToolValidator, Andy.Tools.Validation.ToolValidator>();
-            services.AddSingleton<IToolRegistry, Andy.Tools.Registry.ToolRegistry>();
-            services.AddSingleton<Andy.Tools.Discovery.IToolDiscovery, Andy.Tools.Discovery.ToolDiscoveryService>();
-            services.AddSingleton<Andy.Tools.Execution.ISecurityManager, Andy.Tools.Execution.SecurityManager>();
-            services.AddSingleton<Andy.Tools.Execution.IResourceMonitor, Andy.Tools.Execution.ResourceMonitor>();
-            services.AddSingleton<Andy.Tools.Core.OutputLimiting.IToolOutputLimiter, Andy.Tools.Core.OutputLimiting.ToolOutputLimiter>();
-            services.AddSingleton<IToolExecutor, ToolExecutor>();
-            services.AddSingleton<Andy.Tools.Core.IPermissionProfileService, Andy.Tools.Core.PermissionProfileService>();
-            services.AddSingleton<Andy.Tools.Framework.IToolLifecycleManager, Andy.Tools.Framework.ToolLifecycleManager>();
-            // Gate tool execution through the permission engine (interactive prompt for the TUI).
-            services.AddAndyCliPermissions(permissionBroker);
-
-            // Framework options
-            services.AddSingleton(new Andy.Tools.Framework.ToolFrameworkOptions
-            {
-                RegisterBuiltInTools = false, // We'll register them separately
-                EnableObservability = false,
-                AutoDiscoverTools = false
-            });
-
-            // Register all tools using the trim-safe ToolCatalog
-            ToolCatalog.RegisterAllTools(services);
+            // Configure the core Andy.Tools service graph (interactive prompt for the TUI).
+            // Shared with the ACP and one-shot command paths via AppCompositionRoot.
+            AppCompositionRoot.AddCoreToolServices(services, permissionBroker);
 
             // Register code indexing service as a singleton only. The app builds a plain
             // ServiceProvider (no HostedService startup), so an AddHostedService registration would
@@ -399,12 +383,7 @@ class Program
             var serviceProvider = services.BuildServiceProvider();
 
             // Initialize tool registry and register tools
-            var toolRegistry = serviceProvider.GetRequiredService<IToolRegistry>();
-            var toolRegistrations = serviceProvider.GetServices<ToolRegistrationInfo>();
-            foreach (var registration in toolRegistrations)
-            {
-                toolRegistry.RegisterTool(registration.ToolType, registration.Configuration);
-            }
+            var toolRegistry = AppCompositionRoot.InitializeToolRegistry(serviceProvider);
 
             // Initialize commands
             var modelCommand = new ModelCommand(serviceProvider);
@@ -488,7 +467,7 @@ class Program
                     loggerFactory,
                     extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, currentProvider));
 
-                var providerUrl = GetProviderUrl(currentProvider);
+                var providerUrl = ProviderUrlResolver.Resolve(currentProvider);
 
                 feed.AddMarkdownRich($"[model] {currentModel} with {currentProvider} provider [{providerUrl}] (tool-enabled)");
             }
@@ -1981,12 +1960,6 @@ class Program
         }
     }
 
-    private static string GetProviderUrl(string provider)
-    {
-        // Single source of truth for provider endpoints (honors *_API_BASE overrides)
-        return Andy.Cli.Services.ProviderRegistry.GetEndpoint(provider);
-    }
-
     private static async Task RunAcpServerModeAsync()
     {
         // Configure logging with stderr output (to avoid polluting stdout used for ACP protocol)
@@ -2013,29 +1986,9 @@ class Program
         // Add the provider factory
         services.AddSingleton<Andy.Llm.Providers.ILlmProviderFactory, Andy.Llm.Providers.LlmProviderFactory>();
 
-        // Configure Tool services
-        services.AddSingleton<Andy.Tools.Validation.IToolValidator, Andy.Tools.Validation.ToolValidator>();
-        services.AddSingleton<IToolRegistry, Andy.Tools.Registry.ToolRegistry>();
-        services.AddSingleton<Andy.Tools.Discovery.IToolDiscovery, Andy.Tools.Discovery.ToolDiscoveryService>();
-        services.AddSingleton<Andy.Tools.Execution.ISecurityManager, Andy.Tools.Execution.SecurityManager>();
-        services.AddSingleton<Andy.Tools.Execution.IResourceMonitor, Andy.Tools.Execution.ResourceMonitor>();
-        services.AddSingleton<Andy.Tools.Core.OutputLimiting.IToolOutputLimiter, Andy.Tools.Core.OutputLimiting.ToolOutputLimiter>();
-        services.AddSingleton<IToolExecutor, ToolExecutor>();
-        services.AddSingleton<Andy.Tools.Core.IPermissionProfileService, Andy.Tools.Core.PermissionProfileService>();
-        services.AddSingleton<Andy.Tools.Framework.IToolLifecycleManager, Andy.Tools.Framework.ToolLifecycleManager>();
-        // Gate tool execution through the permission engine (non-interactive: fail-closed / bypass via env).
-        services.AddAndyCliPermissions(null);
-
-        // Framework options
-        services.AddSingleton(new Andy.Tools.Framework.ToolFrameworkOptions
-        {
-            RegisterBuiltInTools = false,
-            EnableObservability = false,
-            AutoDiscoverTools = false
-        });
-
-        // Register all tools
-        ToolCatalog.RegisterAllTools(services);
+        // Configure the core Andy.Tools service graph (non-interactive: fail-closed /
+        // bypass via env). Shared with the interactive and one-shot command paths.
+        AppCompositionRoot.AddCoreToolServices(services, null);
 
         var serviceProvider = services.BuildServiceProvider();
         var loggerFactory = serviceProvider.GetRequiredService<ILoggerFactory>();
@@ -2046,12 +1999,7 @@ class Program
         try
         {
             // Initialize tool registry
-            var toolRegistry = serviceProvider.GetRequiredService<IToolRegistry>();
-            var toolRegistrations = serviceProvider.GetServices<ToolRegistrationInfo>();
-            foreach (var registration in toolRegistrations)
-            {
-                toolRegistry.RegisterTool(registration.ToolType, registration.Configuration);
-            }
+            var toolRegistry = AppCompositionRoot.InitializeToolRegistry(serviceProvider);
 
             logger.LogInformation("Registered {ToolCount} tools", toolRegistry.GetTools().Count());
 
@@ -2146,40 +2094,14 @@ class Program
         // services.AddTransient<Andy.Cli.Parsing.Compiler.LlmResponseCompiler>();
         // services.AddTransient<Andy.Cli.Parsing.Rendering.AstRenderer>();
 
-        // Configure Tool services - manually register to avoid HostedService requirement
-        // Core services from AddAndyTools
-        services.AddSingleton<Andy.Tools.Validation.IToolValidator, Andy.Tools.Validation.ToolValidator>();
-        services.AddSingleton<IToolRegistry, Andy.Tools.Registry.ToolRegistry>();
-        services.AddSingleton<Andy.Tools.Discovery.IToolDiscovery, Andy.Tools.Discovery.ToolDiscoveryService>();
-        services.AddSingleton<Andy.Tools.Execution.ISecurityManager, Andy.Tools.Execution.SecurityManager>();
-        services.AddSingleton<Andy.Tools.Execution.IResourceMonitor, Andy.Tools.Execution.ResourceMonitor>();
-        services.AddSingleton<Andy.Tools.Core.OutputLimiting.IToolOutputLimiter, Andy.Tools.Core.OutputLimiting.ToolOutputLimiter>();
-        services.AddSingleton<IToolExecutor, ToolExecutor>();
-        services.AddSingleton<Andy.Tools.Core.IPermissionProfileService, Andy.Tools.Core.PermissionProfileService>();
-        services.AddSingleton<Andy.Tools.Framework.IToolLifecycleManager, Andy.Tools.Framework.ToolLifecycleManager>();
-        // Gate tool execution through the permission engine (non-interactive: fail-closed / bypass via env).
-        services.AddAndyCliPermissions(null);
-
-        // Framework options
-        services.AddSingleton(new Andy.Tools.Framework.ToolFrameworkOptions
-        {
-            RegisterBuiltInTools = false, // We'll register them separately
-            EnableObservability = false,
-            AutoDiscoverTools = false
-        });
-
-        // Register all tools using the trim-safe ToolCatalog
-        ToolCatalog.RegisterAllTools(services);
+        // Configure the core Andy.Tools service graph (non-interactive: fail-closed /
+        // bypass via env). Shared with the interactive and ACP paths.
+        AppCompositionRoot.AddCoreToolServices(services, null);
 
         var serviceProvider = services.BuildServiceProvider();
 
         // Initialize tool registry and register tools
-        var toolRegistry = serviceProvider.GetRequiredService<IToolRegistry>();
-        var toolRegistrations = serviceProvider.GetServices<ToolRegistrationInfo>();
-        foreach (var registration in toolRegistrations)
-        {
-            toolRegistry.RegisterTool(registration.ToolType, registration.Configuration);
-        }
+        AppCompositionRoot.InitializeToolRegistry(serviceProvider);
 
         // Route to appropriate command
         var commandName = args[0].ToLowerInvariant();
