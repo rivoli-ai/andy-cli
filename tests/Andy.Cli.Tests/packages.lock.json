@@ -223,12 +223,12 @@
       "Andy.Doc.Core": {
         "type": "Transitive",
         "resolved": "2026.6.22-rc.1",
-        "contentHash": "y4m1d3Lraj43F40ReqK2Facs2+GhP81aJsr0h6zztPLgK++yXFc8kUjHvaXE816OoGZLzjcqsouvSrGNlMBjqA=="
+        "contentHash": "lN58KG6hnLZoLlCM9C+DlI+Anf7zJQ5VPNnAT4kSpNUy/hWN2Nt6tQW/bFVG3emkGrXchAsm3Mvcpd0vy6PU5w=="
       },
       "Andy.Doc.Pdf": {
         "type": "Transitive",
         "resolved": "2026.6.22-rc.1",
-        "contentHash": "2M1g1dySoqOIexd0wRBwnUGxQYV0K4wT2RsQi23ZXHDiV5tIhlhrh3VWKXl3akzTw3fPl5hv+OdzJ8ssWkxFrg==",
+        "contentHash": "apGsnx6GhzA2VLGz7iU5vlZBgiMsVS6vP2OPIyCz18dkzYaddqgBT7dlUzkImWbjgsi5A6gdrdgzNR4MAExEFA==",
         "dependencies": {
           "Andy.Doc.Core": "2026.6.22-rc.1",
           "CSJ2K": "3.0.0",
@@ -288,10 +288,10 @@
       "Andy.Tools.Pdf": {
         "type": "Transitive",
         "resolved": "2026.6.22-rc.1",
-        "contentHash": "5OL+gMaVGKkwUhIWGvycDB0/ExdWb32n0QJO7h6uTZv6nsHGpBmeqGrd1AaVTQUC3f2dTFZje5uWA8EbkIinSw==",
+        "contentHash": "91duz7LVa6bVuOEb7mMW2iiXzqk6pLe3MCRnNP4OnXxaQ8WfLtIMfHrcvhgYkbDd3LFvC2W8KMd1xB7unkRExQ==",
         "dependencies": {
           "Andy.Doc.Pdf": "2026.6.22-rc.1",
-          "Andy.Tools": "1.0.0",
+          "Andy.Tools": "1.0.0-rc",
           "Microsoft.Extensions.DependencyInjection.Abstractions": "8.0.2",
           "Microsoft.Extensions.Logging.Abstractions": "8.0.2"
         }
