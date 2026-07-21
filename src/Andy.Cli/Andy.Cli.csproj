@@ -96,7 +96,21 @@
     <TrimmerRootAssembly Include="Andy.Llm" />
     <TrimmerRootAssembly Include="Andy.Engine" />
     <TrimmerRootAssembly Include="Andy.Model" />
-    <TrimmerRootAssembly Include="Andy.Tui" />
+    <!-- Andy.Tui became a meta-package (no assembly of its own); root each of
+         its split assemblies instead. -->
+    <TrimmerRootAssembly Include="Andy.Tui.Animations" />
+    <TrimmerRootAssembly Include="Andy.Tui.Backend.Terminal" />
+    <TrimmerRootAssembly Include="Andy.Tui.Compose" />
+    <TrimmerRootAssembly Include="Andy.Tui.Compositor" />
+    <TrimmerRootAssembly Include="Andy.Tui.Core" />
+    <TrimmerRootAssembly Include="Andy.Tui.DisplayList" />
+    <TrimmerRootAssembly Include="Andy.Tui.Input" />
+    <TrimmerRootAssembly Include="Andy.Tui.Layout" />
+    <TrimmerRootAssembly Include="Andy.Tui.Observability" />
+    <TrimmerRootAssembly Include="Andy.Tui.Style" />
+    <TrimmerRootAssembly Include="Andy.Tui.Text" />
+    <TrimmerRootAssembly Include="Andy.Tui.Virtualization" />
+    <TrimmerRootAssembly Include="Andy.Tui.Widgets" />
   </ItemGroup>
 
   <!--
