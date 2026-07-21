@@ -60,6 +60,10 @@
     <!-- 9.0.18: the entire 8.0.x line is flagged by multiple high-severity advisories
          (NU1903); also lifts the transitive 8.0.3 via Microsoft dependencies. -->
     <PackageReference Include="System.Security.Cryptography.Xml" Version="9.0.18" />
+    <!-- Explicit pin: trimmed publishing otherwise adds this implicitly AT THE SDK'S OWN
+         VERSION, which makes packages.lock.json depend on whichever SDK runs restore and
+         breaks locked-mode CI restores (NU1004) whenever the runner SDK moves. -->
+    <PackageReference Include="Microsoft.NET.ILLink.Tasks" Version="8.0.29" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
