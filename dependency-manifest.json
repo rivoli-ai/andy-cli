@@ -1,7 +1,7 @@
 {
   "$comment": "Known-good dependency graph for andy-cli. Records the exact SDK band and Andy ecosystem package versions the CLI is verified against. Update this file in the same commit that bumps global.json or any Andy.* PackageReference in src/Andy.Cli/Andy.Cli.csproj. See docs/SDK_AND_DEPENDENCIES.md and issue #172.",
   "schemaVersion": 1,
-  "updated": "2026-07-17",
+  "updated": "2026-07-21",
   "sdk": {
     "channel": "8.0",
     "minimumVersion": "8.0.0",
@@ -11,37 +11,37 @@
   },
   "targetFramework": "net8.0",
   "engine": {
-    "Andy.Engine": "2026.6.21-rc.66"
+    "Andy.Engine": "2026.7.21-rc.78"
   },
   "tui": {
-    "Andy.Tui": "2026.6.20-rc.64"
+    "Andy.Tui": "2026.7.21-rc.162"
   },
   "codeIndex": {
-    "Andy.CodeIndex.Infrastructure": "2026.6.8-rc.3"
+    "Andy.CodeIndex.Infrastructure": "2026.7.21-rc.11"
   },
   "permissions": {
-    "Andy.Permissions": "2026.6.21-rc.10"
+    "Andy.Permissions": "2026.7.21-rc.14"
   },
   "otherAndyPackages": {
-    "Andy.Acp.Core": "2025.11.18-rc.3",
-    "Andy.Llm": "2026.6.20-rc.42",
-    "Andy.MCP": "2026.4.26-rc.29",
-    "Andy.Model": "2026.6.20-rc.10",
-    "Andy.Tools": "2026.6.20-rc.77",
-    "Andy.Tools.Data": "2026.6.17-rc.75",
-    "Andy.Tools.Pdf": "2026.6.22-rc.1"
+    "Andy.Acp.Core": "2026.7.21",
+    "Andy.Llm": "2026.7.21-rc.76",
+    "Andy.MCP": "2026.5.16-rc.31",
+    "Andy.Model": "2026.7.21-rc.13",
+    "Andy.Tools": "2026.7.21-rc.86",
+    "Andy.Tools.Data": "2026.7.21-rc.86",
+    "Andy.Tools.Pdf": "2026.7.21-rc.86"
   },
   "sourceRevisionCompatibility": {
     "$comment": "When building the CLI against sibling SOURCE repos instead of the pinned packages (see scripts/check-source-compat.sh), these are the branches/revisions the above package versions were cut from. CI cannot rely on these paths; they document the local composite-build workflow.",
     "andy-engine": {
       "repo": "rivoli-ai/andy-engine",
       "localPath": "../andy-engine",
-      "packageVersion": "2026.6.21-rc.66"
+      "packageVersion": "2026.7.21-rc.78"
     },
     "andy-tui2": {
       "repo": "rivoli-ai/andy-tui2",
       "localPath": "../andy-tui2",
-      "packageVersion": "2026.6.20-rc.64"
+      "packageVersion": "2026.7.21-rc.162"
     }
   },
   "reproducibleRestore": {
