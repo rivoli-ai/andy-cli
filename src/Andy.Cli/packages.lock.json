@@ -4,9 +4,9 @@
     "net8.0": {
       "Andy.Acp.Core": {
         "type": "Direct",
-        "requested": "[2026.7.21, )",
-        "resolved": "2026.7.21",
-        "contentHash": "5TWabSqBEijlvUHsSfwQ9RXgZy4ngZqUXkCzonVgdIx1No9AVJ0lKfzT3hsjDyboaROVhMATaiqj9w+tMNoNSw==",
+        "requested": "[2026.7.21.1, )",
+        "resolved": "2026.7.21.1",
+        "contentHash": "Q8lOLNa3nPvfk3nxSEhyJwi1VTv8ND1ebDmWdzI1euvDM65QkXnSmQtyZu5+hUw0RXwdRxfcmm6TgZhstZYKoQ==",
         "dependencies": {
           "Microsoft.Extensions.Logging.Abstractions": "8.0.0"
         }
@@ -325,12 +325,12 @@
       "Andy.Doc.Core": {
         "type": "Transitive",
         "resolved": "2026.7.21-rc.1",
-        "contentHash": "sCNhTUv9CXAE9aXgy+94x84JfiZXOqMNTvUVMIsmT+LjrHA88aV2OB0U9Y6+WdHHc6qjR6qFzEQRf+AGpFVjGQ=="
+        "contentHash": "sLE5VSc8aEYW0a+JF2R/ghxLbYnpjiQ7kjo2CLsR1kK8SvPRednAj78wu0lAyceg28OsJd6C8dnN0dFOjXqwsQ=="
       },
       "Andy.Doc.Pdf": {
         "type": "Transitive",
         "resolved": "2026.7.21-rc.1",
-        "contentHash": "0LuMqeAwkvRhkwMeVT2hr9CwFMydlabHgO1ADx+6sGdHMYr2TEj8LkbWDZVaB4wYMo+7AMfWMaXcCrp8T342RA==",
+        "contentHash": "ggu5XrP1LN8ICGoCQEtuaqGBNeKyqZ4aTeEkfNIcAhCBsoDXeylnS5be7pqzWHfZ40z0Pe7SLQTrjhznICny5g==",
         "dependencies": {
           "Andy.Doc.Core": "2026.7.21-rc.1",
           "CSJ2K": "3.0.0",
