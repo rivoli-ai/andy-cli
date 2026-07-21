@@ -62,33 +62,26 @@ for platform in "${PLATFORMS[@]}"; do
         -p:FileVersion="$SAFE_VERSION" \
         -p:InformationalVersion="$RAW_VERSION"
 
-    # Create archive
-    cd "$BUILD_DIR"
-
+    # Create archive and checksum in subshells so the script's working directory
+    # never changes. (The previous `cd "$BUILD_DIR"` went three levels deep but
+    # `cd ../..` only came back two, stranding the loop in $OUTPUT_DIR after the
+    # first platform and breaking every subsequent publish path.)
     if [[ "$runtime" == win-* ]]; then
-        # Windows: create zip
-        zip -r "../../${artifact_name}.zip" ./*
-        cd ../..
-
-        # Calculate checksum
-        if command -v sha256sum &> /dev/null; then
-            sha256sum "${artifact_name}.zip" > "${artifact_name}.zip.sha256"
-        else
-            shasum -a 256 "${artifact_name}.zip" > "${artifact_name}.zip.sha256"
-        fi
+        archive="${artifact_name}.zip"
+        ( cd "$BUILD_DIR" && zip -r "../../${archive}" ./* )
     else
-        # Unix: create tar.gz
-        chmod +x andy-cli
-        tar -czf "../../${artifact_name}.tar.gz" ./*
-        cd ../..
-
-        # Calculate checksum
-        if command -v sha256sum &> /dev/null; then
-            sha256sum "${artifact_name}.tar.gz" > "${artifact_name}.tar.gz.sha256"
-        else
-            shasum -a 256 "${artifact_name}.tar.gz" > "${artifact_name}.tar.gz.sha256"
-        fi
+        archive="${artifact_name}.tar.gz"
+        ( cd "$BUILD_DIR" && chmod +x andy-cli && tar -czf "../../${archive}" ./* )
     fi
+
+    (
+        cd "$OUTPUT_DIR"
+        if command -v sha256sum &> /dev/null; then
+            sha256sum "$archive" > "${archive}.sha256"
+        else
+            shasum -a 256 "$archive" > "${archive}.sha256"
+        fi
+    )
 
     echo "✓ Built $artifact_name"
 done
