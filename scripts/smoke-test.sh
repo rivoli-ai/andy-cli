@@ -41,20 +41,20 @@ echo "smoke: testing $BIN (expected version $EXPECTED)"
 # 1) Startup + version.
 version_out="$("$BIN" --version)"
 echo "  version: $version_out"
-echo "$version_out" | grep -q "andy-cli" || fail "version output missing 'andy-cli' marker"
-echo "$version_out" | grep -qF "$EXPECTED" || fail "version output missing expected version $EXPECTED"
+grep -q "andy-cli" <<< "$version_out" || fail "version output missing 'andy-cli' marker"
+grep -qF "$EXPECTED" <<< "$version_out" || fail "version output missing expected version $EXPECTED"
 pass "startup + version"
 
 # 2) Help / usage text.
 help_out="$("$BIN" help)"
-echo "$help_out" | grep -qi "Usage:" || fail "help output missing usage line"
-echo "$help_out" | grep -qi "tools" || fail "help output missing commands list"
+grep -qi "Usage:" <<< "$help_out" || fail "help output missing usage line"
+grep -qi "tools" <<< "$help_out" || fail "help output missing commands list"
 pass "help / usage"
 
 # 3) Representative non-network tool path: list the built-in tool catalog. This
 #    initialises the tool registry and renders it with no network access.
 tools_out="$("$BIN" tools list)"
-echo "$tools_out" | grep -qiE "tool|read_file|list" || fail "tools list produced no catalog"
+grep -qiE "tool|read_file|list" <<< "$tools_out" || fail "tools list produced no catalog"
 pass "tool catalog listing (non-network)"
 
 # 4) Headless schema validation: an intentionally invalid config must be rejected
