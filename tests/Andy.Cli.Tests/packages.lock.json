@@ -104,11 +104,12 @@
       },
       "System.Security.Cryptography.Xml": {
         "type": "Direct",
-        "requested": "[8.0.3, )",
-        "resolved": "8.0.3",
-        "contentHash": "1cHAWDYwOyyoRy+nxS7/Ro/Zcio6i5yHoIJ6xUA+fU8lNu4yGQgja5dEovAxBVud3RnfwRVWOl0B2vr+9LP/mg==",
+        "requested": "[9.0.18, )",
+        "resolved": "9.0.18",
+        "contentHash": "UoE37brJoIJPMds6wqDaweVrORmdM3XDPGLRU01Mg6Koh3SjgogSfz4+zDsriaEluHMRCx/Qc7yeEw7F9QMcJA==",
         "dependencies": {
-          "System.Security.Cryptography.Pkcs": "8.0.1"
+          "Microsoft.Bcl.Cryptography": "9.0.18",
+          "System.Security.Cryptography.Pkcs": "9.0.18"
         }
       },
       "System.Text.RegularExpressions": {
@@ -144,8 +145,8 @@
       },
       "Andy.Acp.Core": {
         "type": "Transitive",
-        "resolved": "2025.11.18-rc.3",
-        "contentHash": "11JmrQG14jSI7l6eih2r1y4fIlEhPIWIuPiDjxhTKXtX9iC1b0jOdBeQ0KVYGyCCKUwAmLXfDJdFydcy78OVjw==",
+        "resolved": "2026.7.21",
+        "contentHash": "cOP94VYIuahae8PQ0D+2H+iUXgCbmLssWQMhV/fyukeC2J4fsLHKkwpYoLx7PaLtHAIFYuiCA6K5f1AHnIWW5Q==",
         "dependencies": {
           "Microsoft.Extensions.Logging.Abstractions": "8.0.0"
         }
@@ -2030,7 +2031,7 @@
       "andy-cli": {
         "type": "Project",
         "dependencies": {
-          "Andy.Acp.Core": "[2025.11.18-rc.3, )",
+          "Andy.Acp.Core": "[2026.7.21, )",
           "Andy.CodeIndex.Infrastructure": "[2026.6.8-rc.3, )",
           "Andy.Engine": "[2026.6.21-rc.66, )",
           "Andy.Llm": "[2026.6.20-rc.42, )",
@@ -2047,7 +2048,7 @@
           "Microsoft.CodeAnalysis.CSharp.Workspaces": "[4.8.0, )",
           "Microsoft.Extensions.Logging.Console": "[9.0.9, )",
           "System.Net.Http": "[4.3.4, )",
-          "System.Security.Cryptography.Xml": "[8.0.3, )",
+          "System.Security.Cryptography.Xml": "[9.0.18, )",
           "System.Text.RegularExpressions": "[4.3.1, )"
         }
       },

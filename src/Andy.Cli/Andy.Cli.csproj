@@ -27,7 +27,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Andy.Acp.Core" Version="2025.11.18-rc.3" />
+    <PackageReference Include="Andy.Acp.Core" Version="2026.7.21" />
+    <!-- Direct override: lifts the transitive System.Security.Cryptography.Xml 8.0.3
+         (via Microsoft.AspNetCore.DataProtection) to the patched 9.0.x line, resolving
+         NU1903 (multiple advisories; the entire 8.0.x line is affected). -->
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="9.0.18" />
     <PackageReference Include="Andy.CodeIndex.Infrastructure" Version="2026.6.8-rc.3" />
     <PackageReference Include="Andy.Engine" Version="2026.6.21-rc.66" />
     <PackageReference Include="Andy.Llm" Version="2026.6.20-rc.42" />

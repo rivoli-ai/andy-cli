@@ -4,9 +4,9 @@
     "net8.0": {
       "Andy.Acp.Core": {
         "type": "Direct",
-        "requested": "[2025.11.18-rc.3, )",
-        "resolved": "2025.11.18-rc.3",
-        "contentHash": "11JmrQG14jSI7l6eih2r1y4fIlEhPIWIuPiDjxhTKXtX9iC1b0jOdBeQ0KVYGyCCKUwAmLXfDJdFydcy78OVjw==",
+        "requested": "[2026.7.21, )",
+        "resolved": "2026.7.21",
+        "contentHash": "cOP94VYIuahae8PQ0D+2H+iUXgCbmLssWQMhV/fyukeC2J4fsLHKkwpYoLx7PaLtHAIFYuiCA6K5f1AHnIWW5Q==",
         "dependencies": {
           "Microsoft.Extensions.Logging.Abstractions": "8.0.0"
         }
@@ -227,11 +227,12 @@
       },
       "System.Security.Cryptography.Xml": {
         "type": "Direct",
-        "requested": "[8.0.3, )",
-        "resolved": "8.0.3",
-        "contentHash": "1cHAWDYwOyyoRy+nxS7/Ro/Zcio6i5yHoIJ6xUA+fU8lNu4yGQgja5dEovAxBVud3RnfwRVWOl0B2vr+9LP/mg==",
+        "requested": "[9.0.18, )",
+        "resolved": "9.0.18",
+        "contentHash": "UoE37brJoIJPMds6wqDaweVrORmdM3XDPGLRU01Mg6Koh3SjgogSfz4+zDsriaEluHMRCx/Qc7yeEw7F9QMcJA==",
         "dependencies": {
-          "System.Security.Cryptography.Pkcs": "8.0.1"
+          "Microsoft.Bcl.Cryptography": "9.0.18",
+          "System.Security.Cryptography.Pkcs": "9.0.18"
         }
       },
       "System.Text.RegularExpressions": {
