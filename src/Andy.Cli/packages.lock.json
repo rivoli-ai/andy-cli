@@ -6,7 +6,7 @@
         "type": "Direct",
         "requested": "[2026.7.21, )",
         "resolved": "2026.7.21",
-        "contentHash": "cOP94VYIuahae8PQ0D+2H+iUXgCbmLssWQMhV/fyukeC2J4fsLHKkwpYoLx7PaLtHAIFYuiCA6K5f1AHnIWW5Q==",
+        "contentHash": "5TWabSqBEijlvUHsSfwQ9RXgZy4ngZqUXkCzonVgdIx1No9AVJ0lKfzT3hsjDyboaROVhMATaiqj9w+tMNoNSw==",
         "dependencies": {
           "Microsoft.Extensions.Logging.Abstractions": "8.0.0"
         }
