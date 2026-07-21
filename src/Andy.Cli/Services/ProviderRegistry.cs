@@ -74,8 +74,8 @@ public static class ProviderRegistry
             ApiKeyEnvVars = new[] { "OPENROUTER_API_KEY" },
             ApiBaseEnvVar = "OPENROUTER_API_BASE",
             DefaultEndpoint = "https://openrouter.ai/api/v1",
-            DefaultModel = "xiaomi/mimo-v2.5",
-            DetectionPriority = 0 // Preferred when its key is present (default Mimo-v2.5 setup)
+            DefaultModel = "moonshotai/kimi-k3",
+            DetectionPriority = 0 // Preferred when its key is present (default Kimi K3 setup)
         },
         new ProviderDescriptor
         {

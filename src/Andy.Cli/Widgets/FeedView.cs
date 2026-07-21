@@ -2205,7 +2205,7 @@ namespace Andy.Cli.Widgets
             if (theme.Background is { } mdBg)
                 renderer.SetColors(theme.Text, mdBg, theme.Accent);
             renderer.SetHeaderColors(theme.Heading, theme.Heading, theme.Heading);
-            renderer.SetText(FeedMarkdown.Normalize(_content.ToString()));
+            renderer.SetText(FeedMarkdown.BalanceCodeFences(FeedMarkdown.Normalize(_content.ToString())));
             // Convert the renderer's Underline (emphasis) attribute to Bold + link color so the
             // streaming view matches the finalized markdown: bold, distinct color, no underline.
             MarkdownLinkStyle.RenderWithoutUnderline(b, theme.Accent, temp =>

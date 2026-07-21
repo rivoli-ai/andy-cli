@@ -83,7 +83,12 @@ public class AndyAgentProvider : IAgentProvider, IDisposable
 
         var mode = string.IsNullOrWhiteSpace(parameters?.Mode) ? "assistant" : parameters!.Mode;
         var model = string.IsNullOrWhiteSpace(parameters?.Model) ? _defaultModel : parameters!.Model;
-        var systemPrompt = string.IsNullOrWhiteSpace(parameters?.SystemPrompt) ? _systemPrompt : parameters!.SystemPrompt;
+
+        // ACP passes the workspace cwd with session/new; surface it to the model
+        // through the system prompt so relative references resolve sensibly.
+        var systemPrompt = string.IsNullOrWhiteSpace(parameters?.Cwd)
+            ? _systemPrompt
+            : _systemPrompt + $"\n\nThe user's working directory is: {parameters!.Cwd}";
 
         // Create a new engine agent for this session.
         var agent = _agentFactory.Create(systemPrompt);
@@ -111,11 +116,19 @@ public class AndyAgentProvider : IAgentProvider, IDisposable
         });
     }
 
-    public Task<SessionMetadata?> LoadSessionAsync(string sessionId, CancellationToken cancellationToken)
+    public Task<SessionMetadata?> LoadSessionAsync(
+        LoadSessionParams parameters,
+        IResponseStreamer streamer,
+        CancellationToken cancellationToken)
     {
+        var sessionId = parameters.SessionId;
+
         // Session state lives in-memory only; a session that is no longer
         // retained (evicted, disposed, or from a previous process) cannot be
         // resumed. Reject unknown ids rather than fabricating an empty session.
+        // History replay: the conversation lives inside the engine agent, which
+        // exposes no transcript API, so no session/update replay is emitted here;
+        // the client resumes with metadata only.
         if (_sessions.TryGet(sessionId, out var entry))
         {
             _logger?.LogInformation("Loaded existing ACP session: {SessionId}", sessionId);
@@ -242,24 +255,31 @@ public class AndyAgentProvider : IAgentProvider, IDisposable
     }
 
     /// <summary>
-    /// Folds any embedded context items into the prompt text (honoring the
-    /// advertised EmbeddedContext capability).
+    /// Folds non-text content blocks into the prompt text (honoring the
+    /// advertised EmbeddedContext capability): embedded resources contribute
+    /// their text contents, resource links contribute a reference line. Image
+    /// and audio blocks are not advertised and never reach this provider.
     /// </summary>
     private static string BuildPrompt(PromptMessage prompt)
     {
         var text = prompt.Text ?? string.Empty;
-        if (prompt.Context == null || prompt.Context.Count == 0)
+        if (prompt.Blocks == null || prompt.Blocks.All(b => b.Type == "text"))
         {
             return text;
         }
 
         var sb = new StringBuilder();
-        foreach (var item in prompt.Context)
+        foreach (var block in prompt.Blocks)
         {
-            if (!string.IsNullOrWhiteSpace(item?.Content))
+            switch (block.Type)
             {
-                var label = string.IsNullOrWhiteSpace(item!.Type) ? "context" : item.Type;
-                sb.Append('[').Append(label).Append("]\n").Append(item.Content).Append("\n\n");
+                case "resource" when !string.IsNullOrWhiteSpace(block.Resource?.Text):
+                    var label = string.IsNullOrWhiteSpace(block.Resource!.Uri) ? "resource" : block.Resource.Uri;
+                    sb.Append('[').Append(label).Append("]\n").Append(block.Resource.Text).Append("\n\n");
+                    break;
+                case "resource_link" when !string.IsNullOrWhiteSpace(block.Uri):
+                    sb.Append("[linked resource] ").Append(block.Uri).Append("\n\n");
+                    break;
             }
         }
 
@@ -281,22 +301,15 @@ public class AndyAgentProvider : IAgentProvider, IDisposable
         await streamer.SendMessageChunkAsync(response, cancellationToken);
     }
 
-    public Task<bool> SetSessionModeAsync(string sessionId, string mode, CancellationToken cancellationToken)
+    public Task<bool> SetSessionModeAsync(string sessionId, string modeId, CancellationToken cancellationToken)
     {
         // Mode switching is not supported by the engine agent. Explicitly
         // decline (returning false) instead of silently accepting the request.
+        // (Model selection is likewise unsupported; under conformant ACP it
+        // would be exposed via session config options, which this provider does
+        // not implement.)
         _logger?.LogInformation(
-            "Rejecting unsupported mode switch for session {SessionId}: {Mode}", sessionId, mode);
-        return Task.FromResult(false);
-    }
-
-    public Task<bool> SetSessionModelAsync(string sessionId, string model, CancellationToken cancellationToken)
-    {
-        // Model switching would require rebuilding the engine agent against a
-        // different provider/model, which SimpleAgent does not support at
-        // runtime. Explicitly decline instead of silently no-op'ing.
-        _logger?.LogInformation(
-            "Rejecting unsupported model switch for session {SessionId}: {Model}", sessionId, model);
+            "Rejecting unsupported mode switch for session {SessionId}: {ModeId}", sessionId, modeId);
         return Task.FromResult(false);
     }
 

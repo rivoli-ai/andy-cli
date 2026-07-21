@@ -129,6 +129,13 @@ public class AndyAgentProviderTests
         Assert.NotNull(metadata.SessionId);
     }
 
+    /// <summary>Adapter for the conformant LoadSessionAsync(LoadSessionParams, IResponseStreamer, ct) signature.</summary>
+    private Task<SessionMetadata?> LoadAsync(string sessionId) =>
+        _provider.LoadSessionAsync(
+            new LoadSessionParams { SessionId = sessionId, Cwd = "/tmp" },
+            new Mock<IResponseStreamer>().Object,
+            CancellationToken.None);
+
     [Fact]
     public async Task LoadSessionAsync_ReturnsSessionMetadata_ForExistingSession()
     {
@@ -137,7 +144,7 @@ public class AndyAgentProviderTests
         var sessionId = createResult.SessionId;
 
         // Act
-        var metadata = await _provider.LoadSessionAsync(sessionId, CancellationToken.None);
+        var metadata = await LoadAsync(sessionId);
 
         // Assert
         Assert.NotNull(metadata);
@@ -150,7 +157,7 @@ public class AndyAgentProviderTests
     public async Task LoadSessionAsync_ReturnsNull_ForNonExistentSession()
     {
         // Act
-        var metadata = await _provider.LoadSessionAsync("non-existent-session", CancellationToken.None);
+        var metadata = await LoadAsync("non-existent-session");
 
         // Assert
         Assert.Null(metadata);
@@ -191,20 +198,6 @@ public class AndyAgentProviderTests
     }
 
     [Fact]
-    public async Task SetSessionModelAsync_ReturnsFalse_ForNonImplementedFeature()
-    {
-        // Arrange
-        var createResult = await _provider.CreateSessionAsync(null, CancellationToken.None);
-        var sessionId = createResult.SessionId;
-
-        // Act
-        var result = await _provider.SetSessionModelAsync(sessionId, "gpt-4", CancellationToken.None);
-
-        // Assert - Model switching not implemented yet
-        Assert.False(result);
-    }
-
-    [Fact]
     public async Task CancelSessionAsync_CompletesSuccessfully()
     {
         // Arrange
@@ -229,9 +222,9 @@ public class AndyAgentProviderTests
         Assert.NotEqual(session1.SessionId, session3.SessionId);
 
         // Verify all can be loaded
-        var loaded1 = await _provider.LoadSessionAsync(session1.SessionId, CancellationToken.None);
-        var loaded2 = await _provider.LoadSessionAsync(session2.SessionId, CancellationToken.None);
-        var loaded3 = await _provider.LoadSessionAsync(session3.SessionId, CancellationToken.None);
+        var loaded1 = await LoadAsync(session1.SessionId);
+        var loaded2 = await LoadAsync(session2.SessionId);
+        var loaded3 = await LoadAsync(session3.SessionId);
 
         Assert.NotNull(loaded1);
         Assert.NotNull(loaded2);
@@ -323,9 +316,14 @@ public class AndyAgentProviderTests
         var prompt = new PromptMessage
         {
             Text = "answer this",
-            Context = new List<ContextItem>
+            Blocks = new List<ContentBlock>
             {
-                new() { Type = "file", Content = "embedded content here" }
+                new() { Type = "text", Text = "answer this" },
+                new()
+                {
+                    Type = "resource",
+                    Resource = new EmbeddedResource { Uri = "file:///ctx.txt", Text = "embedded content here" }
+                }
             }
         };
 
@@ -493,7 +491,7 @@ public class AndyAgentProviderTests
         provider.Dispose();
 
         // After disposal the session is gone and the agent has been disposed.
-        var loaded = await provider.LoadSessionAsync(session.SessionId, CancellationToken.None);
+        var loaded = await provider.LoadSessionAsync(new LoadSessionParams { SessionId = session.SessionId, Cwd = "/tmp" }, new Mock<IResponseStreamer>().Object, CancellationToken.None);
         Assert.Null(loaded);
         Assert.True(agent.IsDisposed);
     }
@@ -518,7 +516,7 @@ public class AndyAgentProviderTests
 
         // The oldest (least-recently-used) session must have been evicted and its
         // agent disposed.
-        var loadedFirst = await provider.LoadSessionAsync(first.SessionId, CancellationToken.None);
+        var loadedFirst = await provider.LoadSessionAsync(new LoadSessionParams { SessionId = first.SessionId, Cwd = "/tmp" }, new Mock<IResponseStreamer>().Object, CancellationToken.None);
         Assert.Null(loadedFirst);
         Assert.True(created[0].IsDisposed);
 
@@ -538,8 +536,8 @@ public class AndyAgentProviderTests
 
         await provider.ProcessPromptAsync(s1.SessionId, new PromptMessage { Text = "a" }, streamer.Object, CancellationToken.None);
 
-        var loaded1 = await provider.LoadSessionAsync(s1.SessionId, CancellationToken.None);
-        var loaded2 = await provider.LoadSessionAsync(s2.SessionId, CancellationToken.None);
+        var loaded1 = await provider.LoadSessionAsync(new LoadSessionParams { SessionId = s1.SessionId, Cwd = "/tmp" }, new Mock<IResponseStreamer>().Object, CancellationToken.None);
+        var loaded2 = await provider.LoadSessionAsync(new LoadSessionParams { SessionId = s2.SessionId, Cwd = "/tmp" }, new Mock<IResponseStreamer>().Object, CancellationToken.None);
 
         // s1 processed a message; s2 did not. State is per-session.
         Assert.NotNull(loaded1);

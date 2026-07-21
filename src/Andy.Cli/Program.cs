@@ -2042,11 +2042,10 @@ class Program
                 Description = "Andy CLI - AI-powered command line assistant"
             };
 
-            // Create and run the ACP server
+            // Create and run the ACP server. Filesystem/terminal are agent-to-client
+            // requests in conformant ACP, not server-side providers.
             var acpServer = new Andy.Acp.Core.Server.AcpServer(
                 agentProvider,
-                fileSystemProvider: null,
-                terminalProvider: null,
                 serverInfo: serverInfo,
                 loggerFactory: loggerFactory);
 

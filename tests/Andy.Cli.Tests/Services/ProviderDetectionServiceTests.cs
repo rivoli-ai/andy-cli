@@ -189,7 +189,7 @@ public class ProviderDetectionServiceTests
     {
         // OpenRouter is priority 0, so when its key is present it wins even if
         // lower-priority providers (e.g. OpenAI) are also configured. This is the
-        // default Mimo-v2.5 setup.
+        // default Kimi K3 setup.
         var originalOpenRouter = Environment.GetEnvironmentVariable("OPENROUTER_API_KEY");
         var originalOpenAI = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
 

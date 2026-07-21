@@ -64,4 +64,52 @@ public class UnclosedCodeFenceTests
         const string md = "Just **bold** and `code`, no fences.";
         Assert.Equal(md, FeedMarkdown.BalanceCodeFences(md));
     }
+
+#if STREAMING_FENCE_WIP // WIP: FeedView.StreamingMessageItem does not exist yet; un-fence when the feature lands
+    /// <summary>
+    /// The streaming path (StreamingMessageItem.RenderSlice) must also balance dangling fences,
+    /// matching the finalized AddMarkdownRich path. Without it, a model that opens a fence
+    /// mid-stream and never closes it causes all subsequent markdown to render as literal text.
+    /// </summary>
+    [Fact]
+    public void StreamingMessageItem_BalancesUnclosedFence()
+    {
+        var item = new FeedView.StreamingMessageItem();
+        item.AppendContent("""
+            Here is code:
+            ```csharp
+            var x = 1;
+
+            **Bold** and `code` after.
+
+            """);
+        var b = new DL.DisplayListBuilder();
+        item.RenderSlice(0, 0, 96, 0, item.MeasureLineCount(96), new DL.DisplayListBuilder().Build(), b);
+        var runs = b.Build().Ops.OfType<DL.TextRun>().Where(r => !string.IsNullOrEmpty(r.Content)).ToList();
+
+        // Bold markers must be consumed by the parser, not rendered literally.
+        Assert.DoesNotContain(runs, r => r.Content.Contains("**"));
+        // Inline-code backticks must be consumed, not rendered literally.
+        Assert.DoesNotContain(runs, r => r.Content.Contains('`'));
+    }
+
+    [Fact]
+    public void StreamingMessageItem_ClosedFence_StillRendersCorrectly()
+    {
+        var item = new FeedView.StreamingMessageItem();
+        item.AppendContent("""
+            ```
+            code
+            ```
+
+            **Bold** after.
+
+            """);
+        var b = new DL.DisplayListBuilder();
+        item.RenderSlice(0, 0, 96, 0, item.MeasureLineCount(96), new DL.DisplayListBuilder().Build(), b);
+        var runs = b.Build().Ops.OfType<DL.TextRun>().Where(r => !string.IsNullOrEmpty(r.Content)).ToList();
+
+        Assert.DoesNotContain(runs, r => r.Content.Contains("**"));
+    }
+#endif
 }

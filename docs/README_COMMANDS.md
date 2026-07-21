@@ -79,7 +79,7 @@ Set the appropriate environment variables for the providers you want to use:
 ### Configured Providers
 
 The following providers are defined in `src/Andy.Cli/appsettings.json`:
-- **OpenRouter** - model `xiaomi/mimo-v2.5` (ApiBase `https://openrouter.ai/api/v1`); the primary configured provider
+- **OpenRouter** - model `moonshotai/kimi-k3` (ApiBase `https://openrouter.ai/api/v1`); the primary configured provider
 - **OpenAI** - `gpt-4o`, plus the Codex variants `gpt-5-codex`, `codex-mini-latest`, `gpt-5.1-codex-mini`, `gpt-5.1-codex-max`, `gpt-5.1-codex`, and `gpt-5.2-codex`
 - **Anthropic** - `claude-3-5-haiku-20241022`
 - **Cerebras** - `llama-3.3-70b`
@@ -106,7 +106,7 @@ The commands are integrated into `Program.cs` with:
 
 ## Notes
 
-- There is no hardcoded default provider; `DefaultProvider` is empty in `appsettings.json`, so the provider is auto-detected (use `/model detect`). OpenRouter (model `xiaomi/mimo-v2.5`) is the primary configured provider in `appsettings.json`.
+- There is no hardcoded default provider; `DefaultProvider` is empty in `appsettings.json`, so the provider is auto-detected (use `/model detect`). OpenRouter (model `moonshotai/kimi-k3`) is the primary configured provider in `appsettings.json`.
 - Model switching recreates the LLM client with the new provider
 - The command palette supports fuzzy search across command names, descriptions, and aliases
 - All UI updates are reflected immediately in the chat feed

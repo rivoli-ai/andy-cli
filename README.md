@@ -50,7 +50,7 @@ defined in a single registry (`src/Andy.Cli/Services/ProviderRegistry.cs`)
 that provider detection and the `/model` command both read from. When several
 providers are configured, detection prefers them in this order:
 
-1. **OpenRouter** - Requires `OPENROUTER_API_KEY` (default Mimo-v2.5 setup)
+1. **OpenRouter** - Requires `OPENROUTER_API_KEY` (default Kimi K3 setup)
 2. **OpenAI** - Requires `OPENAI_API_KEY` (reliable fallback)
 3. **Anthropic** - Requires `ANTHROPIC_API_KEY`
 4. **Cerebras** - Requires `CEREBRAS_API_KEY` (fast inference)
@@ -95,7 +95,7 @@ dotnet run --project src/Andy.Cli -- model provider openai
 # Check provider detection
 dotnet run --project src/Andy.Cli -- model detect
 
-# Use OpenRouter (default Mimo-v2.5 setup)
+# Use OpenRouter (default Kimi K3 setup)
 export OPENROUTER_API_KEY="your-key"
 dotnet run --project src/Andy.Cli
 ```

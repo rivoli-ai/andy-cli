@@ -79,7 +79,15 @@ public class SimpleAssistantService : IDisposable
             return;
 
         _lastIntermediateText = text;
-        _feed.AddMarkdownRich(text.Trim());
+
+        // Sanitize to strip any tool-call protocol artifacts (XML tags, JSON envelopes,
+        // fenced tool_call blocks) that would otherwise leak raw protocol into the feed.
+        var sanitizer = new TextContentSanitizer();
+        var sanitized = sanitizer.Sanitize(new TextBlock("intermediate", text.Trim())) as TextBlock;
+        if (sanitized == null || !sanitized.IsComplete || string.IsNullOrWhiteSpace(sanitized.Content))
+            return;
+
+        _feed.AddMarkdownRich(sanitized.Content);
         // Blank line so each mid-turn model message is separated from the tools/text around it.
         _feed.AddItem(new Andy.Cli.Widgets.SpacerItem(1));
     }

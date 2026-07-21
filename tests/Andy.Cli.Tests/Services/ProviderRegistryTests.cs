@@ -126,9 +126,9 @@ public class ProviderRegistryTests
     }
 
     [Theory]
-    // Default models must match the values in use before the provider-centralization refactor;
-    // a refactor must not silently change which model each provider defaults to.
-    [InlineData("openrouter", "xiaomi/mimo-v2.5")]
+    // Default models are pinned deliberately; a refactor must not silently change
+    // which model each provider defaults to.
+    [InlineData("openrouter", "moonshotai/kimi-k3")]
     [InlineData("openai", "gpt-4o")]
     [InlineData("anthropic", "claude-3-sonnet-20240229")]
     [InlineData("cerebras", "llama-3.3-70b")]

@@ -34,7 +34,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
-          global-json-file: global.json
+          dotnet-version: '8.0.x'  # latest 8.0 SDK; exact 8.0.0 is no longer downloadable
 
       - name: Restore dependencies
         run: dotnet restore Andy.Cli.sln
@@ -100,7 +100,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
-          global-json-file: global.json
+          dotnet-version: '8.0.x'  # latest 8.0 SDK; exact 8.0.0 is no longer downloadable
 
       - name: Restore dependencies
         run: dotnet restore Andy.Cli.sln
@@ -172,7 +172,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
-          global-json-file: global.json
+          dotnet-version: '8.0.x'  # latest 8.0 SDK; exact 8.0.0 is no longer downloadable
 
       - name: Restore dependencies
         run: dotnet restore Andy.Cli.sln
