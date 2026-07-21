@@ -90,6 +90,10 @@
 
   <!-- Disable trimming for Andy.* assemblies to avoid anonymous type issues -->
   <ItemGroup>
+    <!-- Andy.Acp.Core wire models are (de)serialized via reflection-based
+         System.Text.Json; trimming their members breaks ACP mode at the first
+         initialize message. -->
+    <TrimmerRootAssembly Include="Andy.Acp.Core" />
     <TrimmerRootAssembly Include="Andy.Tools" />
     <TrimmerRootAssembly Include="Andy.Tools.Data" />
     <TrimmerRootAssembly Include="Andy.Tools.Pdf" />
