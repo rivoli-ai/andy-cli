@@ -171,7 +171,7 @@ provider config, so `model.id` is what is used.
   },
   "model": {
     "provider": "openrouter",
-    "id": "xiaomi/mimo-v2.5",
+    "id": "moonshotai/kimi-k3",
     "api_key_ref": "env:OPENROUTER_API_KEY"
   },
   "tools": [
