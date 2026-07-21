@@ -177,9 +177,9 @@ jobs:
           - os: ubuntu-latest
             artifact: andy-cli-linux-x64
             archive: andy-cli-linux-x64.tar.gz
-          - os: macos-13          # Intel
-            artifact: andy-cli-macos-x64
-            archive: andy-cli-macos-x64.tar.gz
+          - os: macos-latest      # Apple Silicon; the x64 binary runs under Rosetta 2
+            artifact: andy-cli-macos-x64      # (macos-13 Intel runners are retired — jobs
+            archive: andy-cli-macos-x64.tar.gz  # requesting them queue forever)
           - os: macos-14          # Apple Silicon
             artifact: andy-cli-macos-arm64
             archive: andy-cli-macos-arm64.tar.gz

@@ -145,8 +145,8 @@
       },
       "Andy.Acp.Core": {
         "type": "Transitive",
-        "resolved": "2026.7.21",
-        "contentHash": "5TWabSqBEijlvUHsSfwQ9RXgZy4ngZqUXkCzonVgdIx1No9AVJ0lKfzT3hsjDyboaROVhMATaiqj9w+tMNoNSw==",
+        "resolved": "2026.7.21.1",
+        "contentHash": "Q8lOLNa3nPvfk3nxSEhyJwi1VTv8ND1ebDmWdzI1euvDM65QkXnSmQtyZu5+hUw0RXwdRxfcmm6TgZhstZYKoQ==",
         "dependencies": {
           "Microsoft.Extensions.Logging.Abstractions": "8.0.0"
         }
@@ -2220,7 +2220,7 @@
       "andy-cli": {
         "type": "Project",
         "dependencies": {
-          "Andy.Acp.Core": "[2026.7.21, )",
+          "Andy.Acp.Core": "[2026.7.21.1, )",
           "Andy.CodeIndex.Infrastructure": "[2026.7.21-rc.11, )",
           "Andy.Engine": "[2026.7.21-rc.78, )",
           "Andy.Llm": "[2026.7.21-rc.76, )",
