@@ -225,12 +225,12 @@
       "Andy.Doc.Core": {
         "type": "Transitive",
         "resolved": "2026.7.21-rc.1",
-        "contentHash": "sLE5VSc8aEYW0a+JF2R/ghxLbYnpjiQ7kjo2CLsR1kK8SvPRednAj78wu0lAyceg28OsJd6C8dnN0dFOjXqwsQ=="
+        "contentHash": "sCNhTUv9CXAE9aXgy+94x84JfiZXOqMNTvUVMIsmT+LjrHA88aV2OB0U9Y6+WdHHc6qjR6qFzEQRf+AGpFVjGQ=="
       },
       "Andy.Doc.Pdf": {
         "type": "Transitive",
         "resolved": "2026.7.21-rc.1",
-        "contentHash": "ggu5XrP1LN8ICGoCQEtuaqGBNeKyqZ4aTeEkfNIcAhCBsoDXeylnS5be7pqzWHfZ40z0Pe7SLQTrjhznICny5g==",
+        "contentHash": "0LuMqeAwkvRhkwMeVT2hr9CwFMydlabHgO1ADx+6sGdHMYr2TEj8LkbWDZVaB4wYMo+7AMfWMaXcCrp8T342RA==",
         "dependencies": {
           "Andy.Doc.Core": "2026.7.21-rc.1",
           "CSJ2K": "3.0.0",
