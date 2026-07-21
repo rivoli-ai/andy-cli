@@ -26,6 +26,7 @@ public class AndyAgentProvider : IAgentProvider, IDisposable
     private readonly AndySessionRegistry _sessions;
     private readonly string _systemPrompt;
     private readonly string _defaultModel;
+    private readonly string _defaultProvider;
 
     public AndyAgentProvider(
         ILlmProvider llmProvider,
@@ -35,13 +36,15 @@ public class AndyAgentProvider : IAgentProvider, IDisposable
         ILoggerFactory? loggerFactory = null,
         int maxSessions = AndySessionRegistry.DefaultMaxSessions,
         string? defaultModel = null,
-        ISessionAgentFactory? agentFactory = null)
+        ISessionAgentFactory? agentFactory = null,
+        string? defaultProvider = null)
     {
         if (llmProvider == null) throw new ArgumentNullException(nameof(llmProvider));
         _toolRegistry = toolRegistry ?? throw new ArgumentNullException(nameof(toolRegistry));
         if (toolExecutor == null) throw new ArgumentNullException(nameof(toolExecutor));
         _logger = logger;
         _defaultModel = string.IsNullOrWhiteSpace(defaultModel) ? "andy-cli" : defaultModel!;
+        _defaultProvider = string.IsNullOrWhiteSpace(defaultProvider) ? "andy-cli" : defaultProvider!;
         _agentFactory = agentFactory
             ?? new SimpleAgentSessionAgentFactory(llmProvider, toolRegistry, toolExecutor, loggerFactory);
         _sessions = new AndySessionRegistry(maxSessions, logger);
@@ -110,7 +113,7 @@ public class AndyAgentProvider : IAgentProvider, IDisposable
             MessageCount = entry.MessageCount,
             Metadata = new Dictionary<string, object>
             {
-                ["provider"] = "andy-cli",
+                ["provider"] = _defaultProvider,
                 ["tools_count"] = _toolRegistry.GetTools().Count()
             }
         });
@@ -209,8 +212,18 @@ public class AndyAgentProvider : IAgentProvider, IDisposable
             _logger?.LogInformation("Processing prompt for session {SessionId}: {Preview}",
                 sessionId, effectivePrompt.Substring(0, Math.Min(100, effectivePrompt.Length)));
 
-            // Thread the linked cancellation token into the engine call.
-            var result = await entry.Agent.ProcessMessageAsync(effectivePrompt, linkedToken);
+            if (entry.TryMarkModelAnnounced())
+            {
+                await streamer.SendThinkingAsync(
+                    $"Model: {_defaultProvider}/{entry.Model}", linkedToken);
+            }
+
+            await streamer.SendThinkingAsync("Analyzing request...", linkedToken);
+
+            // Thread the linked cancellation token and prompt-specific ACP
+            // streamer into the engine call so intermediate narration and real
+            // tool execution updates can be displayed by the client.
+            var result = await entry.Agent.ProcessMessageAsync(effectivePrompt, streamer, linkedToken);
 
             entry.IncrementMessageCount();
 

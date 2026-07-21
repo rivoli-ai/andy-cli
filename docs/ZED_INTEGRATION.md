@@ -163,7 +163,10 @@ Then in Zed settings:
    Can you list the files in the current directory?
    ```
 
-   The assistant should use the file listing tool.
+   The assistant should identify its provider/model on the first prompt, show
+   progress narration, render the file-listing tool while it runs, and then show
+   the tool result before the final answer. Andy surfaces narration returned by
+   the model; it does not expose private hidden chain-of-thought.
 
 ## Troubleshooting
 
@@ -211,10 +214,9 @@ Then in Zed settings:
    ```bash
    dotnet run --project src/Andy.Cli -- model info
    ```
-3. Set the correct provider before starting:
-   ```bash
-   dotnet run --project src/Andy.Cli -- model switch openai
-   ```
+3. Set the provider key and model in the Zed agent server's `env` object, then
+   restart the agent server. For example, OpenRouter with Kimi K3 uses
+   `OPENROUTER_API_KEY` and `OPENROUTER_MODEL=moonshotai/kimi-k3`.
 
 ## Debugging Tips
 

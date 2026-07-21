@@ -18,6 +18,7 @@ public sealed class AcpSessionEntry : IDisposable
 
     private readonly object _gate = new();
     private CancellationTokenSource? _activeCts;
+    private bool _modelAnnounced;
 
     public string SessionId { get; }
 
@@ -80,6 +81,24 @@ public sealed class AcpSessionEntry : IDisposable
         lock (_gate)
         {
             MessageCount++;
+        }
+    }
+
+    /// <summary>
+    /// Returns true once per session so the first prompt can identify the
+    /// configured provider/model without repeating it on every turn.
+    /// </summary>
+    public bool TryMarkModelAnnounced()
+    {
+        lock (_gate)
+        {
+            if (_modelAnnounced)
+            {
+                return false;
+            }
+
+            _modelAnnounced = true;
+            return true;
         }
     }
 

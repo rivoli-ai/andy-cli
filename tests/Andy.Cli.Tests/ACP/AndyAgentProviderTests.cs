@@ -129,6 +129,23 @@ public class AndyAgentProviderTests
         Assert.NotNull(metadata.SessionId);
     }
 
+    [Fact]
+    public async Task CreateSessionAsync_ReportsConfiguredProviderAndModel()
+    {
+        using var provider = new AndyAgentProvider(
+            _mockLlmProvider.Object,
+            _mockToolRegistry.Object,
+            _mockToolExecutor.Object,
+            _mockLogger.Object,
+            defaultModel: "moonshotai/kimi-k3",
+            defaultProvider: "openrouter");
+
+        var metadata = await provider.CreateSessionAsync(null, CancellationToken.None);
+
+        Assert.Equal("moonshotai/kimi-k3", metadata.Model);
+        Assert.Equal("openrouter", metadata.Metadata!["provider"]);
+    }
+
     /// <summary>Adapter for the conformant LoadSessionAsync(LoadSessionParams, IResponseStreamer, ct) signature.</summary>
     private Task<SessionMetadata?> LoadAsync(string sessionId) =>
         _provider.LoadSessionAsync(
@@ -301,6 +318,40 @@ public class AndyAgentProviderTests
         Assert.Equal(StopReason.Completed, response.StopReason);
         Assert.Single(chunks);
         Assert.Equal(responseText, chunks[0]);
+    }
+
+    [Fact]
+    public async Task ProcessPromptAsync_AnnouncesModelOnce_AndProgressForEveryPrompt()
+    {
+        var factory = new FakeAgentFactory(_ => FakeAgent.ReturningSuccess("ok"));
+        using var provider = new AndyAgentProvider(
+            _mockLlmProvider.Object,
+            _mockToolRegistry.Object,
+            _mockToolExecutor.Object,
+            _mockLogger.Object,
+            defaultModel: "moonshotai/kimi-k3",
+            agentFactory: factory,
+            defaultProvider: "openrouter");
+
+        var thoughts = new List<string>();
+        var streamer = new Mock<IResponseStreamer>();
+        streamer.Setup(s => s.SendThinkingAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns((string text, CancellationToken _) =>
+            {
+                thoughts.Add(text);
+                return Task.CompletedTask;
+            });
+        streamer.Setup(s => s.SendMessageChunkAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var session = await provider.CreateSessionAsync(null, CancellationToken.None);
+        await provider.ProcessPromptAsync(
+            session.SessionId, new PromptMessage { Text = "one" }, streamer.Object, CancellationToken.None);
+        await provider.ProcessPromptAsync(
+            session.SessionId, new PromptMessage { Text = "two" }, streamer.Object, CancellationToken.None);
+
+        Assert.Single(thoughts, text => text == "Model: openrouter/moonshotai/kimi-k3");
+        Assert.Equal(2, thoughts.Count(text => text == "Analyzing request..."));
     }
 
     [Fact]
@@ -588,7 +639,10 @@ public class AndyAgentProviderTests
                 return new SimpleAgentResult(true, "unreachable", 1, TimeSpan.Zero, "stop");
             });
 
-        public Task<SimpleAgentResult> ProcessMessageAsync(string userMessage, CancellationToken cancellationToken)
+        public Task<SimpleAgentResult> ProcessMessageAsync(
+            string userMessage,
+            IResponseStreamer streamer,
+            CancellationToken cancellationToken)
             => _behavior(userMessage, cancellationToken);
 
         public void Dispose() => IsDisposed = true;

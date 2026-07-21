@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Andy.Acp.Core.Agent;
 using Andy.Engine;
 using Andy.Model.Llm;
 using Andy.Tools.Core;
@@ -16,7 +17,10 @@ namespace Andy.Cli.ACP;
 /// </summary>
 public interface ISessionAgent : IDisposable
 {
-    Task<SimpleAgentResult> ProcessMessageAsync(string userMessage, CancellationToken cancellationToken);
+    Task<SimpleAgentResult> ProcessMessageAsync(
+        string userMessage,
+        IResponseStreamer streamer,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>Creates <see cref="ISessionAgent"/> instances for new sessions.</summary>
@@ -29,11 +33,29 @@ public interface ISessionAgentFactory
 internal sealed class SimpleAgentSessionAgent : ISessionAgent
 {
     private readonly SimpleAgent _agent;
+    private readonly AcpSessionUpdateSink _sink;
 
-    public SimpleAgentSessionAgent(SimpleAgent agent) => _agent = agent;
+    public SimpleAgentSessionAgent(SimpleAgent agent, AcpSessionUpdateSink sink)
+    {
+        _agent = agent;
+        _sink = sink;
+    }
 
-    public Task<SimpleAgentResult> ProcessMessageAsync(string userMessage, CancellationToken cancellationToken)
-        => _agent.ProcessMessageAsync(userMessage, cancellationToken);
+    public async Task<SimpleAgentResult> ProcessMessageAsync(
+        string userMessage,
+        IResponseStreamer streamer,
+        CancellationToken cancellationToken)
+    {
+        _sink.Attach(streamer);
+        try
+        {
+            return await _agent.ProcessMessageAsync(userMessage, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _sink.Detach(streamer);
+        }
+    }
 
     public void Dispose() => _agent.Dispose();
 }
@@ -66,14 +88,17 @@ internal sealed class SimpleAgentSessionAgentFactory : ISessionAgentFactory
 
     public ISessionAgent Create(string systemPrompt)
     {
+        var sink = new AcpSessionUpdateSink(_loggerFactory?.CreateLogger<AcpSessionUpdateSink>());
+        var progressProvider = new AcpProgressLlmProvider(_llmProvider, sink);
+        var observingExecutor = new AcpObservingToolExecutor(_toolExecutor, sink);
         var agent = new SimpleAgent(
-            _llmProvider,
+            progressProvider,
             _toolRegistry,
-            _toolExecutor,
+            observingExecutor,
             systemPrompt,
             maxTurns: _maxTurns,
             logger: AndyAgentProvider.CreateAgentLogger(_loggerFactory));
 
-        return new SimpleAgentSessionAgent(agent);
+        return new SimpleAgentSessionAgent(agent, sink);
     }
 }

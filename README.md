@@ -175,6 +175,13 @@ Run as an Agent Client Protocol (ACP) server for editor integrations:
 dotnet run --project src/Andy.Cli -- --acp
 ```
 
+#### ACP progress updates (2026-07-21)
+
+ACP sessions report the resolved provider/model on the first prompt and stream
+model progress narration, tool starts, and real tool completion results through
+`session/update`. Editors such as Zed can therefore render activity while the
+agent is working instead of showing only the final answer.
+
 ## Development
 
 ### Architecture

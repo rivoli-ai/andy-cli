@@ -14,6 +14,7 @@ using Andy.Cli.Services;
 using Andy.Cli.Services.Prompts;
 using Andy.Cli.Tools;
 using Andy.Llm;
+using Andy.Llm.Configuration;
 using Andy.Llm.Extensions;
 using Andy.Model.Llm;
 using Andy.Model.Model;
@@ -27,6 +28,7 @@ using Andy.Tools.Registry;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using DL = Andy.Tui.DisplayList;
 using L = Andy.Tui.Layout;
 
@@ -2009,7 +2011,12 @@ class Program
             // Detect current provider
             var detectionService = new ProviderDetectionService();
             var currentProvider = detectionService.DetectDefaultProvider() ?? "cerebras";
-            logger.LogInformation("Using LLM provider: {Provider}", currentProvider);
+
+            var llmOptions = serviceProvider.GetRequiredService<IOptions<LlmOptions>>().Value;
+            var currentModel = Andy.Cli.ACP.AcpModelConfiguration.ResolveAndApply(
+                llmOptions, currentProvider);
+            logger.LogInformation(
+                "Using LLM provider: {Provider}, model: {Model}", currentProvider, currentModel);
 
             // Create LLM provider instance
             var llmProvider = providerFactory.CreateProvider(currentProvider);
@@ -2029,7 +2036,8 @@ class Program
                 toolExecutor,
                 loggerFactory.CreateLogger<Andy.Cli.ACP.AndyAgentProvider>(),
                 loggerFactory,
-                defaultModel: currentProvider);
+                defaultModel: currentModel,
+                defaultProvider: currentProvider);
 
             logger.LogInformation("Andy agent provider initialized");
 
