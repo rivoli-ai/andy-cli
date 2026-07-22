@@ -1982,7 +1982,9 @@ class Program
             // Auto-detect the default provider based on environment variables
             var detectionService = new ProviderDetectionService();
             var detectedProvider = detectionService.DetectDefaultProvider();
-            options.DefaultProvider = detectedProvider ?? "cerebras";
+            var defaultProvider = detectedProvider ?? "cerebras";
+            options.DefaultProvider = defaultProvider;
+            Andy.Cli.ACP.AcpModelConfiguration.EnsureProviderConfig(options, defaultProvider);
         });
 
         // Add the provider factory
@@ -2018,12 +2020,12 @@ class Program
             logger.LogInformation(
                 "Using LLM provider: {Provider}, model: {Model}", currentProvider, currentModel);
 
-            // Create LLM provider instance
-            var llmProvider = providerFactory.CreateProvider(currentProvider);
-            if (llmProvider == null)
-            {
-                throw new InvalidOperationException($"Failed to create LLM provider for: {currentProvider}");
-            }
+            // ACP clients commonly launch the server before provider credentials
+            // are configured. Keep initialize/session discovery available and
+            // defer the actionable credential error until the first prompt.
+            var llmProvider = detectionService.IsProviderAvailable(currentProvider)
+                ? providerFactory.CreateProvider(currentProvider)
+                : new Andy.Cli.ACP.UnavailableLlmProvider(currentProvider);
 
             var toolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
 
@@ -2041,13 +2043,10 @@ class Program
                     sessionServices.AddLlmServices(options =>
                     {
                         options.DefaultProvider = selectedProvider;
-                        var providerConfig = options.Providers.FirstOrDefault(pair =>
-                            pair.Key.Equals(selectedProvider, StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(pair.Value.Provider, selectedProvider, StringComparison.OrdinalIgnoreCase));
-                        if (providerConfig.Value != null)
-                        {
-                            providerConfig.Value.Model = selectedModel;
-                        }
+                        Andy.Cli.ACP.AcpModelConfiguration.EnsureProviderConfig(
+                            options,
+                            selectedProvider,
+                            selectedModel);
                     });
                     sessionServices.AddSingleton<
                         Andy.Llm.Providers.ILlmProviderFactory,
@@ -2058,9 +2057,9 @@ class Program
                     {
                         var sessionProviderFactory = sessionServiceProvider
                             .GetRequiredService<Andy.Llm.Providers.ILlmProviderFactory>();
-                        var selectedLlmProvider = sessionProviderFactory.CreateProvider(selectedProvider)
-                            ?? throw new InvalidOperationException(
-                                $"Failed to create LLM provider for: {selectedProvider}");
+                        var selectedLlmProvider = detectionService.IsProviderAvailable(selectedProvider)
+                            ? sessionProviderFactory.CreateProvider(selectedProvider)
+                            : new Andy.Cli.ACP.UnavailableLlmProvider(selectedProvider);
                         return (selectedLlmProvider, (IDisposable?)sessionServiceProvider);
                     }
                     catch

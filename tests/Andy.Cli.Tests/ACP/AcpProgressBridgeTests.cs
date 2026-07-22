@@ -54,6 +54,47 @@ public class AcpProgressBridgeTests
     }
 
     [Fact]
+    public void ModelConfiguration_CreatesFallbackProviderWithoutCredentials()
+    {
+        var options = new LlmOptions();
+
+        var config = AcpModelConfiguration.EnsureProviderConfig(options, "cerebras");
+
+        Assert.Same(config, options.Providers["cerebras"]);
+        Assert.Equal("cerebras", config.Provider);
+        Assert.Equal("llama-3.3-70b", config.Model);
+        Assert.Equal("https://api.cerebras.ai", config.ApiBase);
+    }
+
+    [Fact]
+    public void ModelConfiguration_UpdatesExistingProviderModel()
+    {
+        var existing = new ProviderConfig { Provider = "openai", Model = "old" };
+        var options = new LlmOptions
+        {
+            Providers = new Dictionary<string, ProviderConfig> { ["openai"] = existing }
+        };
+
+        var config = AcpModelConfiguration.EnsureProviderConfig(options, "openai", "gpt-4.1");
+
+        Assert.Same(existing, config);
+        Assert.Equal("gpt-4.1", existing.Model);
+    }
+
+    [Fact]
+    public async Task UnavailableProvider_DefersActionableCredentialErrorUntilCompletion()
+    {
+        var provider = new UnavailableLlmProvider("cerebras");
+
+        Assert.False(await provider.IsAvailableAsync());
+        Assert.Empty(await provider.ListModelsAsync());
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            provider.CompleteAsync(new LlmRequest { Messages = Array.Empty<Andy.Model.Model.Message>() }));
+        Assert.Contains("CEREBRAS_API_KEY", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ProgressProvider_SendsToolRoundNarration_AsThinkingUpdate()
     {
         var inner = new Mock<ILlmProvider>();
