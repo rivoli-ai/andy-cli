@@ -1,9 +1,9 @@
 # FeedView.cs component inventory
 
-Updated: 2026-07-21
+Updated: 2026-07-22
 
-`src/Andy.Cli/Widgets/FeedView.cs` is 3,152 lines and defines roughly 15
-types in a single file. Issue #177 calls for moving the general-purpose,
+`src/Andy.Cli/Widgets/FeedView.cs` is now 2,791 lines and defines 11 container,
+helper, and item types. Issue #177 calls for moving the general-purpose,
 reusable rendering pieces into the `andy-tui2` package (owner of TUI work) while
 keeping CLI-only domain presentation here. Issue #177 delivered this inventory
 and the first composition-root extraction; issue #211 tracks the remaining
@@ -29,21 +29,21 @@ recommendation for coordinating that work.
 
 | # | Type | Approx. lines | Location | Class | Notes |
 |---|------|--------------:|----------|-------|-------|
-| 1 | `ToolOutputView` (static) | ~25-47 | FeedView.cs | INFRA (CLI) | Shared Ctrl+O expand/collapse flag read by tool items at render time. CLI view state; stays. |
-| 2 | `FeedView` | ~48-982 | FeedView.cs | INFRA | The scrollable feed container: item list, measure/measure-cache, bottom-follow, scroll clamp, animation ticks, reflow signalling. Orchestrator; stays, but is a candidate to slim by extracting the item classes below into their own files first (see plan doc). |
-| 3 | `MarkdownItem` | ~1005-1048 | FeedView.cs | REUSABLE | Naive line-by-line markdown renderer with fenced-code detection. Generic. |
-| 4 | `FileDiffItem` (+ `FileChangeKind`, `RowKind`, `Row`) | ~1049-1202 | FeedView.cs | CLI-ONLY (borderline) | Git-style unified-diff presentation of a file write/update. The diff-row rendering is generic, but it is driven by the CLI's tool-result/diff domain. Recommend keeping in CLI; optionally split a generic "unified diff view" primitive into andy-tui2 later. |
-| 5 | `FeedMarkdown` (static) | ~1203-1285 | FeedView.cs | REUSABLE | Markdown normalization (blank-line collapsing, heading spacing). Pure text transform; strong andy-tui2 candidate. |
-| 6 | `MarkdownLinkStyle` (internal static) | ~1286-1348 | FeedView.cs | REUSABLE | Replays a display list transforming link TextRuns (styling without underline). Generic display-list post-processing utility. |
-| 7 | `MarkdownRendererItem` | ~1349-1483 | FeedView.cs | REUSABLE | Wraps `Andy.Tui.Widgets.MarkdownRenderer` as a feed item with measure==render parity. The richest markdown item; belongs next to the renderer it wraps in andy-tui2. |
-| 8 | `TableItem` | ~1484-1640 | FeedView.cs | REUSABLE | General table widget with explicit vertical separators and measure==render parity. Generic; strong andy-tui2 candidate. |
-| 9 | `CodeBlockItem` | ~1641-1786 | FeedView.cs | REUSABLE | Shaded-background code block with syntax highlighting. Generic; strong andy-tui2 candidate (pairs with the code highlighter). |
-| 10 | `SpacerItem` | ~1787-1797 | FeedView.cs | REUSABLE | Trivial vertical spacer. Generic; move alongside the other items. |
-| 11 | `UserBubbleItem` | ~1798-1911 | FeedView.cs | CLI-ONLY (borderline) | Bordered "user message" bubble. The bordered-bubble rendering is generic, but the concept (user chat turn, message numbering) is CLI chat domain. Recommend a generic "bordered text block" primitive in andy-tui2 with the chat-specific bubble staying here. |
-| 12 | `ToolExecutionItem` | ~1912-2126 | FeedView.cs | CLI-ONLY | Tool-call display (params, result label/body, dotted gutter). Tied to the tool execution model. Stays. |
-| 13 | `StreamingMessageItem` | ~2127-2219 | FeedView.cs | CLI-ONLY (borderline) | Progressive/streamed assistant text. Streaming-text rendering is generic; the assistant-turn semantics are CLI. Recommend a generic streaming-text item in andy-tui2, CLI keeps the assistant wrapper. |
-| 14 | `ProcessingIndicatorItem` | ~2220-2298 | FeedView.cs | CLI-ONLY (borderline) | Animated "thinking" indicator with turn stats. Spinner animation is generic; the turn-stat content is CLI. |
-| 15 | `RunningToolItem` | ~2299-3152 (~850 lines) | FeedView.cs | CLI-ONLY | The largest component: live tool-execution rendering in "Claude style" with per-tool status, result formatting, and detail lines. Deeply tied to the CLI tool-execution domain. Stays, but is itself a candidate for its own file and further decomposition. |
+| 1 | `ToolOutputView` (static) | ~26-48 | FeedView.cs | INFRA (CLI) | Shared Ctrl+O expand/collapse flag read by tool items at render time. CLI view state; stays. |
+| 2 | `FeedView` | ~49-982 | FeedView.cs | INFRA | The scrollable feed container: item list, measure/measure-cache, bottom-follow, scroll clamp, animation ticks, reflow signalling. Orchestrator; stays, but is a candidate to slim by extracting the item classes below into their own files first (see plan doc). |
+| 3 | `MarkdownItem` | ~996-1046 | FeedView.cs | REUSABLE | Naive line-by-line markdown renderer with fenced-code detection. Generic. |
+| 4 | `FileDiffItem` (+ `FileChangeKind`, `RowKind`, `Row`) | 1-156 | FeedItems/FileDiffItem.cs | CLI-ONLY (borderline) | Extracted in-repository. Git-style unified-diff presentation of a file write/update. The diff-row rendering is generic, but it is driven by the CLI's tool-result/diff domain. Recommend keeping in CLI; optionally split a generic "unified diff view" primitive into andy-tui2 later. |
+| 5 | `FeedMarkdown` (static) | ~1047-1129 | FeedView.cs | REUSABLE | Markdown normalization (blank-line collapsing, heading spacing). Pure text transform; strong andy-tui2 candidate. |
+| 6 | `MarkdownLinkStyle` (internal static) | ~1130-1192 | FeedView.cs | REUSABLE | Replays a display list transforming link TextRuns (styling without underline). Generic display-list post-processing utility. |
+| 7 | `MarkdownRendererItem` | ~1193-1327 | FeedView.cs | REUSABLE | Wraps `Andy.Tui.Widgets.MarkdownRenderer` as a feed item with measure==render parity. The richest markdown item; belongs next to the renderer it wraps in andy-tui2. |
+| 8 | `TableItem` | ~1328-1484 | FeedView.cs | REUSABLE | General table widget with explicit vertical separators and measure==render parity. Generic; strong andy-tui2 candidate. |
+| 9 | `CodeBlockItem` | ~1485-1629 | FeedView.cs | REUSABLE | Shaded-background code block with syntax highlighting. Generic; strong andy-tui2 candidate (pairs with the code highlighter). |
+| 10 | `SpacerItem` | ~1630-1642 | FeedView.cs | REUSABLE | Trivial vertical spacer. Generic; move alongside the other items. |
+| 11 | `UserBubbleItem` | 1-121 | FeedItems/UserBubbleItem.cs | CLI-ONLY (borderline) | Extracted in-repository. Bordered "user message" bubble. The bordered-bubble rendering is generic, but the concept (user chat turn, message numbering) is CLI chat domain. Recommend a generic "bordered text block" primitive in andy-tui2 with the chat-specific bubble staying here. |
+| 12 | `ToolExecutionItem` | ~1643-1858 | FeedView.cs | CLI-ONLY | Tool-call display (params, result label/body, dotted gutter). Tied to the tool execution model. Stays. |
+| 13 | `StreamingMessageItem` | 1-100 | FeedItems/StreamingMessageItem.cs | CLI-ONLY (borderline) | Extracted in-repository. Progressive/streamed assistant text. Streaming-text rendering is generic; the assistant-turn semantics are CLI. Recommend a generic streaming-text item in andy-tui2, CLI keeps the assistant wrapper. |
+| 14 | `ProcessingIndicatorItem` | ~1859-1937 | FeedView.cs | CLI-ONLY (borderline) | Animated "thinking" indicator with turn stats. Spinner animation is generic; the turn-stat content is CLI. |
+| 15 | `RunningToolItem` | ~1938-2791 (~850 lines) | FeedView.cs | CLI-ONLY | The largest component: live tool-execution rendering in "Claude style" with per-tool status, result formatting, and detail lines. Deeply tied to the CLI tool-execution domain. Stays, but is itself a candidate for its own file and further decomposition. |
 
 ## Migration recommendation
 
@@ -72,7 +72,8 @@ recommendation for coordinating that work.
 
 ## Current status
 
-No feed-item implementations have moved yet; only `IFeedItem` is already in
-`Widgets/FeedItems/`. The in-repository file split remains the next low-risk
-increment in `REFACTORING_PLAN.md` and issue #211, followed by coordinated
-package work for components that belong in `andy-tui2`.
+The first in-repository split is complete: `IFeedItem`, `FileDiffItem`,
+`UserBubbleItem`, and `StreamingMessageItem` live under `Widgets/FeedItems/`,
+with focused measure/render coverage. The remaining item split stays a
+low-risk follow-up before coordinated package work for reusable components that
+belong in `andy-tui2`.

@@ -1,6 +1,6 @@
 # CLI Refactoring Plan
 
-Updated: 2026-07-21
+Updated: 2026-07-22
 
 ## Overview
 This document outlines the refactoring strategy for the Andy CLI to improve maintainability, testability, and consistency.
@@ -12,7 +12,8 @@ Measured on `main` on 2026-07-21:
 - `src/Andy.Cli/Program.cs` - 2,204 lines.
   Combines DI composition, provider/permission setup, headless/ACP/command
   dispatch, input handling, TUI lifecycle, and rendering.
-- `src/Andy.Cli/Widgets/FeedView.cs` - ~3,150 lines, ~15 types in one file.
+- `src/Andy.Cli/Widgets/FeedView.cs` - 2,791 lines after the first three
+  feed-item extractions; 11 container, helper, and item types remain.
   See `docs/feedview-inventory.md` for the per-component inventory and the
   reusable-vs-CLI-only classification.
 
@@ -87,8 +88,10 @@ var fg = Theme.Current.Text;
 ## In Progress
 
 ### 2. FeedView refactoring (#211)
-**Current State**: `FeedView.cs` is 3,152 lines with roughly 15 types defined in
-one file. Only `IFeedItem` has been extracted.
+**Current State**: `IFeedItem`, `FileDiffItem`, `UserBubbleItem`, and
+`StreamingMessageItem` are independently defined under `Widgets/FeedItems/`.
+The first issue #211 extraction tranche is complete and reduced `FeedView.cs`
+from 3,152 to 2,791 lines without changing their public namespaces.
 
 **Target State**: Break into multiple files:
 ```
@@ -98,11 +101,12 @@ Widgets/
     IFeedItem.cs (complete)
     MarkdownItem.cs
     CodeBlockItem.cs
-    UserBubbleItem.cs
+    FileDiffItem.cs (complete)
+    UserBubbleItem.cs (complete)
     ToolExecutionItem.cs
     ProcessingIndicatorItem.cs
     RunningToolItem.cs
-    StreamingMessageItem.cs
+    StreamingMessageItem.cs (complete)
     SpacerItem.cs
     MarkdownRendererItem.cs
 ```
@@ -115,10 +119,12 @@ Widgets/
 
 **Migration Strategy**:
 1. Extract interface (`IFeedItem.cs`) (complete)
-2. Extract one item class at a time
-3. Update FeedView.cs to use the extracted classes
-4. Write unit tests for each extracted class
-5. Remove extracted code from FeedView.cs
+2. Extract `FileDiffItem`, `UserBubbleItem`, and `StreamingMessageItem`
+   (complete)
+3. Extract the remaining item classes one at a time
+4. Update FeedView.cs to use the extracted classes
+5. Write unit tests for each extracted class
+6. Remove extracted code from FeedView.cs
 
 ## Planned
 
@@ -235,8 +241,8 @@ format could allow user-defined theme palettes without recompiling the CLI.
 - [x] Create Theme.cs
 - [x] Extract IFeedItem interface
 - [ ] Remove remaining hard-coded widget colors
-- [ ] Extract 3 feed item classes (#211)
-- [ ] Write tests for extracted classes
+- [x] Extract 3 feed item classes (#211)
+- [x] Write tests for extracted classes
 - [x] Document migration for remaining classes (see `docs/feedview-inventory.md`)
 - [x] Extract CLI mode-dispatch into `Hosting/CliModeSelector` (#177)
 - [x] Extract shared tool-service DI into `Hosting/AppCompositionRoot` (#177)
@@ -251,3 +257,8 @@ format could allow user-defined theme palettes without recompiling the CLI.
 Program/FeedView baselines, recorded the completed runtime theme system, and
 kept the remaining widget-theme, FeedView extraction (#211), Program
 decomposition, and cross-repository TUI work open.
+
+2026-07-22: Completed the first #211 file-split tranche by moving
+`FileDiffItem`, `UserBubbleItem`, and `StreamingMessageItem` under
+`Widgets/FeedItems/`. Preserved their public API and added or retained focused
+measure/render regression coverage for all three.

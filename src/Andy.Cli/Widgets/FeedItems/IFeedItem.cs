@@ -1,6 +1,6 @@
 using DL = Andy.Tui.DisplayList;
 
-namespace Andy.Cli.Widgets.FeedItems
+namespace Andy.Cli.Widgets
 {
     /// <summary>
     /// Interface for feed items that can be rendered in the FeedView.
