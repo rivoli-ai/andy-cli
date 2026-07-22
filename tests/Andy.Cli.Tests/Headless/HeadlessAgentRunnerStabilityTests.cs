@@ -11,6 +11,7 @@ using Andy.Cli.Headless;
 using Andy.Cli.HeadlessConfig;
 using Andy.Model.Llm;
 using Andy.Model.Model;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -164,7 +165,7 @@ public class HeadlessAgentRunnerStabilityTests
     }
 
     [Fact]
-    public async Task UnsupportedToolTransport_EmitsErrorBeforeStarted_AndExitsAgentFailure()
+    public async Task UnsupportedToolTransport_EmitsCompleteFailureEnvelope()
     {
         using var ws = new TempDir();
         var config = NewConfig(ws) with
@@ -179,12 +180,98 @@ public class HeadlessAgentRunnerStabilityTests
         Assert.Equal(HeadlessExitCode.AgentFailure, code);
         Assert.Equal(0, provider.CompleteCallCount);
 
-        // Tool wiring fails before `started`; stream is error then finished.
+        Assert.Equal("started", events.First().Kind);
         var error = events.Single(e => e.Kind == "error");
         Assert.True(error.Data.GetProperty("fatal").GetBoolean());
         var finished = events.Single(e => e.Kind == "finished");
         Assert.Equal((int)HeadlessExitCode.AgentFailure, finished.Data.GetProperty("exit_code").GetInt32());
-        Assert.DoesNotContain(events, e => e.Kind == "started");
+        Assert.Equal("finished", events.Last().Kind);
+        Assert.Single(events, e => e.Kind == "started");
+        Assert.Single(events, e => e.Kind == "finished");
+        Assert.DoesNotContain(events, e => e.Kind == "tool_usage_audit");
+    }
+
+    [Fact]
+    public async Task UnknownProvider_EmitsCompleteFailureEnvelope()
+    {
+        using var ws = new TempDir();
+        var config = NewConfig(ws) with
+        {
+            Model = new HeadlessModel { Provider = "not-a-provider", Id = "missing-model" },
+        };
+        var stdout = new StringWriter(new StringBuilder());
+        var stderr = new StringWriter(new StringBuilder());
+
+        var code = await HeadlessAgentRunner.ExecuteAsync(
+            config, stdout, stderr, NullLoggerFactory.Instance);
+
+        var events = stdout.ToString()
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(ParseEvent)
+            .ToList();
+        Assert.Equal(HeadlessExitCode.AgentFailure, code);
+        Assert.Equal(new[] { "started", "error", "finished" }, events.Select(e => e.Kind));
+        Assert.True(events[1].Data.GetProperty("fatal").GetBoolean());
+        Assert.DoesNotContain(events, e => e.Kind == "tool_usage_audit");
+    }
+
+    [Fact]
+    public async Task UnexpectedSetupFailure_EmitsOneCompleteInternalErrorEnvelope()
+    {
+        using var ws = new TempDir();
+        var config = NewConfig(ws);
+        var provider = new FakeLlmProvider(FakeLlmProvider.TextResponse("unreachable"));
+        var stdout = new StringWriter(new StringBuilder());
+        var stderr = new StringWriter(new StringBuilder());
+
+        var code = await HeadlessAgentRunner.ExecuteAsync(
+            config, stdout, stderr, new ThrowingLoggerFactory(), provider);
+        var events = stdout.ToString()
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(ParseEvent)
+            .ToList();
+
+        Assert.Equal(HeadlessExitCode.InternalError, code);
+        Assert.Equal(0, provider.CompleteCallCount);
+        Assert.Equal(new[] { "started", "error", "finished" }, events.Select(e => e.Kind));
+        Assert.Equal((int)HeadlessExitCode.InternalError,
+            events.Single(e => e.Kind == "finished").Data.GetProperty("exit_code").GetInt32());
+        Assert.Single(events, e => e.Kind == "started");
+        Assert.Single(events, e => e.Kind == "finished");
+    }
+
+    [Fact]
+    public async Task MaxIterationsExhausted_MapsCurrentEngineReasonToTimeout()
+    {
+        using var ws = new TempDir();
+        var config = NewConfig(ws) with
+        {
+            Tools = new[] { CrossPlatform.NoOpCliTool("noop") },
+            Limits = new HeadlessLimits { MaxIterations = 1, TimeoutSeconds = 30 },
+        };
+        var provider = new FakeLlmProvider(FakeLlmProvider.ToolCallResponse("noop", "turn-limit-call"));
+
+        var (events, code) = await RunAsync(config, provider);
+
+        Assert.Equal(HeadlessExitCode.Timeout, code);
+        Assert.Equal(1, provider.CompleteCallCount);
+        var error = events.Single(e => e.Kind == "error");
+        Assert.Contains("max_iterations=1", error.Data.GetProperty("message").GetString());
+        Assert.True(error.Data.GetProperty("fatal").GetBoolean());
+        var finished = events.Single(e => e.Kind == "finished");
+        Assert.Equal((int)HeadlessExitCode.Timeout, finished.Data.GetProperty("exit_code").GetInt32());
+        Assert.Equal(1, finished.Data.GetProperty("iterations").GetInt32());
+    }
+
+    [Theory]
+    [InlineData("max_turns_exceeded", true)]
+    [InlineData("MAX_TURNS_EXCEEDED", true)]
+    [InlineData("max_turns", true)]
+    [InlineData("tool_error", false)]
+    [InlineData(null, false)]
+    public void IsTurnLimitStopReason_NormalizesSupportedEngineValues(string? stopReason, bool expected)
+    {
+        Assert.Equal(expected, HeadlessAgentRunner.IsTurnLimitStopReason(stopReason));
     }
 
     [Fact]
@@ -287,6 +374,20 @@ public class HeadlessAgentRunnerStabilityTests
 
     // Minimal parsed view of one NDJSON event line.
     private sealed record Evt(int SchemaVersion, string Kind, JsonElement Data);
+
+    private sealed class ThrowingLoggerFactory : ILoggerFactory
+    {
+        public ILogger CreateLogger(string categoryName) =>
+            throw new InvalidOperationException("logger setup failed");
+
+        public void AddProvider(ILoggerProvider provider)
+        {
+        }
+
+        public void Dispose()
+        {
+        }
+    }
 
     private sealed class TempDir : IDisposable
     {

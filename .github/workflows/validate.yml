@@ -37,7 +37,7 @@ jobs:
           dotnet-version: '8.0.x'  # latest 8.0 SDK; exact 8.0.0 is no longer downloadable
 
       - name: Restore dependencies
-        run: dotnet restore Andy.Cli.sln
+        run: dotnet restore Andy.Cli.sln --locked-mode
 
       # Warnings are intentionally NOT suppressed and NOT promoted to errors:
       # they must remain visible in the build log so regressions are noticed.
@@ -103,7 +103,7 @@ jobs:
           dotnet-version: '8.0.x'  # latest 8.0 SDK; exact 8.0.0 is no longer downloadable
 
       - name: Restore dependencies
-        run: dotnet restore Andy.Cli.sln
+        run: dotnet restore Andy.Cli.sln --locked-mode
 
       # Fail the job if any High or Critical advisory affects a direct OR
       # transitive package. The report is always printed for triage.
@@ -175,7 +175,7 @@ jobs:
           dotnet-version: '8.0.x'  # latest 8.0 SDK; exact 8.0.0 is no longer downloadable
 
       - name: Restore dependencies
-        run: dotnet restore Andy.Cli.sln
+        run: dotnet restore Andy.Cli.sln --locked-mode
 
       # Headless contract/schema tests: validate the canonical JSON schemas and
       # the headless config contract on this OS. These tests are hermetic (no

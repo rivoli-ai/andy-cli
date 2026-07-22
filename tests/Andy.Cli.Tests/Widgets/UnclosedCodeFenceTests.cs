@@ -65,7 +65,6 @@ public class UnclosedCodeFenceTests
         Assert.Equal(md, FeedMarkdown.BalanceCodeFences(md));
     }
 
-#if STREAMING_FENCE_WIP // WIP: FeedView.StreamingMessageItem does not exist yet; un-fence when the feature lands
     /// <summary>
     /// The streaming path (StreamingMessageItem.RenderSlice) must also balance dangling fences,
     /// matching the finalized AddMarkdownRich path. Without it, a model that opens a fence
@@ -74,7 +73,7 @@ public class UnclosedCodeFenceTests
     [Fact]
     public void StreamingMessageItem_BalancesUnclosedFence()
     {
-        var item = new FeedView.StreamingMessageItem();
+        var item = new StreamingMessageItem();
         item.AppendContent("""
             Here is code:
             ```csharp
@@ -96,7 +95,7 @@ public class UnclosedCodeFenceTests
     [Fact]
     public void StreamingMessageItem_ClosedFence_StillRendersCorrectly()
     {
-        var item = new FeedView.StreamingMessageItem();
+        var item = new StreamingMessageItem();
         item.AppendContent("""
             ```
             code
@@ -111,5 +110,4 @@ public class UnclosedCodeFenceTests
 
         Assert.DoesNotContain(runs, r => r.Content.Contains("**"));
     }
-#endif
 }

@@ -42,6 +42,8 @@ public static class HeadlessAgentRunner
     // contract); the user-side prompt only needs to prime the model to
     // start producing.
     private const string KickoffMessage = "Begin.";
+    private const string MaxTurnsExceededStopReason = "max_turns_exceeded";
+    private const string LegacyMaxTurnsStopReason = "max_turns";
 
     public static async Task<HeadlessExitCode> ExecuteAsync(
         HeadlessRunConfig config,
@@ -54,7 +56,75 @@ public static class HeadlessAgentRunner
     {
         var emitter = new HeadlessEventEmitter(eventStream);
         var stopwatch = Stopwatch.StartNew();
-        var logger = loggerFactory.CreateLogger("Andy.Cli.Headless.HeadlessAgentRunner");
+        var finished = false;
+
+        void Finish(HeadlessExitCode code, int iterations)
+        {
+            if (finished)
+            {
+                return;
+            }
+
+            EmitFinished(emitter, stopwatch, iterations, code);
+            finished = true;
+        }
+
+        // The config has already passed parse and schema validation before this
+        // boundary. Start the lifecycle envelope before any fallible runtime setup
+        // so tool-host, workspace, and provider failures retain run correlation.
+        emitter.EmitStarted(
+            runId: config.RunId,
+            agentSlug: config.Agent.Slug,
+            modelProvider: config.Model.Provider,
+            modelId: config.Model.Id,
+            toolCount: config.Tools.Count);
+
+        try
+        {
+            var logger = loggerFactory.CreateLogger("Andy.Cli.Headless.HeadlessAgentRunner");
+            return await ExecuteAcceptedRunAsync(
+                config,
+                emitter,
+                stderr,
+                loggerFactory,
+                logger,
+                llmProviderOverride,
+                ct,
+                currentBranchResolver,
+                Finish);
+        }
+        catch (OperationCanceledException)
+        {
+            if (!finished)
+            {
+                emitter.EmitError("Headless runtime setup cancelled.", fatal: true);
+                Finish(HeadlessExitCode.Cancelled, 0);
+            }
+            return HeadlessExitCode.Cancelled;
+        }
+        catch (Exception ex)
+        {
+            stderr.WriteLine($"andy-cli run --headless: internal error: {ex.GetType().Name}: {ex.Message}");
+            if (!finished)
+            {
+                emitter.EmitError($"Headless runtime failed: {ex.GetType().Name}: {ex.Message}", fatal: true);
+                Finish(HeadlessExitCode.InternalError, 0);
+            }
+            return HeadlessExitCode.InternalError;
+        }
+    }
+
+    private static async Task<HeadlessExitCode> ExecuteAcceptedRunAsync(
+        HeadlessRunConfig config,
+        HeadlessEventEmitter emitter,
+        TextWriter stderr,
+        ILoggerFactory loggerFactory,
+        ILogger logger,
+        ILlmProvider? llmProviderOverride,
+        CancellationToken ct,
+        Func<string, string?>? currentBranchResolver,
+        Action<HeadlessExitCode, int> finish)
+    {
         var iterations = 0;
         var exitCode = HeadlessExitCode.Success;
 
@@ -92,7 +162,7 @@ public static class HeadlessAgentRunner
         {
             // TryBuildToolHostAsync already emitted an error event and
             // logged. Surface the matching exit code without further chatter.
-            EmitFinished(emitter, stopwatch, iterations, HeadlessExitCode.AgentFailure);
+            finish(HeadlessExitCode.AgentFailure, iterations);
             return HeadlessExitCode.AgentFailure;
         }
 
@@ -106,7 +176,7 @@ public static class HeadlessAgentRunner
         {
             logger.LogError("Workspace branch verification failed: {Error}", branchError);
             emitter.EmitError(branchError, fatal: true);
-            EmitFinished(emitter, stopwatch, iterations, HeadlessExitCode.AgentFailure);
+            finish(HeadlessExitCode.AgentFailure, iterations);
             return HeadlessExitCode.AgentFailure;
         }
 
@@ -121,7 +191,7 @@ public static class HeadlessAgentRunner
             {
                 logger.LogError(ex, "Failed to resolve LLM provider {Provider}", config.Model.Provider);
                 emitter.EmitError($"Failed to resolve LLM provider '{config.Model.Provider}': {ex.Message}", fatal: true);
-                EmitFinished(emitter, stopwatch, iterations, HeadlessExitCode.AgentFailure);
+                finish(HeadlessExitCode.AgentFailure, iterations);
                 return HeadlessExitCode.AgentFailure;
             }
         }
@@ -189,15 +259,8 @@ public static class HeadlessAgentRunner
         void Finalize(HeadlessExitCode code, int iters)
         {
             EmitToolUsageAudit(emitter, auditor, services, toolHost.Registry, allowedTools);
-            EmitFinished(emitter, stopwatch, iters, code);
+            finish(code, iters);
         }
-
-        emitter.EmitStarted(
-            runId: config.RunId,
-            agentSlug: config.Agent.Slug,
-            modelProvider: config.Model.Provider,
-            modelId: config.Model.Id,
-            toolCount: config.Tools.Count);
 
         // Two cancellation sources: the caller's outer ct (SIGTERM, etc.)
         // and the wall-clock timeout. Whichever fires first short-circuits
@@ -263,13 +326,13 @@ public static class HeadlessAgentRunner
             return exitCode;
         }
 
-        // SimpleAgent reports loop-level success; max_turns hits land here as
-        // Success=false with StopReason="max_turns". Treat that as Timeout
-        // to match the headless contract (max_iterations → exit 4).
+        // Engine versions have used two spellings for turn-budget exhaustion.
+        // Normalize them at this host boundary so max_iterations always maps to
+        // the headless Timeout contract (exit 4).
         if (result is null || !result.Success)
         {
             var stopReason = result?.StopReason ?? "unknown";
-            if (string.Equals(stopReason, "max_turns", StringComparison.OrdinalIgnoreCase))
+            if (IsTurnLimitStopReason(stopReason))
             {
                 emitter.EmitError(
                     $"Agent loop exhausted max_iterations={maxTurns}.",
@@ -318,6 +381,10 @@ public static class HeadlessAgentRunner
         Finalize(HeadlessExitCode.Success, iterations);
         return HeadlessExitCode.Success;
     }
+
+    internal static bool IsTurnLimitStopReason(string? stopReason) =>
+        string.Equals(stopReason, MaxTurnsExceededStopReason, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(stopReason, LegacyMaxTurnsStopReason, StringComparison.OrdinalIgnoreCase);
 
     private static void EmitFinished(
         HeadlessEventEmitter emitter,

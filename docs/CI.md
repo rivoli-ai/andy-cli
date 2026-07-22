@@ -22,15 +22,11 @@ SHA is the executed version.
 
 `validate.yml` contains three jobs.
 
-Known follow-up: issue
-[#208](https://github.com/rivoli-ai/andy-cli/issues/208) tracks changing the
-reusable validation restore to `--locked-mode`, matching releases.
-
 ### Build, format, and test
 
 Runs on Ubuntu with .NET 8 and performs:
 
-1. `dotnet restore Andy.Cli.sln`
+1. `dotnet restore Andy.Cli.sln --locked-mode`
 2. Release build with compiler warnings visible.
 3. `dotnet format Andy.Cli.sln --verify-no-changes --no-restore`.
 4. The full xUnit suite with Coverlet Cobertura coverage.
@@ -86,7 +82,7 @@ release path.
 Run the relevant gates before pushing:
 
 ```bash
-dotnet restore Andy.Cli.sln
+dotnet restore Andy.Cli.sln --locked-mode
 dotnet build Andy.Cli.sln --configuration Release --no-restore
 dotnet format Andy.Cli.sln --verify-no-changes --no-restore
 dotnet test Andy.Cli.sln \
@@ -106,6 +102,10 @@ reportgenerator \
   -targetdir:"./TestResults/CoverageReport" \
   -reporttypes:TextSummary
 ```
+
+After an intentional dependency change, refresh every committed lock file with
+`dotnet restore Andy.Cli.sln --force-evaluate`, review the lock-file diff, and
+commit it with the package change.
 
 Run the packaged smoke suite used by the release workflow with:
 

@@ -51,9 +51,17 @@ public class HeadlessInactiveFieldsRuntimeTests
         var mismatchOut = stdout.ToString();
         Assert.Contains("\"kind\":\"error\"", mismatchOut);
         Assert.Contains("mismatch", mismatchOut);
+        var kinds = ParseEventKinds(mismatchOut);
+        Assert.Equal(new[] { "started", "error", "finished" }, kinds);
         // The run must not have produced an output file.
         Assert.False(File.Exists(config.Output.File));
     }
+
+    private static string[] ParseEventKinds(string ndjson) =>
+        ndjson.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => System.Text.Json.JsonDocument.Parse(line).RootElement
+                .GetProperty("kind").GetString()!)
+            .ToArray();
 
     [Fact]
     public async Task Branch_Unresolvable_FailsFast()

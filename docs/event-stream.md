@@ -1,6 +1,6 @@
 # Event stream
 
-Updated: 2026-07-21
+Updated: 2026-07-22
 
 The headless runtime emits a structured event stream while it runs. The format
 is NDJSON: one JSON object per line. The authoritative contract is
@@ -38,17 +38,17 @@ Wire field names are `snake_case`. Fields whose value is null are omitted.
 
 ## Event kinds
 
-Once setup succeeds and the agent loop is reached, the runner emits `started`
-before agent activity and `finished` last. An early tool-host, branch, or provider
-setup failure can emit a fatal `error` followed by `finished` without a preceding
-`started`; consumers must accept that current behavior. Issue
-[#209](https://github.com/rivoli-ai/andy-cli/issues/209) tracks restoring a
-universal envelope. The kinds, in
-[enum order](../schemas/headless-events.v1.json):
+After a config is parsed and schema-validated, the runtime emits exactly one
+`started` before any fallible tool-host, workspace, or provider setup and exactly
+one final `finished`. A setup failure therefore emits `started`, fatal `error`,
+then `finished`. Argument, config-file, and schema-validation failures occur
+before a run is accepted: they return exit code 2 on stderr and emit no NDJSON
+events. The kinds, in [enum order](../schemas/headless-events.v1.json):
 
 ### `started`
 
-Emitted once, immediately before the agent loop begins.
+Emitted once, immediately after the validated config is accepted and before
+runtime setup begins.
 
 | Field | Type | Notes |
 | --- | --- | --- |

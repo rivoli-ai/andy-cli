@@ -69,6 +69,7 @@ public class HeadlessRunnerTests
 
         Assert.Equal(HeadlessExitCode.ConfigError, code);
         Assert.Contains("--headless", stderr.ToString());
+        Assert.Empty(stdout.ToString());
     }
 
     [Fact]

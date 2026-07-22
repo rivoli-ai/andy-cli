@@ -279,7 +279,8 @@ rather than the dump.
    `config.limits.max_iterations` as `maxTurns` (default 10).
 4. Runs with a wall-clock timeout; either limit firing maps to
    `HeadlessExitCode.Timeout` (4). Other outcomes map to structured `HeadlessExitCode`
-   values; a max-turns stop (StopReason `max_turns`) is also treated as Timeout.
+   values; current `max_turns_exceeded` and legacy `max_turns` stop reasons are
+   both treated as Timeout.
 5. On success, atomically writes the final response to `config.output.file` and emits
    an NDJSON event envelope (`started` ... `finished`).
 

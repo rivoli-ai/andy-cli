@@ -89,7 +89,8 @@ committed `packages.lock.json`:
 - `src/Andy.Cli.Headless.Contract/packages.lock.json`
 - `tests/Andy.Cli.Tests/packages.lock.json`
 
-Release builds restore in locked mode so the graph cannot drift:
+Reusable PR validation and release builds restore in locked mode so the graph
+cannot drift:
 
 ```bash
 dotnet restore Andy.Cli.sln --locked-mode
@@ -97,13 +98,6 @@ dotnet restore Andy.Cli.sln --locked-mode
 
 Regenerate the lock files intentionally (after a deliberate dependency bump)
 with `dotnet restore Andy.Cli.sln --force-evaluate` and commit the result.
-
-The reusable PR validation currently runs `dotnet restore Andy.Cli.sln` without
-`--locked-mode`. Because lock-file generation is enabled, that restore still
-uses and updates the locked graph, but CI should eventually use `--locked-mode`
-to fail instead of accepting a lock-file change in the ephemeral checkout.
-This is tracked by
-[#208](https://github.com/rivoli-ai/andy-cli/issues/208).
 
 ## 4. API / contract compatibility with engine and TUI
 
