@@ -86,7 +86,7 @@ var fg = Theme.Current.Text;
 
 ## In Progress
 
-### 2. FeedView Refactoring
+### 2. FeedView refactoring (#211)
 **Current State**: `FeedView.cs` is 3,152 lines with roughly 15 types defined in
 one file. Only `IFeedItem` has been extracted.
 
@@ -235,7 +235,7 @@ format could allow user-defined theme palettes without recompiling the CLI.
 - [x] Create Theme.cs
 - [x] Extract IFeedItem interface
 - [ ] Remove remaining hard-coded widget colors
-- [ ] Extract 3 feed item classes
+- [ ] Extract 3 feed item classes (#211)
 - [ ] Write tests for extracted classes
 - [x] Document migration for remaining classes (see `docs/feedview-inventory.md`)
 - [x] Extract CLI mode-dispatch into `Hosting/CliModeSelector` (#177)
@@ -243,11 +243,11 @@ format could allow user-defined theme palettes without recompiling the CLI.
 - [x] Extract provider URL mapping into `Hosting/ProviderUrlResolver` (#177)
 - [ ] Extract render loop / input handler / dialogs out of `Program.Main` (#177, follow-up)
 - [ ] Cross-repo: add `FrameScheduler` reset/invalidate API in andy-tui2 and stop recreating it per reflow (#177)
-- [ ] Cross-repo: move REUSABLE feed items into andy-tui2 (#177, see inventory)
+- [ ] Cross-repo: move REUSABLE feed items into andy-tui2 (see inventory)
 
 ## Completion summary
 
 2026-07-21: Re-audited every checklist item against `main`, corrected the
 Program/FeedView baselines, recorded the completed runtime theme system, and
-kept the remaining widget-theme, FeedView extraction, Program decomposition,
-and cross-repository TUI work open.
+kept the remaining widget-theme, FeedView extraction (#211), Program
+decomposition, and cross-repository TUI work open.

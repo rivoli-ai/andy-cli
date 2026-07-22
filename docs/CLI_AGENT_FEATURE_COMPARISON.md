@@ -334,6 +334,26 @@ credential mechanism rather than committing them to `acp.json`.
 | ACP lifecycle | Create, in-process load, embedded context, cancel, progress | Behind agents that advertise list/fork/resume and persistent histories |
 | Distribution | Source/build/publish workflow; no ACP registry entry | More setup in Rider than one-click registry agents |
 
+### Improvement backlog derived from this comparison
+
+The 2026-07-21 backlog grooming converted the largest actionable gaps into
+scoped GitHub work:
+
+| Gap | Tracking issue |
+| --- | --- |
+| Incremental ACP final responses and rich editor-native tool content | [#204](https://github.com/rivoli-ai/andy-cli/issues/204) |
+| ACP provider/model selection | [#205](https://github.com/rivoli-ai/andy-cli/issues/205) |
+| Persistent sessions, replay, catalog, and resume | [#206](https://github.com/rivoli-ai/andy-cli/issues/206) |
+| Bounded subagent delegation and parallel work | [#210](https://github.com/rivoli-ai/andy-cli/issues/210) |
+| Repository instructions and reusable skills | [#212](https://github.com/rivoli-ai/andy-cli/issues/212) |
+| First-class web search and browser validation | [#213](https://github.com/rivoli-ai/andy-cli/issues/213) |
+| ACP registry packaging and editor installation | [#214](https://github.com/rivoli-ai/andy-cli/issues/214) |
+| Multimodal prompts across interactive, headless, and ACP | [#215](https://github.com/rivoli-ai/andy-cli/issues/215) |
+
+These are grouped under
+[#217](https://github.com/rivoli-ai/andy-cli/issues/217), which focuses on
+high-value workflow outcomes rather than feature-count parity.
+
 ## Practical selection guidance
 
 ### Choose Andy CLI when

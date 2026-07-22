@@ -156,6 +156,11 @@ Required: `max_iterations`, `timeout_seconds`.
 | `max_iterations` | Yes | 1-10000 | Hard cap on agent loop turns. Exhausting it maps to exit code `4` (Timeout). |
 | `timeout_seconds` | Yes | 1-86400 | Wall-clock timeout. Exceeding it maps to exit code `4` (Timeout). |
 
+Known implementation gap: issue
+[#207](https://github.com/rivoli-ai/andy-cli/issues/207) tracks normalizing the
+current Engine `max_turns_exceeded` stop reason so every max-iteration exit is
+reliably reported as `Timeout` rather than a generic agent failure.
+
 ## Worked example: OpenRouter + Mimo
 
 A complete, valid v1 config using OpenRouter with the Mimo model. OpenRouter

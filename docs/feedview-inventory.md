@@ -5,8 +5,9 @@ Updated: 2026-07-21
 `src/Andy.Cli/Widgets/FeedView.cs` is 3,152 lines and defines roughly 15
 types in a single file. Issue #177 calls for moving the general-purpose,
 reusable rendering pieces into the `andy-tui2` package (owner of TUI work) while
-keeping CLI-only domain presentation here. This remains the working inventory
-for the refactoring tracked in issue #177.
+keeping CLI-only domain presentation here. Issue #177 delivered this inventory
+and the first composition-root extraction; issue #211 tracks the remaining
+in-repository feed-item split.
 
 **Important:** `Andy.Tui` is consumed here as a NuGet **package**; its source
 lives in the sibling `andy-tui2` repository and is **not editable from this
@@ -73,5 +74,5 @@ recommendation for coordinating that work.
 
 No feed-item implementations have moved yet; only `IFeedItem` is already in
 `Widgets/FeedItems/`. The in-repository file split remains the next low-risk
-increment in `REFACTORING_PLAN.md`, followed by coordinated package work for
-components that belong in `andy-tui2`.
+increment in `REFACTORING_PLAN.md` and issue #211, followed by coordinated
+package work for components that belong in `andy-tui2`.

@@ -41,7 +41,9 @@ Wire field names are `snake_case`. Fields whose value is null are omitted.
 Once setup succeeds and the agent loop is reached, the runner emits `started`
 before agent activity and `finished` last. An early tool-host, branch, or provider
 setup failure can emit a fatal `error` followed by `finished` without a preceding
-`started`; consumers must accept that current behavior. The kinds, in
+`started`; consumers must accept that current behavior. Issue
+[#209](https://github.com/rivoli-ai/andy-cli/issues/209) tracks restoring a
+universal envelope. The kinds, in
 [enum order](../schemas/headless-events.v1.json):
 
 ### `started`

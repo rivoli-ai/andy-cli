@@ -102,6 +102,8 @@ The reusable PR validation currently runs `dotnet restore Andy.Cli.sln` without
 `--locked-mode`. Because lock-file generation is enabled, that restore still
 uses and updates the locked graph, but CI should eventually use `--locked-mode`
 to fail instead of accepting a lock-file change in the ephemeral checkout.
+This is tracked by
+[#208](https://github.com/rivoli-ai/andy-cli/issues/208).
 
 ## 4. API / contract compatibility with engine and TUI
 
@@ -125,6 +127,8 @@ A real source-compatibility gate would need to:
 
 Until that exists, update `dependency-manifest.json` in the same commit as an
 Andy package bump and rely on the pinned package graph as the release contract.
+The executable source-compatibility build is tracked by
+[#216](https://github.com/rivoli-ai/andy-cli/issues/216).
 
 ## Current known-good snapshot
 

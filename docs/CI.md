@@ -22,6 +22,10 @@ SHA is the executed version.
 
 `validate.yml` contains three jobs.
 
+Known follow-up: issue
+[#208](https://github.com/rivoli-ai/andy-cli/issues/208) tracks changing the
+reusable validation restore to `--locked-mode`, matching releases.
+
 ### Build, format, and test
 
 Runs on Ubuntu with .NET 8 and performs:

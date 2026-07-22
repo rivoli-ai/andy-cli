@@ -125,6 +125,10 @@ Current limitations:
   is currently delivered as one completed chunk.
 - Andy CLI is not in the public ACP registry, so it requires a custom agent entry.
 
+The active ACP follow-ups are token/rich-content streaming (#204), model config
+options (#205), persistent session catalog/resume (#206), registry packaging
+(#214), and multimodal prompts (#215).
+
 ## Tools and permissions
 
 `andy-cli tools list` currently reports 54 built-in tools: file/code, text,
