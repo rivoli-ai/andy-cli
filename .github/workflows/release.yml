@@ -163,7 +163,8 @@ jobs:
           retention-days: 30
 
   # 4) Smoke test: each binary is exercised on its native platform through startup, version,
-  #    help, a non-network tool path, and headless schema validation (scripts/smoke-test.sh).
+  #    help, a non-network tool path, headless schema validation, and an ACP stdio
+  #    initialize/session-new handshake (scripts/smoke-test.sh).
   #    Covers both architectures on macOS plus x64 Linux/Windows on standard runners;
   #    linux-arm64 and win-arm64 are built but not smoke-tested here (no free arm64 Linux/Windows
   #    runners) - add `ubuntu-24.04-arm` / `windows-11-arm` entries if those runners are available.

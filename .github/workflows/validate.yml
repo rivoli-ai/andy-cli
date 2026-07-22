@@ -206,3 +206,9 @@ jobs:
           out="$(./smoke-publish/${{ matrix.exe }} --version)"
           echo "Version output: $out"
           echo "$out" | grep -q "andy-cli"
+
+      - name: Smoke test packaged ACP handshake
+        run: >-
+          python3 scripts/acp-smoke.py
+          ./smoke-publish/${{ matrix.exe }}
+          --cwd "${GITHUB_WORKSPACE}"

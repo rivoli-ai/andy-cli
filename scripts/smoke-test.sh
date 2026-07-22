@@ -11,6 +11,8 @@
 #                              headless-config.v1 schema validator with the ConfigError
 #                              exit code (2), proving the packaged binary validates input
 #                              before any provider/network call.
+#   5. ACP handshake         - initialize and session/new succeed over stdio without
+#                              a provider credential or model request.
 #
 # Works on Linux, macOS and Windows runners (run under bash; Windows uses git-bash).
 #
@@ -70,5 +72,17 @@ cat "${bad_config}.out" 2>/dev/null || true
 rm -f "$bad_config" "${bad_config}.out" 2>/dev/null || true
 [ "$code" -eq 2 ] || fail "headless invalid-config expected ConfigError exit 2, got $code"
 pass "headless schema validation (ConfigError=2)"
+
+# 5) ACP packaged handshake. The Python driver uses only the standard library
+#    and validates real JSON-RPC responses instead of matching log text.
+if command -v python3 >/dev/null 2>&1; then
+    PYTHON=python3
+elif command -v python >/dev/null 2>&1; then
+    PYTHON=python
+else
+    fail "python is required for the ACP packaged handshake"
+fi
+"$PYTHON" "$(dirname "$0")/acp-smoke.py" "$BIN" --cwd "$DIR"
+pass "ACP initialize + session/new"
 
 echo "smoke: ALL CHECKS PASSED for $BIN ($EXPECTED)"

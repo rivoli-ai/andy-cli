@@ -51,9 +51,13 @@ On Ubuntu and macOS, CI:
 - Runs the headless JSON schema/contract tests without model credentials.
 - Publishes a self-contained single-file binary for the runner.
 - Executes `andy-cli --version` against the packaged artifact.
+- Drives the packaged ACP server through `initialize` and `session/new` over
+  stdio without sending a model prompt or requiring provider credentials.
 
-This catches trimming, packaging, native-runtime, and schema issues that a normal
-framework-dependent build can miss.
+The release smoke matrix runs the same ACP handshake through
+`scripts/smoke-test.sh` on Linux x64, macOS x64/ARM64, and Windows x64. This
+catches trimming, packaging, native-runtime, ACP serialization, and schema
+issues that a normal framework-dependent build can miss.
 
 ## Release pipeline
 
