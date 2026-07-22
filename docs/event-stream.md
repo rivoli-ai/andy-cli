@@ -1,5 +1,7 @@
 # Event stream
 
+Updated: 2026-07-21
+
 The headless runtime emits a structured event stream while it runs. The format
 is NDJSON: one JSON object per line. The authoritative contract is
 [`schemas/headless-events.v1.json`](../schemas/headless-events.v1.json); the
@@ -36,8 +38,10 @@ Wire field names are `snake_case`. Fields whose value is null are omitted.
 
 ## Event kinds
 
-The runner always emits `started` first and `finished` last, even on failure, so
-every run produces a clean envelope. The kinds, in
+Once setup succeeds and the agent loop is reached, the runner emits `started`
+before agent activity and `finished` last. An early tool-host, branch, or provider
+setup failure can emit a fatal `error` followed by `finished` without a preceding
+`started`; consumers must accept that current behavior. The kinds, in
 [enum order](../schemas/headless-events.v1.json):
 
 ### `started`
@@ -103,6 +107,23 @@ start/finish correlation, a measured `duration_ms`, and the real `outcome`:
 
 A denied or still-running tool is never reported `ok=true`.
 
+### `tool_usage_audit`
+
+Emitted once immediately before `finished` for runs that reach the agent loop.
+It records the configured allow-list and a summary of each distinct tool the
+agent attempted.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `allowed_tools` | array of strings | Echoes `permissions.allowed_tools`; empty when none was supplied. |
+| `tools` | array | One entry per distinct invoked tool. |
+| `tools[].tool_name` | string | Invoked tool ID. |
+| `tools[].invocations` | integer >= 1 | Number of attempts during the run. |
+| `tools[].permitted` | boolean | Whether the permission engine permitted that tool. Read-only built-ins can be permitted without appearing in `allowed_tools`. |
+
+Early setup failures occur before the auditor exists and therefore do not emit
+this event.
+
 Cross-repo remainder: a full engine-native `ToolCompleted`/`ToolResult` event
 on `SimpleAgent` (andy-engine) would let hosts that do NOT own the executor
 observe completion. Until then the CLI-owned executor wrap is the exact signal.
@@ -152,7 +173,8 @@ A typical successful run with one tool call (NDJSON; one object per line):
 {"schema_version":1,"ts":"2026-04-25T22:31:15.220+00:00","kind":"tool_call_started","data":{"call_id":"a1b2c3d4e5f6","tool_name":"read_file"}}
 {"schema_version":1,"ts":"2026-04-25T22:31:15.246+00:00","kind":"tool_call_finished","data":{"call_id":"a1b2c3d4e5f6","tool_name":"read_file","ok":true,"outcome":"success","duration_ms":26}}
 {"schema_version":1,"ts":"2026-04-25T22:31:18.540+00:00","kind":"output_written","data":{"path":"/workspace/.andy/output.txt","bytes":2048}}
-{"schema_version":1,"ts":"2026-04-25T22:31:18.541+00:00","kind":"finished","data":{"exit_code":0,"duration_ms":4540,"iterations":3}}
+{"schema_version":1,"ts":"2026-04-25T22:31:18.541+00:00","kind":"tool_usage_audit","data":{"allowed_tools":[],"tools":[{"tool_name":"read_file","invocations":1,"permitted":true}]}}
+{"schema_version":1,"ts":"2026-04-25T22:31:18.542+00:00","kind":"finished","data":{"exit_code":0,"duration_ms":4541,"iterations":3}}
 ```
 
 A failing run (e.g. timeout) ends with a fatal `error` then `finished`:
@@ -160,11 +182,12 @@ A failing run (e.g. timeout) ends with a fatal `error` then `finished`:
 ```
 {"schema_version":1,"ts":"2026-04-25T22:31:14.001+00:00","kind":"started","data":{"run_id":"f6c2b0d4-2c1e-4a3f-9b21-2f7e0c5d8a90","agent_slug":"code-reviewer","model_provider":"openrouter","model_id":"xiaomi/mimo-v2.5","tool_count":2}}
 {"schema_version":1,"ts":"2026-04-25T23:01:14.002+00:00","kind":"error","data":{"message":"Agent loop exceeded timeout_seconds=1800.","fatal":true}}
-{"schema_version":1,"ts":"2026-04-25T23:01:14.003+00:00","kind":"finished","data":{"exit_code":4,"duration_ms":1800001,"iterations":12}}
+{"schema_version":1,"ts":"2026-04-25T23:01:14.003+00:00","kind":"tool_usage_audit","data":{"allowed_tools":[],"tools":[]}}
+{"schema_version":1,"ts":"2026-04-25T23:01:14.004+00:00","kind":"finished","data":{"exit_code":4,"duration_ms":1800002,"iterations":12}}
 ```
 
 ## See also
 
-- [Headless runtime](headless-runtime.md) — the command, config schema, and exit codes.
-- [ADR 0001: headless agent runtime](adr/0001-headless-agent-runtime.md) — versioning strategy for this contract.
-- [`schemas/headless-events.v1.json`](../schemas/headless-events.v1.json) — the event schema.
+- [Headless runtime](headless-runtime.md) - the command, config schema, and exit codes.
+- [ADR 0001: headless agent runtime](adr/0001-headless-agent-runtime.md) - versioning strategy for this contract.
+- [`schemas/headless-events.v1.json`](../schemas/headless-events.v1.json) - the event schema.

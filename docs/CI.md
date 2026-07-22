@@ -1,108 +1,117 @@
-# Continuous Integration
+# Continuous integration and releases
 
-This repository enforces a single set of quality gates on every pull request,
-every push to `main`, and every release. The gates live in a reusable workflow
-so pull-request CI and the release workflows run exactly the same checks.
+Updated: 2026-07-21
+
+Pull requests, pushes to `main`, and releases share the validation workflow in
+`.github/workflows/validate.yml`.
 
 ## Workflows
 
 | File | Trigger | Purpose |
 | --- | --- | --- |
-| `.github/workflows/validate.yml` | `workflow_call` (reusable) | Single source of truth for all validation gates. |
-| `.github/workflows/ci.yml` | `pull_request`, `push` to `main` | Required status check. Calls `validate.yml`. |
-| `.github/workflows/release.yml` | tag `v*`, manual dispatch | Cross-platform release. `build` needs `validate`. |
-| `.github/workflows/release-signed.yml` | manual dispatch | Signed release. Every build job needs `validate`. |
+| `validate.yml` | `workflow_call` | Reusable build/test, security, and packaged-smoke gates. |
+| `ci.yml` | Pull requests and pushes to `main` | Calls `validate.yml`; this is the normal required CI check. |
+| `release.yml` | Tags matching `v*` or manual dispatch | Validates, builds six self-contained archives, generates checksums/SBOM, smoke-tests supported runners, and publishes only for a tag. |
+| `release-signed-todo.yml` | Manual dispatch | Explicitly unsigned placeholder for future signing/notarization work. Do not treat its output as signed. |
 
-Because the release workflows depend on `validate` via `needs:`, a release can
-never be built or published on a tree that has not passed the full test suite,
-the format check, the vulnerability audit, and the secret scan.
+All third-party GitHub Actions currently used by these workflows are pinned to
+immutable commit SHAs. Human-readable version comments are informational; the
+SHA is the executed version.
 
-## Required checks
+## Reusable validation gates
 
-The `validate.yml` pipeline runs three jobs:
+`validate.yml` contains three jobs.
 
-1. **Build, format and test** (`ubuntu-latest`)
-   - `dotnet restore`
-   - `dotnet build` in Release with compiler warnings left visible (warnings are
-     neither suppressed nor promoted to errors).
-   - `dotnet format --verify-no-changes` (fails if the tree is not formatted).
-     Note: the repository tree must be brought into `dotnet format` compliance
-     before (or at the moment) this gate is enabled, or the check will fail on a
-     pre-existing formatting backlog. The local fix is to run
-     `dotnet format Andy.Cli.sln`; the one-time whole-tree reformat is applied
-     during integration on `main` rather than on this branch, to avoid a massive
-     diff that conflicts with other in-flight branches.
-   - The FULL test suite with `--collect:"XPlat Code Coverage"`.
-   - A readable coverage summary rendered by ReportGenerator into the job summary
-     panel, plus the Cobertura report uploaded as an artifact.
+### Build, format, and test
 
-2. **Vulnerability audit and secret scan** (`ubuntu-latest`)
-   - `dotnet list package --vulnerable --include-transitive`; the job FAILS if any
-     `High` or `Critical` advisory affects a direct or transitive package.
-   - `gitleaks detect --no-git` over the working tree. The pinned gitleaks binary
-     is downloaded and run directly (no third-party marketplace Action executes in
-     CI), matching the existing release workflow.
+Runs on Ubuntu with .NET 8 and performs:
 
-3. **Packaged smoke and headless contract** (`ubuntu-latest` and `macos-latest`)
-   - Runs the headless contract/schema tests on each OS (hermetic; no model key
-     or network needed).
-   - Publishes the self-contained single-file CLI for the runner and smoke-tests
-     it with `andy-cli --version`.
+1. `dotnet restore Andy.Cli.sln`
+2. Release build with compiler warnings visible.
+3. `dotnet format Andy.Cli.sln --verify-no-changes --no-restore`.
+4. The full xUnit suite with Coverlet Cobertura coverage.
+5. A ReportGenerator summary in the job summary and coverage artifacts retained
+   for 14 days.
 
-## Supply-chain notes
+Warnings are not suppressed or promoted to errors. Formatting is a hard gate.
 
-The CI workflows (`validate.yml` and `ci.yml`) pin every `actions/*` step to a
-full commit SHA (with the human-readable version in a trailing comment) rather
-than a floating tag. When bumping an action, update both the SHA and the
-comment. SHA pinning for the release workflows (`release.yml` and
-`release-signed.yml`, which still use floating tags on this branch) is delivered
-separately by issue #173.
+### Dependency and secret security
 
-The gitleaks binary is likewise pinned: `validate.yml` downloads a fixed
-`GITLEAKS_VERSION` and verifies it against a recorded sha256 (`sha256sum -c`)
-instead of resolving the latest release through an unauthenticated
-api.github.com call, which is rate-limited and would fail the security job
-flakily on busy pull requests.
+Runs a transitive NuGet vulnerability audit and fails when the report contains a
+High or Critical advisory. A command/network failure also fails the job; it is
+never interpreted as a clean scan.
+
+The job downloads a pinned gitleaks release, verifies its SHA-256, and scans the
+checked-out tree with `--no-git`. Bump the gitleaks version and checksum together.
+
+### Packaged smoke and headless contract
+
+On Ubuntu and macOS, CI:
+
+- Runs the headless JSON schema/contract tests without model credentials.
+- Publishes a self-contained single-file binary for the runner.
+- Executes `andy-cli --version` against the packaged artifact.
+
+This catches trimming, packaging, native-runtime, and schema issues that a normal
+framework-dependent build can miss.
+
+## Release pipeline
+
+`release.yml` is the supported release workflow. It:
+
+1. Requires the reusable validation and an additional release-tree secret scan.
+2. Restores the locked dependency graph.
+3. Uses `scripts/build-release.sh` to build macOS, Linux, and Windows artifacts
+   for x64 and ARM64.
+4. Generates a CycloneDX JSON SBOM.
+5. Generates per-archive and aggregate SHA-256 checksums.
+6. Smoke-tests Linux x64, macOS ARM64, macOS x64 under Rosetta, and Windows x64.
+7. Publishes the GitHub Release, checksums, SBOM, and build provenance only when
+   the workflow was triggered by a tag.
+
+Linux ARM64 and Windows ARM64 artifacts are built but are not smoke-tested
+because the workflow does not currently use native runners for those targets.
+
+The `release-signed-todo.yml` workflow is intentionally named and labeled as an
+unsigned placeholder. Signing certificates, notarization, verification steps,
+and maintainer-owned secrets must be configured before it can become a signed
+release path.
 
 ## Local equivalents
 
-Run these before pushing to reproduce the CI gates locally. They use the same
-solution and project paths as CI.
+Run the relevant gates before pushing:
 
 ```bash
-# Restore
 dotnet restore Andy.Cli.sln
-
-# Build with warnings visible (do not suppress warnings)
 dotnet build Andy.Cli.sln --configuration Release --no-restore
-
-# Verify formatting (CI runs --verify-no-changes; run without it to auto-fix)
-dotnet format Andy.Cli.sln --verify-no-changes
-#   ...or fix in place:
-dotnet format Andy.Cli.sln
-
-# Full test suite with coverage
+dotnet format Andy.Cli.sln --verify-no-changes --no-restore
 dotnet test Andy.Cli.sln \
+  --configuration Release \
+  --no-build \
   --collect:"XPlat Code Coverage" \
   --results-directory ./TestResults
+dotnet list Andy.Cli.sln package --vulnerable --include-transitive
+```
 
-# Optional: render the coverage summary locally
+To fix formatting, run `dotnet format Andy.Cli.sln` and review the resulting
+diff. To render a local coverage summary:
+
+```bash
 reportgenerator \
   -reports:"./TestResults/*/coverage.cobertura.xml" \
   -targetdir:"./TestResults/CoverageReport" \
   -reporttypes:TextSummary
-
-# Transitive vulnerability audit (CI fails on High/Critical)
-dotnet list Andy.Cli.sln package --vulnerable --include-transitive
-
-# Headless contract/schema tests only
-dotnet test tests/Andy.Cli.Tests/Andy.Cli.Tests.csproj \
-  --filter "FullyQualifiedName~HeadlessConfigSchemaTests|FullyQualifiedName~HeadlessConfigContractTests"
-
-# Packaged-binary smoke test (adjust the runtime for your platform)
-dotnet publish src/Andy.Cli/Andy.Cli.csproj \
-  --configuration Release --runtime osx-arm64 \
-  --self-contained true --output ./smoke-publish \
-  -p:PublishSingleFile=true
-./smoke-publish/andy-cli --version
 ```
+
+Run the packaged smoke suite used by the release workflow with:
+
+```bash
+scripts/build-release.sh 0.0.0-local
+mkdir -p /tmp/andy-cli-smoke
+tar -xzf release-artifacts/andy-cli-macos-arm64.tar.gz \
+  -C /tmp/andy-cli-smoke
+scripts/smoke-test.sh /tmp/andy-cli-smoke 0.0.0-local
+```
+
+Select the archive for the current host. The workflow files are the authoritative
+executable specification when this guide and CI differ.

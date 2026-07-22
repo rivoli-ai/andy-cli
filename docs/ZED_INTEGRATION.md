@@ -1,344 +1,181 @@
-# Zed Editor Integration Guide
+# Zed and ACP integration
 
-This guide shows how to use Andy.CLI as an ACP (Agent Client Protocol) server with Zed editor.
+Updated: 2026-07-21
+
+Andy CLI can run as an Agent Client Protocol (ACP) server for Zed and other ACP
+clients. ACP traffic uses standard input/output; diagnostics go to standard
+error so they do not corrupt the protocol stream.
 
 ## Prerequisites
 
-1. **Zed Editor** installed - Download from [zed.dev](https://zed.dev/)
-2. **.NET 8.0 SDK** or later
-3. **Andy.CLI** built with ACP support
-4. **API Keys** for your preferred LLM provider (OpenAI, Anthropic, Cerebras, etc.)
+- Zed with external ACP-agent support.
+- A published Andy CLI binary, or a .NET 8 SDK for source execution.
+- Credentials for at least one configured remote provider, or a reachable local
+  Ollama instance.
 
-## Step 1: Build Andy.CLI
+The [quickstart](QUICKSTART_ZED.md) is the shortest setup path.
 
-Build the project in Release mode for best performance:
+## Recommended setup: published binary
 
-```bash
-cd /Users/samibengrine/Devel/rivoli-ai/andy-cli
-dotnet build -c Release
-```
-
-Verify the build succeeded with no errors. This creates a pre-compiled DLL at:
-`src/Andy.Cli/bin/Release/net8.0/andy-cli.dll`
-
-## Step 2: Test ACP Server Manually
-
-Before integrating with Zed, verify the ACP server works:
+Publish a self-contained executable for the host architecture:
 
 ```bash
-# Test that ACP mode starts (it will wait for JSON-RPC messages on stdin)
-dotnet run --project src/Andy.Cli -- --acp
-
-# You should see logs on stderr like:
-# info: Andy.Cli.ACP.AcpServerHost[0]
-#       Starting ACP server: Andy.CLI v1.0.0
-# info: Andy.Cli.ACP.AcpServerHost[0]
-#       ACP server initialized with X tools
+dotnet publish src/Andy.Cli/Andy.Cli.csproj \
+  --configuration Release \
+  --runtime osx-arm64 \
+  --self-contained true \
+  --output ./publish \
+  -p:PublishSingleFile=true
 ```
 
-Press `Ctrl+C` to stop.
-
-### Test with a JSON-RPC Message
-
-Create a test file `test-init.json`:
-
-```json
-{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"protocolVersion":"0.1.0","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}
-```
-
-Test the server:
+Run two non-interactive checks before configuring the editor:
 
 ```bash
-cat test-init.json | dotnet run --project src/Andy.Cli -- --acp
+./publish/andy-cli --version
+./publish/andy-cli tools list
 ```
 
-You should see a JSON-RPC response with server capabilities.
-
-## Step 3: Configure Zed
-
-### Find Zed Settings Location
-
-- **macOS/Linux**: `~/.config/zed/settings.json`
-- **Windows**: `%APPDATA%\Zed\settings.json`
-
-### Add ACP Configuration
-
-Open your Zed settings and add the **recommended** configuration using the pre-built DLL:
+Then add an `agent_servers` entry to Zed's `settings.json`:
 
 ```json
 {
   "agent_servers": {
     "Andy CLI": {
-      "command": "dotnet",
-      "args": [
-        "/Users/samibengrine/Devel/rivoli-ai/andy-cli/src/Andy.Cli/bin/Release/net8.0/andy-cli.dll",
-        "--acp"
-      ],
-      "env": {
-        "OPENAI_API_KEY": "your-openai-api-key-here",
-        "ANTHROPIC_API_KEY": "your-anthropic-api-key-here"
-      }
+      "command": "/absolute/path/to/publish/andy-cli",
+      "args": ["--acp"]
     }
   }
 }
 ```
 
-**IMPORTANT**:
-- Replace the DLL path with your actual absolute path to the built DLL
-- Add your API keys in the `env` section
-- Using the pre-built DLL avoids compilation delays when Zed starts the server
+Use the executable's absolute path. A published binary starts faster and avoids
+build output being mixed into an editor-managed process.
 
-**Alternative** (slower startup):
+## Source-checkout alternative
+
+For local development, Zed can launch the project through the .NET SDK:
+
 ```json
 {
   "agent_servers": {
-    "Andy CLI": {
+    "Andy CLI (source)": {
       "command": "dotnet",
       "args": [
         "run",
         "--project",
-        "/Users/samibengrine/Devel/rivoli-ai/andy-cli/src/Andy.Cli",
+        "/absolute/path/to/andy-cli/src/Andy.Cli",
         "--",
         "--acp"
-      ],
-      "env": {
-        "OPENAI_API_KEY": "your-openai-api-key-here"
-      }
-    }
-  }
-}
-```
-Note: Using `dotnet run` compiles the project on each start, which may cause delays.
-
-### Alternative: Use Published Binary
-
-For better performance, publish Andy.CLI first:
-
-```bash
-cd /Users/samibengrine/Devel/rivoli-ai/andy-cli
-dotnet publish src/Andy.Cli -c Release -o ./publish
-```
-
-Then in Zed settings:
-
-```json
-{
-  "agent_servers": {
-    "Andy CLI": {
-      "command": "/Users/samibengrine/Devel/rivoli-ai/andy-cli/publish/andy-cli",
-      "args": ["--acp"],
-      "env": {
-        "OPENAI_API_KEY": "your-openai-api-key-here"
-      }
+      ]
     }
   }
 }
 ```
 
-## Step 4: Test in Zed
+This is convenient while changing the server, but it is slower and can trigger
+a build whenever Zed starts the process.
 
-1. **Restart Zed** completely (quit and reopen)
+## Credentials and provider selection
 
-2. **Open Assistant Panel**
-   - macOS: `Cmd+?`
-   - Windows/Linux: `Ctrl+?`
+Andy detects providers in this order when their credentials are available:
+OpenRouter, OpenAI, Anthropic, Cerebras, Groq, Google Gemini, then local Ollama.
+The primary credential variables are:
 
-3. **Verify Connection**
-   - Look for "andy-cli" in the assistant provider list
-   - Check for connection status (should show connected)
+- `OPENROUTER_API_KEY`
+- `OPENAI_API_KEY`
+- `ANTHROPIC_API_KEY`
+- `CEREBRAS_API_KEY`
+- `GROQ_API_KEY`
+- `GOOGLE_API_KEY`
 
-4. **Test Basic Interaction**
+Ollama uses `OLLAMA_API_BASE` when supplied and otherwise probes
+`http://localhost:11434`. `ANDY_SKIP_OLLAMA=1` disables that probe.
 
-   Try a simple prompt:
-   ```
-   What tools do you have available?
-   ```
+Prefer launching Zed with the required environment or using a supported OS/IDE
+secret-injection mechanism. Zed also accepts an `env` object in an agent entry,
+but values stored there are plain configuration data: do not commit secrets or
+paste production credentials into a shared settings file.
 
-   The assistant should list all Andy.CLI tools.
+ACP mode selects the provider at session creation. The current ACP server does
+not expose model or provider switching; restart the server with different
+environment/configuration to change them.
 
-5. **Test Tool Execution**
+## Current ACP behavior
 
-   Try using a tool:
-   ```
-   Can you list the files in the current directory?
-   ```
+For each new ACP session, Andy creates an independent `SimpleAgent` backed by
+Andy.Engine and the live Andy Tools registry. It supports:
 
-   The assistant should identify its provider/model on the first prompt, show
-   progress narration, render the file-listing tool while it runs, and then show
-   the tool result before the final answer. Andy surfaces narration returned by
-   the model; it does not expose private hidden chain-of-thought.
+- New sessions.
+- Loading a session retained by the same running server process.
+- Embedded text and resource context supplied by the client.
+- Cancellation propagated to the active agent operation.
+- Provider/model identification on the first prompt.
+- Progress narration, tool-start notifications, actual tool results, and a final
+  response through `session/update`.
+
+Current limitations:
+
+- Session state is bounded and in-memory; restarting the ACP process loses it.
+- Loading a retained session restores the agent object but cannot replay a
+  transcript to the client.
+- Session list, fork, durable resume, model switching, and mode switching are not
+  implemented.
+- Image and audio prompt capabilities are not advertised.
+- Intermediate narration and tool activity are incremental, but final model text
+  is currently delivered as one completed chunk.
+- Andy CLI is not in the public ACP registry, so it requires a custom agent entry.
+
+## Tools and permissions
+
+`andy-cli tools list` currently reports 54 built-in tools: file/code, text,
+system, git, HTTP/JSON, utility/productivity, six PDF, and 28 dataframe tools.
+See the [feature comparison](CLI_AGENT_FEATURE_COMPARISON.md#built-in-andy-tools-catalog)
+for the complete inventory.
+
+ACP tool execution uses the same permission-aware Engine/Tools path as the CLI.
+The permission surface is still alpha: use a disposable branch/worktree, review
+changes, and do not expose critical or unbacked-up data.
 
 ## Troubleshooting
 
-### Connection Issues
+### Agent does not start
 
-**Problem**: Zed shows "Connection failed" or doesn't connect
+1. Confirm the configured command is absolute and executable.
+2. Run `<command> --version` outside Zed.
+3. Run `<command> --acp` in a terminal; it should remain running and wait for an
+   ACP client. Stop it with `Ctrl+C`.
+4. Inspect Zed's agent/server logs for stderr from Andy.
 
-**Solutions**:
-1. Check Zed's log output (View → Debug → Open Log)
-2. Verify the command path is correct and absolute
-3. Test the command manually in terminal:
-   ```bash
-   dotnet run --project /absolute/path/to/andy-cli/src/Andy.Cli -- --acp
-   ```
+### Provider authentication fails
 
-### No Tools Showing
+1. Confirm the Zed process receives the intended credential variable.
+2. From a shell with the same environment, run `andy-cli model detect`.
+3. If Ollama is unintentionally winning or slowing startup, set
+   `ANDY_SKIP_OLLAMA=1`.
 
-**Problem**: Assistant connects but doesn't show available tools
+### Tools are missing
 
-**Solutions**:
-1. Check stderr output when running manually
-2. Verify tools are registered:
-   ```bash
-   dotnet run --project src/Andy.Cli -- tools list
-   ```
+Run `andy-cli tools list` using the exact binary from the Zed configuration. A
+source build and a published binary may reference different Andy.Tools package
+versions.
 
-### JSON-RPC Errors
+### Protocol errors or immediate disconnects
 
-**Problem**: "Invalid JSON-RPC message" errors
+- Do not wrap the ACP command in a script that writes banners or status text to
+  stdout.
+- Capture diagnostics from stderr, for example:
 
-**Solutions**:
-1. Ensure no console output goes to stdout (only stderr)
-2. Check that all logging uses stderr:
-   ```bash
-   ANDY_DEBUG=true dotnet run --project src/Andy.Cli -- --acp 2>debug.log
-   ```
+  ```bash
+  ANDY_DEBUG=true /absolute/path/to/andy-cli --acp 2>andy-acp.log
+  ```
 
-### API Key Issues
+- Do not test the server with ad-hoc JSON-RPC payloads copied from older ACP
+  drafts. Use an ACP client or the repository's ACP tests so protocol-version and
+  framing details match the installed Andy.Acp.Core package.
 
-**Problem**: "API key not found" or authentication errors
+## Related documentation
 
-**Solutions**:
-1. Verify API keys are set in Zed settings `env` section
-2. Check which provider Andy.CLI is configured to use:
-   ```bash
-   dotnet run --project src/Andy.Cli -- model info
-   ```
-3. Set the provider key and model in the Zed agent server's `env` object, then
-   restart the agent server. For example, OpenRouter with Kimi K3 uses
-   `OPENROUTER_API_KEY` and `OPENROUTER_MODEL=moonshotai/kimi-k3`.
-
-## Debugging Tips
-
-### Enable Verbose Logging
-
-Add to Zed settings:
-
-```json
-{
-  "agent_servers": {
-    "Andy CLI": {
-      "command": "dotnet",
-      "args": ["run", "--project", "/path/to/andy-cli/src/Andy.Cli", "--", "--acp"],
-      "env": {
-        "ANDY_DEBUG": "true",
-        "ANDY_LOG_LEVEL": "Debug",
-        "OPENAI_API_KEY": "your-key"
-      }
-    }
-  }
-}
-```
-
-### Monitor Server Output
-
-Run Andy.CLI manually and check stderr:
-
-```bash
-dotnet run --project src/Andy.Cli -- --acp 2>&1 | tee andy-cli.log
-```
-
-Then send test messages via stdin.
-
-### Check Available Tools
-
-Test the tools/list method:
-
-```bash
-echo '{"jsonrpc":"2.0","method":"tools/list","id":2,"params":{}}' | \
-  dotnet run --project src/Andy.Cli -- --acp
-```
-
-Expected response:
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 2,
-  "result": {
-    "tools": [
-      {"name": "bash", "description": "...", "inputSchema": {...}},
-      {"name": "file_read", "description": "...", "inputSchema": {...}},
-      ...
-    ]
-  }
-}
-```
-
-## Expected Behavior
-
-### Successful Integration
-
-When working correctly:
-
-1. ✅ Zed Assistant Panel opens without errors
-2. ✅ "andy-cli" appears as connected provider
-3. ✅ Assistant responds to prompts
-4. ✅ Tools are listed and can be executed
-5. ✅ File operations work within workspace
-6. ✅ No stdout pollution (only JSON-RPC messages)
-
-### Performance
-
-- **Startup time**: < 3 seconds
-- **Tool execution**: Varies by tool, typically < 1 second
-- **Response latency**: Depends on LLM provider
-
-## Example Workflow
-
-Here's a complete example of using Andy.CLI in Zed:
-
-1. **Open a project in Zed**
-   ```bash
-   cd ~/my-project
-   zed .
-   ```
-
-2. **Open Assistant** (`Cmd+?`)
-
-3. **Ask about the project**
-   ```
-   What files are in this project? Give me an overview.
-   ```
-
-4. **Request a code change**
-   ```
-   Can you add error handling to the main.ts file?
-   ```
-
-5. **Run tests**
-   ```
-   Run the test suite and tell me if anything fails.
-   ```
-
-The assistant will use Andy.CLI tools to:
-- List files
-- Read file contents
-- Edit files
-- Execute bash commands (npm test, etc.)
-- Report results
-
-## Next Steps
-
-- Read the ACP protocol spec: [Agent Client Protocol](https://github.com/zed-industries/agent-client-protocol)
-- Customize tools in Andy.CLI
-- Configure model preferences
-- Set up workspace-specific settings
-
-## Getting Help
-
-If you encounter issues:
-
-1. Check the [troubleshooting section](#troubleshooting) above
-2. Review Zed logs: View → Debug → Open Log
-3. Test Andy.CLI in standalone mode first
-4. Check stderr output for detailed error messages
+- [Zed external agents](https://zed.dev/docs/ai/external-agents)
+- [Agent Client Protocol](https://agentclientprotocol.com/)
+- [Andy command reference](README_COMMANDS.md)
+- [Rider CLI-agent comparison](CLI_AGENT_FEATURE_COMPARISON.md)

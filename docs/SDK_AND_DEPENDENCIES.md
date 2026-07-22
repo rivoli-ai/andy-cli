@@ -1,8 +1,9 @@
 # SDK and Dependency Policy
 
-This document describes how andy-cli pins its .NET SDK, records its known-good
-dependency graph, and checks compatibility with the Andy engine and TUI. It
-covers the requirements of issue #172.
+Updated: 2026-07-21
+
+This document describes how Andy CLI pins its .NET SDK, records its known-good
+dependency graph, and tracks compatibility with the Andy engine and TUI.
 
 ## 1. .NET SDK band
 
@@ -58,8 +59,9 @@ CI must fail fast if the selected SDK is not .NET 8. Use the helper script:
 scripts/assert-sdk-version.sh          # exits non-zero unless dotnet --version starts with 8.
 ```
 
-Recommended workflow step (if issue #171 owns the CI workflow, add this step
-there; the script is the portable contract either way):
+The release workflows run the following gate. The reusable PR validation relies
+on `actions/setup-dotnet` plus `global.json` and does not currently invoke the
+helper directly.
 
 ```yaml
 - uses: actions/setup-dotnet@v4
@@ -87,7 +89,7 @@ committed `packages.lock.json`:
 - `src/Andy.Cli.Headless.Contract/packages.lock.json`
 - `tests/Andy.Cli.Tests/packages.lock.json`
 
-Release and CI builds should restore in locked mode so the graph cannot drift:
+Release builds restore in locked mode so the graph cannot drift:
 
 ```bash
 dotnet restore Andy.Cli.sln --locked-mode
@@ -96,25 +98,38 @@ dotnet restore Andy.Cli.sln --locked-mode
 Regenerate the lock files intentionally (after a deliberate dependency bump)
 with `dotnet restore Andy.Cli.sln --force-evaluate` and commit the result.
 
+The reusable PR validation currently runs `dotnet restore Andy.Cli.sln` without
+`--locked-mode`. Because lock-file generation is enabled, that restore still
+uses and updates the locked graph, but CI should eventually use `--locked-mode`
+to fail instead of accepting a lock-file change in the ephemeral checkout.
+
 ## 4. API / contract compatibility with engine and TUI
 
 andy-cli shares contracts with andy-engine (engine events, tool contexts) and
 andy-tui2 (TUI primitives). Those are consumed as NuGet packages; the versions
 in the manifest are the source of truth for what the CLI is known-good against.
 
-To catch contract drift **before** a package is cut, build the CLI against the
-sibling source repos. A full cross-repo composite build cannot run in this
-repo's CI (the sibling paths are not guaranteed to exist on the runner), so it
-is documented here as the recommended approach and provided as a local helper
-stub:
+The package-based build is the only implemented compatibility gate today.
+`scripts/check-source-compat.sh` is explicitly a discovery stub: it verifies that
+configured sibling checkout paths exist, then reports that composite build
+wiring is not implemented. It does **not** replace package references, build the
+sibling repositories, or test source compatibility.
 
-- **Local composite build:** clone `rivoli-ai/andy-engine` and
-  `rivoli-ai/andy-tui2` next to this repo and run
-  `scripts/check-source-compat.sh` (honors `ENGINE_SRC` / `TUI_SRC`). The stub
-  detects the source repos and documents the pack/ProjectReference wiring a full
-  implementation would add.
-- **Recommended CI equivalent (owned by the CI epic, e.g. #171):** a separate,
-  opt-in matrix job that checks out andy-engine and andy-tui2 at chosen
-  revisions (composite checkout or submodule), builds the CLI against them, and
-  runs the test suite. Keep it distinct from the default package-based build so
-  the reproducible, pinned-graph build stays the release gate.
+A real source-compatibility gate would need to:
+
+1. Check out or locate `rivoli-ai/andy-engine` and `rivoli-ai/andy-tui2` at known
+   revisions.
+2. Pack them into an isolated local feed or inject temporary project references.
+3. Restore/build/test Andy CLI against those artifacts.
+4. Leave the committed package references and lock files unchanged.
+
+Until that exists, update `dependency-manifest.json` in the same commit as an
+Andy package bump and rely on the pinned package graph as the release contract.
+
+## Current known-good snapshot
+
+Do not duplicate the full package list in prose. As of 2026-07-21 the manifest
+records Andy.Engine `2026.7.21-rc.78`, Andy.Tui `2026.7.21-rc.162`, and the exact
+versions of every other direct Andy package. `dependency-manifest.json`, the
+project files, and `packages.lock.json` are authoritative if those versions
+change.

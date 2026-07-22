@@ -1,5 +1,7 @@
 # Headless runtime
 
+Updated: 2026-07-21
+
 ## Concept: andy-cli's dual role
 
 andy-cli has two roles that share a single binary:
@@ -248,7 +250,7 @@ tools. Built-ins and config tools coexist in one registry.
 Built-in tools are permission-gated and **fail-closed**. Headless runs wire the
 permission engine with no interactive broker, so any tool that would normally
 prompt ("Ask") is DENIED: the mutating built-ins (`write_file`, `delete_file`,
-`move_file`, `copy_file`, `file_editor`, `replace_text`, `create_directory`) and
+`move_file`, `copy_file`, `replace_text`, `create_directory`) and
 `execute_command` are denied unless explicitly relaxed. Read-only built-ins
 (`read_file`, `list_directory`, `search_text`, `git_diff`, etc.) stay
 auto-allowed. To permit specific mutating tools for a run, list them in
@@ -287,7 +289,7 @@ clear error rather than letting the LLM silently never call it.
 `env_vars` in the config must not shadow any of these; a config that lists any
 of these keys is rejected at load time (exit 2). Two families are reserved.
 
-Container-runtime identity (always set by the runtime) — so a run cannot repoint
+Container-runtime identity (always set by the runtime) - so a run cannot repoint
 its own egress proxy, spoof its run token, or redirect the MCP gateway:
 
 | Variable | Purpose |
@@ -296,7 +298,7 @@ its own egress proxy, spoof its run token, or redirect the MCP gateway:
 | `ANDY_TOKEN` | Run-scoped bearer token. When set, `HeadlessToolHost` attaches it as `Authorization: Bearer <token>` on every MCP request. The config cannot override it. |
 | `ANDY_PROXY_URL` | Egress proxy URL injected by the container runtime. |
 
-Permission-engine controls — `env_vars` are applied to the process environment
+Permission-engine controls - `env_vars` are applied to the process environment
 *before* the fail-closed permission gate is built, so shadowing any of these
 would let a run weaken or disable its own permission enforcement:
 
@@ -337,8 +339,8 @@ priority over strict additivity, and a real policy engine would arrive as v2.
 
 ## See also
 
-- [Event stream](event-stream.md) — the NDJSON event contract.
-- [ADR 0001: headless agent runtime](adr/0001-headless-agent-runtime.md) — why one binary hosts both modes, and the versioning strategy.
-- [ADR 0002: headless v1 inactive fields](adr/0002-headless-v1-inactive-fields.md) — implement-or-reject decisions for previously no-op v1 fields.
-- [`schemas/headless-config.v1.json`](../schemas/headless-config.v1.json) — the config schema.
-- [`schemas/samples/`](../schemas/samples) — example configs.
+- [Event stream](event-stream.md) - the NDJSON event contract.
+- [ADR 0001: headless agent runtime](adr/0001-headless-agent-runtime.md) - why one binary hosts both modes, and the versioning strategy.
+- [ADR 0002: headless v1 inactive fields](adr/0002-headless-v1-inactive-fields.md) - implement-or-reject decisions for previously no-op v1 fields.
+- [`schemas/headless-config.v1.json`](../schemas/headless-config.v1.json) - the config schema.
+- [`schemas/samples/`](../schemas/samples) - example configs.

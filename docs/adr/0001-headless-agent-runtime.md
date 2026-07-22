@@ -72,6 +72,6 @@ overloaded with incompatible meanings.
 ## References
 
 - Epic AQ: rivoli-ai/andy-cli#44
-- `docs/headless-runtime.md` — the command, config schema, and exit codes.
-- `docs/event-stream.md` — the NDJSON event contract.
+- `docs/headless-runtime.md` - the command, config schema, and exit codes.
+- `docs/event-stream.md` - the NDJSON event contract.
 - `schemas/headless-config.v1.json`, `schemas/headless-events.v1.json`.

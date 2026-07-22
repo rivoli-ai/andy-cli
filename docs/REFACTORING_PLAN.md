@@ -1,13 +1,15 @@
 # CLI Refactoring Plan
 
+Updated: 2026-07-21
+
 ## Overview
 This document outlines the refactoring strategy for the Andy CLI to improve maintainability, testability, and consistency.
 
 ## Current file sizes (issue #177 baseline)
 
-Measured on the `fix/177-composition-root-refactor` branch:
+Measured on `main` on 2026-07-21:
 
-- `src/Andy.Cli/Program.cs` - ~2,180 lines (was ~2,244 before this pass).
+- `src/Andy.Cli/Program.cs` - 2,204 lines.
   Combines DI composition, provider/permission setup, headless/ACP/command
   dispatch, input handling, TUI lifecycle, and rendering.
 - `src/Andy.Cli/Widgets/FeedView.cs` - ~3,150 lines, ~15 types in one file.
@@ -16,8 +18,8 @@ Measured on the `fix/177-composition-root-refactor` branch:
 
 ## Issue #177 first increment (composition-root extraction)
 
-Safe, behaviour-preserving extractions landed on this branch. Logic was moved
-**verbatim**; the whole existing test suite still passes.
+Safe, behavior-preserving extractions have landed. Logic was moved verbatim and
+is covered by the existing test suite.
 
 - **`src/Andy.Cli/Hosting/CliMode.cs` + `CliModeSelector.cs`** - the top-level
   mode-dispatch decision (`version` / `acp` / `headless` / `command` /
@@ -46,7 +48,7 @@ behaviour currently *depends* on a fresh instance having no previous grid.
 A safe fix requires a reset/invalidate API on `FrameScheduler` (an `andy-tui2`
 change). **Recommendation:** add `FrameScheduler.Invalidate()` (or a
 `ForceFullRepaint()` flag) in andy-tui2, then replace the recreation with a call
-to it here. Left unchanged on this branch.
+to it here. The recreation remains in the current implementation.
 
 ### Direct Console output mixed with TUI rendering (noted)
 
@@ -59,13 +61,17 @@ increment).
 
 ## Completed
 
-### 1. Centralized Theme System ✓
+### 1. Centralized theme definitions and runtime switching
 - **File**: `src/Andy.Cli/Themes/Theme.cs`
 - **Purpose**: Single source of truth for all colors used in the UI
 - **Benefits**:
   - Easy theme switching
   - Consistent color usage across all widgets
   - No more scattered color definitions
+
+Theme selection, persistence, 34 built-in themes, and optional transparent
+backgrounds are implemented. Full widget adoption is not complete; several
+widgets still contain hard-coded colors, tracked in item 3.
 
 **Usage Example**:
 ```csharp
@@ -81,14 +87,15 @@ var fg = Theme.Current.Text;
 ## In Progress
 
 ### 2. FeedView Refactoring
-**Current State**: `FeedView.cs` is 2144 lines with 10+ classes defined in one file
+**Current State**: `FeedView.cs` is 3,152 lines with roughly 15 types defined in
+one file. Only `IFeedItem` has been extracted.
 
 **Target State**: Break into multiple files:
 ```
 Widgets/
   FeedView.cs (main view class only)
   FeedItems/
-    IFeedItem.cs ✓
+    IFeedItem.cs (complete)
     MarkdownItem.cs
     CodeBlockItem.cs
     UserBubbleItem.cs
@@ -107,7 +114,7 @@ Widgets/
 - Faster compilation (smaller files)
 
 **Migration Strategy**:
-1. Extract interface (IFeedItem.cs) ✓
+1. Extract interface (`IFeedItem.cs`) (complete)
 2. Extract one item class at a time
 3. Update FeedView.cs to use the extracted classes
 4. Write unit tests for each extracted class
@@ -119,21 +126,18 @@ Widgets/
 Update all widgets to use `Theme.Current` instead of hardcoded colors:
 
 **Priority Files**:
-- [ ] KeyHintsBar.cs
-- [ ] ToastStatus.cs
-- [ ] PromptLine.cs
-- [ ] MarkdownDisplay.cs
-- [ ] StatusMessage.cs
-- [ ] TokenCounter.cs
-- [ ] CommandOutput.cs
-- [ ] CommandOutputView.cs
-- [ ] ModelListItem.cs
-- [ ] ToolListItem.cs
-- [ ] ResponseSeparator.cs
+- [ ] Remove remaining hard-coded colors from `FeedView.cs` feed items.
+- [ ] Theme `CommandPalette`, `PermissionsManager`, `InlineCommandHelp`, and
+  `ToolExecutionDisplay`.
+- [ ] Theme remaining fallback/status colors in `MarkdownDisplay`,
+  `ContextStatusBar`, `StatusMessage`, `TokenCounter`, `CommandOutput`,
+  `CommandOutputView`, `ModelListItem`, `ToolListItem`, and `ResponseSeparator`.
+- [ ] Add regression coverage for light and transparent themes across the
+  remaining widgets.
 
 ### 4. Program.cs Refactoring
 **Current Issues**:
-- ~2,180 lines; `Main` is still a very large method
+- 2,204 lines; `Main` is still a very large method
 - Mixed concerns: initialization, rendering, input handling
 - Hard to test
 
@@ -214,13 +218,12 @@ public void MarkdownItem_MeasuresCorrectLineCount()
 }
 ```
 
-## Future Considerations
+## Future considerations
 
-### Theme Switching
-Once theme system is fully integrated:
-- Add ability to switch themes at runtime
-- Provide light/dark theme presets
-- Allow user-defined themes via configuration
+### User-defined themes
+
+Runtime switching and built-in light/dark themes are complete. A future config
+format could allow user-defined theme palettes without recompiling the CLI.
 
 ### Configuration System
 - Move theme configuration to appsettings.json
@@ -231,7 +234,7 @@ Once theme system is fully integrated:
 
 - [x] Create Theme.cs
 - [x] Extract IFeedItem interface
-- [ ] Update 5 key widgets to use Theme
+- [ ] Remove remaining hard-coded widget colors
 - [ ] Extract 3 feed item classes
 - [ ] Write tests for extracted classes
 - [x] Document migration for remaining classes (see `docs/feedview-inventory.md`)
@@ -241,3 +244,10 @@ Once theme system is fully integrated:
 - [ ] Extract render loop / input handler / dialogs out of `Program.Main` (#177, follow-up)
 - [ ] Cross-repo: add `FrameScheduler` reset/invalidate API in andy-tui2 and stop recreating it per reflow (#177)
 - [ ] Cross-repo: move REUSABLE feed items into andy-tui2 (#177, see inventory)
+
+## Completion summary
+
+2026-07-21: Re-audited every checklist item against `main`, corrected the
+Program/FeedView baselines, recorded the completed runtime theme system, and
+kept the remaining widget-theme, FeedView extraction, Program decomposition,
+and cross-repository TUI work open.

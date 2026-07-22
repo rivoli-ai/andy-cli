@@ -1,5 +1,7 @@
-# andy-cli
-Command line AI code assistant powered by .NET 8
+# Andy CLI
+
+A .NET 8 coding agent with an interactive terminal UI, a strict headless
+runtime, and an Agent Client Protocol (ACP) server for editor integrations.
 
 > **ALPHA RELEASE WARNING**
 >
@@ -17,24 +19,33 @@ Command line AI code assistant powered by .NET 8
 
 ## Features
 
-- **Interactive TUI** - Modern terminal interface with real-time streaming responses
+- **Interactive TUI** - Terminal chat, live agent/tool progress, diffs, themes,
+  prompt history, and expandable tool results
 - **Multi-Provider Support** - Works with OpenRouter, OpenAI, Anthropic, Cerebras, Groq, Google Gemini, and Ollama
 - **Smart Provider Detection** - Automatically selects the best available LLM provider
-- **Tool Execution** - File operations, code and text search, shell commands (execute_command), code indexing (code_index), git_diff, dataframe tools, http_request, and MCP tools
-- **Permission Management** - Interactive permission manager (/permissions) and permission layers for controlling tool access
-- **UI Themes** - Switchable terminal UI themes (/theme)
+- **54 Built-in Tools** - File operations, code and text search, shell commands,
+  code indexing, git diffs, HTTP/JSON, 28 dataframe tools, and six PDF tools
+- **Permission Management** - Interactive permission prompts and layered
+  allow/ask/deny rules through `/permissions`
+- **UI Themes** - 34 built-in themes, persistence, and optional transparent
+  backgrounds through `/theme`
 - **Code Indexing** - Index a codebase for fast code-aware search
 - **Headless Agent Runtime** - Non-interactive agent runtime with structured exit codes
 - **ACP Server Mode** - Run as an Agent Client Protocol server for editor integrations
 - **Observability** - Instrumentation and a performance HUD; crash logging for diagnostics
-- **Performance Optimized** - Efficient streaming and rendering with Andy.Tui framework
+- **Reusable .NET Components** - Built on the Andy.Engine, Andy.Llm,
+  Andy.Tools, Andy.Permissions, Andy.MCP, Andy.Acp.Core, and Andy.Tui packages
 
-## Installation
+## Build and run
 
 ```bash
 dotnet build
 dotnet run --project src/Andy.Cli
 ```
+
+Published, self-contained binaries are produced by the GitHub release workflow
+for macOS, Linux, and Windows on x64 and ARM64. Verify downloaded artifacts
+against the release checksums before running them.
 
 ## Configuration
 
@@ -62,15 +73,14 @@ providers are configured, detection prefers them in this order:
 
 #### Required for Providers
 
-See Andy.Llm library documentation.
-
 - `OPENAI_API_KEY` - OpenAI API key
 - `OPENROUTER_API_KEY` - OpenRouter API key
 - `ANTHROPIC_API_KEY` - Anthropic (Claude) API key
 - `CEREBRAS_API_KEY` - Cerebras API key
 - `GROQ_API_KEY` - Groq API key
 - `GOOGLE_API_KEY` - Google Gemini API key
-- `OLLAMA_API_BASE` - Custom Ollama endpoint (default: http://localhost:11434)
+- `OLLAMA_API_BASE` - Custom Ollama endpoint (default:
+  `http://localhost:11434`)
 
 #### Provider Control
 
@@ -112,19 +122,22 @@ dotnet run --project src/Andy.Cli
 
 #### Keyboard Shortcuts
 
-- `Ctrl+P` - Open command palette
+- `Ctrl+P` (or `Cmd+P`) - Open command palette
 - `Ctrl+]` - Toggle scroll mode (Feed vs Prompt History)
 - `Ctrl+O` - Expand/collapse tool output detail
 - `F2` - Toggle performance HUD
-- `F3` - Toggle mouse capture (off by default so native text selection works; on enables mouse-wheel scroll)
-- `ESC` - Exit application
-- `Up/Down` - Scroll through chat history
+- `F3` - Toggle mouse capture (on by default for wheel scrolling; use
+  Option/Shift+drag to select, or turn capture off for native selection)
+- `Esc` or `Ctrl+D` - Open the exit confirmation (Esc first closes an open
+  palette or permission manager)
+- `Up/Down` - Move within the prompt or navigate prompt history in history mode
 - `Page Up/Down` - Fast scroll
 
 #### Slash Commands
 
 - `/model list` - Show available models
 - `/model switch <model>` - Switch to a different model (same provider)
+- `/model switch <provider> <model>` - Switch provider and model together
 - `/model provider <name>` - Switch to a different provider
 - `/model refresh` - Refresh model lists from the provider API
 - `/model info` - Show current model details
@@ -133,8 +146,12 @@ dotnet run --project src/Andy.Cli
 - `/tools info <tool_name>` - Show details for a tool
 - `/permissions` - View and edit tool permissions (aliases: `perms`, `perm`)
 - `/theme` - List and switch the UI theme (alias: `themes`)
+- `/theme transparent on|off` - Toggle a supported theme's transparent background
 - `/clear` - Clear conversation history
 - `/help` - Show help information
+
+See [`docs/README_COMMANDS.md`](docs/README_COMMANDS.md) for the complete
+command and keyboard reference.
 
 ### Command Line Mode
 
@@ -175,12 +192,18 @@ Run as an Agent Client Protocol (ACP) server for editor integrations:
 dotnet run --project src/Andy.Cli -- --acp
 ```
 
-#### ACP progress updates (2026-07-21)
+#### ACP behavior
 
 ACP sessions report the resolved provider/model on the first prompt and stream
 model progress narration, tool starts, and real tool completion results through
 `session/update`. Editors such as Zed can therefore render activity while the
 agent is working instead of showing only the final answer.
+
+Sessions are retained only in the running ACP process. Andy currently supports
+new sessions, in-process session loading, embedded text/resource context, and
+cancellation, but not session listing, forking, durable resume, model/mode
+switching, or image/audio prompts. See [`docs/ZED_INTEGRATION.md`](docs/ZED_INTEGRATION.md)
+and the [Rider agent comparison](docs/CLI_AGENT_FEATURE_COMPARISON.md).
 
 ## Development
 
@@ -209,6 +232,14 @@ this repository). The application is built on a set of Andy.* NuGet packages:
 - `src/Andy.Cli/Tools/` - Additional tool implementations
 - `src/Andy.Cli/Widgets/` - TUI components and views
 - `tests/Andy.Cli.Tests/` - Unit and integration tests
+
+### Documentation
+
+- [`docs/README.md`](docs/README.md) - Documentation index
+- [`docs/README_COMMANDS.md`](docs/README_COMMANDS.md) - Commands and shortcuts
+- [`docs/headless-runtime.md`](docs/headless-runtime.md) - Headless config and execution contract
+- [`docs/ZED_INTEGRATION.md`](docs/ZED_INTEGRATION.md) - ACP editor integration
+- [`docs/CLI_AGENT_FEATURE_COMPARISON.md`](docs/CLI_AGENT_FEATURE_COMPARISON.md) - Rider CLI-agent comparison
 
 ### Testing
 
@@ -252,4 +283,4 @@ record the resulting known-good graph.
 
 ## License
 
-See LICENSE file for details.
+See [`LICENSE`](LICENSE) for details.

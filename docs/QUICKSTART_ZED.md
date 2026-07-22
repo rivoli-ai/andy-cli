@@ -1,81 +1,60 @@
-# Quick Start: Andy CLI with Zed
+# Quickstart: Andy CLI with Zed
 
-## 1. Build Andy CLI
+Updated: 2026-07-21
 
-```bash
-cd /Users/samibengrine/Devel/rivoli-ai/andy-cli
-dotnet build
-```
+Andy CLI exposes an Agent Client Protocol (ACP) server over standard input and
+output. Zed starts the process for each agent connection.
 
-## 2. Test it works
+## 1. Publish the executable
 
 ```bash
-dotnet run --project src/Andy.Cli -- --acp
+dotnet publish src/Andy.Cli/Andy.Cli.csproj \
+  --configuration Release \
+  --runtime osx-arm64 \
+  --self-contained true \
+  --output ./publish \
+  -p:PublishSingleFile=true
 ```
 
-You should see:
+Change the runtime for the target platform (`osx-x64`, `linux-x64`,
+`linux-arm64`, `win-x64`, or `win-arm64`). Confirm the result:
+
+```bash
+./publish/andy-cli --version
+./publish/andy-cli tools list
 ```
-info: Andy.Cli.ACP.AcpServerHost[0]
-      ACP server initialized with 20 tools
-```
 
-Press Ctrl+C to stop.
+## 2. Configure Zed
 
-## 3. Configure Zed
-
-Edit `~/.config/zed/settings.json`:
+Add this entry to Zed's `settings.json`, replacing the command with the absolute
+path to the published executable:
 
 ```json
 {
   "agent_servers": {
     "Andy CLI": {
-      "command": "dotnet",
-      "args": [
-        "run",
-        "--project",
-        "/Users/samibengrine/Devel/rivoli-ai/andy-cli/src/Andy.Cli",
-        "--",
-        "--acp"
-      ],
-      "env": {
-        "OPENAI_API_KEY": "sk-..."
-      }
+      "command": "/absolute/path/to/publish/andy-cli",
+      "args": ["--acp"]
     }
   }
 }
 ```
 
-**Replace**:
-- `/Users/samibengrine/...` with your actual path
-- `sk-...` with your OpenAI API key
+Ensure the Zed process receives one supported provider credential, such as
+`OPENROUTER_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`. Do not commit a
+credential in `settings.json`. If the GUI application does not inherit shell
+environment variables, use an OS/IDE credential-injection mechanism or a local,
+ignored settings file.
 
-## 4. Test in Zed
+## 3. Connect and test
 
-1. Restart Zed (completely quit and reopen)
-2. Open Assistant Panel: `Cmd+?` (Mac) or `Ctrl+?` (Windows/Linux)
-3. Try: "What tools do you have available?"
+Restart the agent server, select **Andy CLI** in Zed's agent panel, and ask it to
+list or read files in the open project. On the first prompt Andy reports the
+resolved provider/model and then sends progress, tool-start, tool-result, and
+final response updates.
 
-## Available Tools
+Andy currently exposes 54 built-in tools. The live list from `tools list` is
+authoritative because package upgrades can add or remove tools.
 
-Andy CLI exposes 20 tools:
-- **File operations**: read, write, copy, move, delete, list directory
-- **Git**: git diff
-- **System**: process info, system info
-- **Text**: format, replace, search
-- **Web**: HTTP requests, JSON processing
-- **Utilities**: datetime, encoding, todo management
-- **Bash**: execute shell commands
-- **Code**: code index search
-
-## Troubleshooting
-
-**"Connection failed"**
-- Check the path in settings.json is absolute and correct
-- Test the command manually in terminal
-- Check Zed logs: View → Debug → Open Log
-
-**"No tools showing"**
-- Verify tools registered: `dotnet run --project src/Andy.Cli -- tools list`
-- Check API key is set in settings
-
-**For detailed help**: See `docs/ZED_INTEGRATION.md`
+For lifecycle limitations, source-build alternatives, and troubleshooting, see
+[Zed and ACP integration](ZED_INTEGRATION.md).

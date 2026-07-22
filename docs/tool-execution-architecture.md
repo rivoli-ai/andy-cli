@@ -1,5 +1,7 @@
 # Tool Execution Architecture in SimpleAssistantService
 
+Updated: 2026-07-21
+
 > Refreshed to match the current SimpleAssistantService-based architecture.
 > The previous revision described an `AiConversationService` / `ToolExecutionService`
 > / `ContextManager` design that has been replaced. The agent loop now lives in the
@@ -66,8 +68,10 @@ display-only `bash_command` tool has been retired. Other registered tools includ
 - Text: `search_text`, `replace_text`, `format_text`
 - Code/Git: `code_index`, `git_diff`
 - System: `execute_command`, `process_info`, `system_info`
-- Web/Data: `http_request`, `json_processor`, `dataframe_*` (DuckDB-backed)
-- Utility: `datetime`, `encoding`, `todo_management`
+- Web/Data: `http_request`, `json_processor`, `dataframe_*` (28 DuckDB-backed tools)
+- PDF: `pdf_extract_text`, `pdf_reflow`, `pdf_extract_tables`, `pdf_outline`,
+  `pdf_info`, `pdf_search`
+- Utility: `datetime_tool`, `encoding_tool`, `todo_management`
 
 The `ToolRegistryAdapter` wraps each enabled tool in a `ToolAdapter` and registers it
 into an `Andy.Model.Tooling.ToolRegistry` that the engine consumes. Tool JSON schemas
@@ -281,7 +285,9 @@ rather than the dump.
 
 Headless wires permissions fail-closed (no interactive broker): anything that would
 prompt is denied unless an injected per-run allow-list (`config.permissions.allowed_tools`,
-installed at the Injected layer) or `ANDY_PERMISSION_MODE=bypass` relaxes it. See
+installed at the Injected layer) or the process-level
+`ANDY_PERMISSION_MODE=bypass` override relaxes it. The override is reserved from
+headless `env_vars`, so a run config cannot enable it for itself. See
 `docs/headless-runtime.md` for the full headless contract.
 
 ## Configuration Constants

@@ -1,16 +1,18 @@
-# FeedView.cs Component Inventory (issue #177)
+# FeedView.cs component inventory
 
-`src/Andy.Cli/Widgets/FeedView.cs` is ~3,150 lines and defines roughly a dozen
+Updated: 2026-07-21
+
+`src/Andy.Cli/Widgets/FeedView.cs` is 3,152 lines and defines roughly 15
 types in a single file. Issue #177 calls for moving the general-purpose,
 reusable rendering pieces into the `andy-tui2` package (owner of TUI work) while
-keeping CLI-only domain presentation here.
+keeping CLI-only domain presentation here. This remains the working inventory
+for the refactoring tracked in issue #177.
 
 **Important:** `Andy.Tui` is consumed here as a NuGet **package**; its source
 lives in the sibling `andy-tui2` repository and is **not editable from this
 repo**. Actually moving any component into `andy-tui2` is therefore a
-**cross-repo change** and is out of scope for the in-repo work on this branch.
-This document is the inventory + migration recommendation that unblocks that
-cross-repo effort.
+**cross-repo change**. This document is the inventory and migration
+recommendation for coordinating that work.
 
 ## Classification legend
 
@@ -67,8 +69,9 @@ cross-repo effort.
    (bordered block, streaming text, spinner), extract that core into andy-tui2
    and keep the thin CLI-specific wrapper here.
 
-## Status on this branch
+## Current status
 
-No components were moved (cross-repo, out of scope). This inventory + the
-recommendation is the deliverable. The in-repo file split (step 1) remains an
-open, low-risk follow-up tracked in `REFACTORING_PLAN.md`.
+No feed-item implementations have moved yet; only `IFeedItem` is already in
+`Widgets/FeedItems/`. The in-repository file split remains the next low-risk
+increment in `REFACTORING_PLAN.md`, followed by coordinated package work for
+components that belong in `andy-tui2`.
