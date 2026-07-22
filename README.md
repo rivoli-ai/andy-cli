@@ -276,6 +276,12 @@ See [`docs/SDK_AND_DEPENDENCIES.md`](docs/SDK_AND_DEPENDENCIES.md) for the SDK
 band policy, how to update it, the CI SDK check (`scripts/assert-sdk-version.sh`),
 and the engine/TUI source-revision compatibility workflow.
 
+For a cross-repository change, run
+`ANDY_SKIP_OLLAMA=1 scripts/check-source-compat.sh` with sibling Andy.Engine and
+Andy.Tui checkouts. The helper uses an isolated project-reference overlay and
+leaves committed package references and lock files unchanged. The same check is
+available as the manual `Source compatibility` GitHub Actions workflow.
+
 Dependency status (2026-07-21): the CLI's direct NuGet references and recursive
 Andy package graph were refreshed to the latest verified stable or prerelease
 versions for the .NET 8 target. The package lock files and dependency manifest

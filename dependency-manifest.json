@@ -1,7 +1,7 @@
 {
   "$comment": "Known-good dependency graph for andy-cli. Records the exact SDK band and Andy ecosystem package versions the CLI is verified against. Update this file in the same commit that bumps global.json or any Andy.* PackageReference in src/Andy.Cli/Andy.Cli.csproj. See docs/SDK_AND_DEPENDENCIES.md and issue #172.",
   "schemaVersion": 1,
-  "updated": "2026-07-21",
+  "updated": "2026-07-22",
   "sdk": {
     "channel": "8.0",
     "minimumVersion": "8.0.0",
@@ -32,7 +32,7 @@
     "Andy.Tools.Pdf": "2026.7.21-rc.86"
   },
   "sourceRevisionCompatibility": {
-    "$comment": "When building the CLI against sibling SOURCE repos instead of the pinned packages (see scripts/check-source-compat.sh), these are the branches/revisions the above package versions were cut from. CI cannot rely on these paths; they document the local composite-build workflow.",
+    "$comment": "The opt-in source compatibility check uses these local defaults; the manual source-compat workflow checks out explicit revisions instead. Package versions above remain the release contract.",
     "andy-engine": {
       "repo": "rivoli-ai/andy-engine",
       "localPath": "../andy-engine",
@@ -51,6 +51,6 @@
       "tests/Andy.Cli.Tests/packages.lock.json"
     ],
     "restoreCommand": "dotnet restore Andy.Cli.sln --locked-mode",
-    "policy": "RestorePackagesWithLockFile is enabled on every project. Release builds must restore with --locked-mode so the package graph is reproducible from the committed lock files."
+    "policy": "RestorePackagesWithLockFile is enabled on every project. Reusable validation and release builds restore with --locked-mode so the package graph is reproducible from the committed lock files."
   }
 }

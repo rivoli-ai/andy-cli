@@ -105,24 +105,41 @@ andy-cli shares contracts with andy-engine (engine events, tool contexts) and
 andy-tui2 (TUI primitives). Those are consumed as NuGet packages; the versions
 in the manifest are the source of truth for what the CLI is known-good against.
 
-The package-based build is the only implemented compatibility gate today.
-`scripts/check-source-compat.sh` is explicitly a discovery stub: it verifies that
-configured sibling checkout paths exist, then reports that composite build
-wiring is not implemented. It does **not** replace package references, build the
-sibling repositories, or test source compatibility.
+The package-based build remains the default PR and release compatibility gate.
+For cross-repository changes, `scripts/check-source-compat.sh` provides an
+opt-in source-level gate. It:
 
-A real source-compatibility gate would need to:
+1. Accepts explicit Engine/TUI checkout paths and required revisions.
+2. Copies the current CLI working tree into an isolated temporary workspace,
+   excluding build artifacts and package lock files.
+3. Uses a temporary MSBuild targets overlay to replace `Andy.Engine` with its
+   source project and the bundled `Andy.Tui` package with every split TUI source
+   project. Committed project files and lock files are never edited.
+4. Restores, builds, and runs the full CLI test project against those sources.
+5. Verifies that the CLI, Engine, and TUI working-tree states are unchanged and
+   prints a `SOURCE_COMPAT_SUMMARY=<json>` line with revisions and evaluated
+   package versions.
 
-1. Check out or locate `rivoli-ai/andy-engine` and `rivoli-ai/andy-tui2` at known
-   revisions.
-2. Pack them into an isolated local feed or inject temporary project references.
-3. Restore/build/test Andy CLI against those artifacts.
-4. Leave the committed package references and lock files unchanged.
+With sibling checkouts at the defaults, run:
 
-Until that exists, update `dependency-manifest.json` in the same commit as an
-Andy package bump and rely on the pinned package graph as the release contract.
-The executable source-compatibility build is tracked by
-[#216](https://github.com/rivoli-ai/andy-cli/issues/216).
+```bash
+ANDY_SKIP_OLLAMA=1 scripts/check-source-compat.sh
+```
+
+Use `--engine-src`, `--tui-src`, `--engine-revision`, and `--tui-revision` for
+other locations or refs. The script validates that each requested revision is
+already checked out; it never changes a source repository. The manual
+`source-compat.yml` workflow checks out both repositories and runs the same
+command. A source API break fails compilation or the contract tests, while the
+normal package-based validation stays authoritative for releases.
+
+### Source compatibility validation (2026-07-22)
+
+The implemented overlay compiled and ran the full CLI suite against Engine
+`00147f2a91fe884dae12e4fd2dec5f2eee1e256c` and TUI
+`1c59df6676a0b16182381ac4b4bad068299caf08`: 1,237 tests passed and four were
+skipped. The script regression suite also covers missing checkouts, build
+failure, contract-test failure, machine-readable output, and cleanup.
 
 ## Current known-good snapshot
 

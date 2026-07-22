@@ -72,6 +72,14 @@ framework-dependent build can miss.
 Linux ARM64 and Windows ARM64 artifacts are built but are not smoke-tested
 because the workflow does not currently use native runners for those targets.
 
+## Manual source compatibility
+
+`source-compat.yml` is an opt-in `workflow_dispatch` check for changes spanning
+andy-cli, andy-engine, and andy-tui2. Its Engine and TUI revision inputs are
+checked out explicitly, then `scripts/check-source-compat.sh` builds and runs
+the full CLI test project against those source trees. It does not replace the
+package-based validation or release gates.
+
 The `release-signed-todo.yml` workflow is intentionally named and labeled as an
 unsigned placeholder. Signing certificates, notarization, verification steps,
 and maintainer-owned secrets must be configured before it can become a signed
