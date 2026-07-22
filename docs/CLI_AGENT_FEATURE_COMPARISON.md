@@ -285,14 +285,14 @@ Andy advertises and implements:
 - Embedded text/resource context from the client.
 - Cancellation propagated to the active Engine operation.
 - Provider/model identification on the first prompt.
+- A grouped per-session provider/model picker through ACP config options.
 - Progress narration, tool-start updates, real tool results, and final output.
 
 Current ACP limitations are important:
 
 - Session history is not persisted across process restarts.
 - Loading a retained session returns metadata but cannot replay the transcript.
-- Session list, fork, durable resume, model switching, and mode switching are not
-  implemented.
+- Session list, fork, durable resume, and mode switching are not implemented.
 - Image and audio prompt capabilities are not advertised.
 - Final model text is sent as one completed chunk because the Engine does not yet
   expose token-level response streaming.
@@ -321,7 +321,7 @@ credential mechanism rather than committing them to `acp.json`.
 
 | Dimension | Andy CLI today | Comparison impact |
 | --- | --- | --- |
-| Provider choice | Seven remote/local provider paths with automatic detection | Stronger choice than single-vendor agents; less polished model catalog than mature multi-provider CLIs |
+| Provider choice | Seven remote/local provider paths with automatic detection and per-session ACP selection | Stronger choice than single-vendor agents; the picker currently exposes the configured/default model for each available provider rather than a live model catalog |
 | Built-in structured data | 28 dataframe and 6 PDF tools | Unusually strong for repository-plus-data workflows |
 | .NET architecture | Engine, LLM, Tools, Permissions, MCP, ACP, and TUI are separate packages | Good for reuse and embedding in .NET systems |
 | Headless contract | Versioned schema, limits, permission allowlist, event stream, atomic output, structured exit codes | Strong automation foundation and clearer failure semantics than an ad-hoc prompt flag |
@@ -342,7 +342,7 @@ scoped GitHub work:
 | Gap | Tracking issue |
 | --- | --- |
 | Incremental ACP final responses and rich editor-native tool content | [#204](https://github.com/rivoli-ai/andy-cli/issues/204) |
-| ACP provider/model selection | [#205](https://github.com/rivoli-ai/andy-cli/issues/205) |
+| ACP provider/model selection (delivered) | [#205](https://github.com/rivoli-ai/andy-cli/issues/205) |
 | Persistent sessions, replay, catalog, and resume | [#206](https://github.com/rivoli-ai/andy-cli/issues/206) |
 | Bounded subagent delegation and parallel work | [#210](https://github.com/rivoli-ai/andy-cli/issues/210) |
 | Repository instructions and reusable skills | [#212](https://github.com/rivoli-ai/andy-cli/issues/212) |

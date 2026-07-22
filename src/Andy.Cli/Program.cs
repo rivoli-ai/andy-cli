@@ -2027,6 +2027,52 @@ class Program
 
             var toolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
 
+            var modelSelections = Andy.Cli.ACP.AcpModelCatalog.Build(
+                llmOptions,
+                currentProvider,
+                currentModel,
+                detectionService.IsProviderAvailable);
+            var sessionAgentFactory = new Andy.Cli.ACP.SimpleAgentSessionAgentFactory(
+                (selectedProvider, selectedModel) =>
+                {
+                    var sessionServices = new ServiceCollection();
+                    sessionServices.AddLogging();
+                    sessionServices.ConfigureLlmFromEnvironment();
+                    sessionServices.AddLlmServices(options =>
+                    {
+                        options.DefaultProvider = selectedProvider;
+                        var providerConfig = options.Providers.FirstOrDefault(pair =>
+                            pair.Key.Equals(selectedProvider, StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(pair.Value.Provider, selectedProvider, StringComparison.OrdinalIgnoreCase));
+                        if (providerConfig.Value != null)
+                        {
+                            providerConfig.Value.Model = selectedModel;
+                        }
+                    });
+                    sessionServices.AddSingleton<
+                        Andy.Llm.Providers.ILlmProviderFactory,
+                        Andy.Llm.Providers.LlmProviderFactory>();
+
+                    var sessionServiceProvider = sessionServices.BuildServiceProvider();
+                    try
+                    {
+                        var sessionProviderFactory = sessionServiceProvider
+                            .GetRequiredService<Andy.Llm.Providers.ILlmProviderFactory>();
+                        var selectedLlmProvider = sessionProviderFactory.CreateProvider(selectedProvider)
+                            ?? throw new InvalidOperationException(
+                                $"Failed to create LLM provider for: {selectedProvider}");
+                        return (selectedLlmProvider, (IDisposable?)sessionServiceProvider);
+                    }
+                    catch
+                    {
+                        sessionServiceProvider.Dispose();
+                        throw;
+                    }
+                },
+                toolRegistry,
+                toolExecutor,
+                loggerFactory);
+
             // Create the Andy agent provider. Passing the logger factory lets it
             // build a proper typed logger for each engine agent, and the provider
             // is disposed on shutdown so all retained sessions are cleaned up.
@@ -2037,7 +2083,9 @@ class Program
                 loggerFactory.CreateLogger<Andy.Cli.ACP.AndyAgentProvider>(),
                 loggerFactory,
                 defaultModel: currentModel,
-                defaultProvider: currentProvider);
+                agentFactory: sessionAgentFactory,
+                defaultProvider: currentProvider,
+                modelSelections: modelSelections);
 
             logger.LogInformation("Andy agent provider initialized");
 

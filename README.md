@@ -199,10 +199,15 @@ model progress narration, tool starts, and real tool completion results through
 `session/update`. Editors such as Zed can therefore render activity while the
 agent is working instead of showing only the final answer.
 
+Each session also advertises a grouped `model` configuration picker containing
+the providers available in the server environment. Changing it rebuilds that
+session with the selected provider/model and resets only that session's
+conversation context.
+
 Sessions are retained only in the running ACP process. Andy currently supports
 new sessions, in-process session loading, embedded text/resource context, and
-cancellation, but not session listing, forking, durable resume, model/mode
-switching, or image/audio prompts. See [`docs/ZED_INTEGRATION.md`](docs/ZED_INTEGRATION.md)
+cancellation, but not session listing, forking, durable resume, mode switching,
+or image/audio prompts. See [`docs/ZED_INTEGRATION.md`](docs/ZED_INTEGRATION.md)
 and the [Rider agent comparison](docs/CLI_AGENT_FEATURE_COMPARISON.md).
 
 ## Development

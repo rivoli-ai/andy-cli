@@ -18,7 +18,7 @@ namespace Andy.Cli.ACP;
 /// lifecycle, bounded retention, and cancellation that reaches the running
 /// engine operation.
 /// </summary>
-public class AndyAgentProvider : IAgentProvider, IDisposable
+public class AndyAgentProvider : IAgentProvider, ISessionConfigProvider, IDisposable
 {
     private readonly IToolRegistry _toolRegistry;
     private readonly ILogger<AndyAgentProvider>? _logger;
@@ -27,6 +27,8 @@ public class AndyAgentProvider : IAgentProvider, IDisposable
     private readonly string _systemPrompt;
     private readonly string _defaultModel;
     private readonly string _defaultProvider;
+    private readonly IReadOnlyList<AcpModelSelection> _modelSelections;
+    private readonly Dictionary<string, AcpModelSelection> _modelSelectionsById;
 
     public AndyAgentProvider(
         ILlmProvider llmProvider,
@@ -37,7 +39,8 @@ public class AndyAgentProvider : IAgentProvider, IDisposable
         int maxSessions = AndySessionRegistry.DefaultMaxSessions,
         string? defaultModel = null,
         ISessionAgentFactory? agentFactory = null,
-        string? defaultProvider = null)
+        string? defaultProvider = null,
+        IReadOnlyList<AcpModelSelection>? modelSelections = null)
     {
         if (llmProvider == null) throw new ArgumentNullException(nameof(llmProvider));
         _toolRegistry = toolRegistry ?? throw new ArgumentNullException(nameof(toolRegistry));
@@ -48,6 +51,18 @@ public class AndyAgentProvider : IAgentProvider, IDisposable
         _agentFactory = agentFactory
             ?? new SimpleAgentSessionAgentFactory(llmProvider, toolRegistry, toolExecutor, loggerFactory);
         _sessions = new AndySessionRegistry(maxSessions, logger);
+        _modelSelections = modelSelections ?? AcpModelCatalog.Build(
+            options: null,
+            _defaultProvider,
+            _defaultModel);
+        if (_modelSelections.Count == 0)
+        {
+            throw new ArgumentException("At least one ACP model selection is required.", nameof(modelSelections));
+        }
+
+        _modelSelectionsById = _modelSelections.ToDictionary(
+            selection => selection.ValueId,
+            StringComparer.Ordinal);
 
         // Build system prompt
         _systemPrompt = Andy.Cli.Services.Prompts.SystemPrompts.GetDefaultCliPrompt();
@@ -94,9 +109,16 @@ public class AndyAgentProvider : IAgentProvider, IDisposable
             : _systemPrompt + $"\n\nThe user's working directory is: {parameters!.Cwd}";
 
         // Create a new engine agent for this session.
-        var agent = _agentFactory.Create(systemPrompt);
+        var selection = ResolveInitialSelection(model);
+        var agent = _agentFactory.Create(systemPrompt, selection.ProviderId, selection.ModelId);
 
-        var entry = new AcpSessionEntry(sessionId, agent, mode, model);
+        var entry = new AcpSessionEntry(
+            sessionId,
+            agent,
+            mode,
+            selection.ModelId,
+            selection.ProviderId,
+            systemPrompt);
         _sessions.Add(entry);
 
         _logger?.LogInformation(
@@ -109,11 +131,12 @@ public class AndyAgentProvider : IAgentProvider, IDisposable
             CreatedAt = entry.CreatedAt,
             LastAccessedAt = entry.LastAccessedAt,
             Mode = mode,
-            Model = model,
+            Model = selection.ModelId,
             MessageCount = entry.MessageCount,
+            ConfigOptions = BuildConfigOptions(entry),
             Metadata = new Dictionary<string, object>
             {
-                ["provider"] = _defaultProvider,
+                ["provider"] = selection.ProviderId,
                 ["tools_count"] = _toolRegistry.GetTools().Count()
             }
         });
@@ -143,7 +166,13 @@ public class AndyAgentProvider : IAgentProvider, IDisposable
                 LastAccessedAt = entry.LastAccessedAt,
                 MessageCount = entry.MessageCount,
                 Mode = entry.Mode,
-                Model = entry.Model
+                Model = entry.Model,
+                ConfigOptions = BuildConfigOptions(entry),
+                Metadata = new Dictionary<string, object>
+                {
+                    ["provider"] = entry.Provider,
+                    ["tools_count"] = _toolRegistry.GetTools().Count()
+                }
             });
         }
 
@@ -157,7 +186,7 @@ public class AndyAgentProvider : IAgentProvider, IDisposable
         IResponseStreamer streamer,
         CancellationToken cancellationToken)
     {
-        if (!_sessions.TryGet(sessionId, out var entry) || entry.Agent == null)
+        if (!_sessions.TryGet(sessionId, out var entry))
         {
             _logger?.LogError("Session not found for prompt: {SessionId}", sessionId);
             return new AgentResponse
@@ -185,6 +214,7 @@ public class AndyAgentProvider : IAgentProvider, IDisposable
                 linkedToken = entry.BeginPrompt(cancellationToken);
                 promptStarted = true;
             }
+
             catch (ObjectDisposedException)
             {
                 _logger?.LogWarning(
@@ -208,6 +238,17 @@ public class AndyAgentProvider : IAgentProvider, IDisposable
                 };
             }
 
+            var agent = entry.Agent;
+            if (agent == null)
+            {
+                return new AgentResponse
+                {
+                    Message = "Error: Session agent not available",
+                    StopReason = StopReason.Error,
+                    Error = "Session agent not available"
+                };
+            }
+
             var effectivePrompt = BuildPrompt(prompt);
             _logger?.LogInformation("Processing prompt for session {SessionId}: {Preview}",
                 sessionId, effectivePrompt.Substring(0, Math.Min(100, effectivePrompt.Length)));
@@ -215,7 +256,7 @@ public class AndyAgentProvider : IAgentProvider, IDisposable
             if (entry.TryMarkModelAnnounced())
             {
                 await streamer.SendThinkingAsync(
-                    $"Model: {_defaultProvider}/{entry.Model}", linkedToken);
+                    $"Model: {entry.Provider}/{entry.Model}", linkedToken);
             }
 
             await streamer.SendThinkingAsync("Analyzing request...", linkedToken);
@@ -223,7 +264,7 @@ public class AndyAgentProvider : IAgentProvider, IDisposable
             // Thread the linked cancellation token and prompt-specific ACP
             // streamer into the engine call so intermediate narration and real
             // tool execution updates can be displayed by the client.
-            var result = await entry.Agent.ProcessMessageAsync(effectivePrompt, streamer, linkedToken);
+            var result = await agent.ProcessMessageAsync(effectivePrompt, streamer, linkedToken);
 
             entry.IncrementMessageCount();
 
@@ -318,12 +359,107 @@ public class AndyAgentProvider : IAgentProvider, IDisposable
     {
         // Mode switching is not supported by the engine agent. Explicitly
         // decline (returning false) instead of silently accepting the request.
-        // (Model selection is likewise unsupported; under conformant ACP it
-        // would be exposed via session config options, which this provider does
-        // not implement.)
         _logger?.LogInformation(
             "Rejecting unsupported mode switch for session {SessionId}: {ModeId}", sessionId, modeId);
         return Task.FromResult(false);
+    }
+
+    /// <summary>
+    /// Applies the ACP model config option by rebuilding the session's engine
+    /// agent with the selected provider/model. Reconfiguration deliberately
+    /// resets that session's conversation context; other sessions are unchanged.
+    /// </summary>
+    public Task<IReadOnlyList<SessionConfigOption>> SetConfigOptionAsync(
+        string sessionId,
+        string configId,
+        SessionConfigValue value,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!configId.Equals(AcpModelCatalog.ConfigId, StringComparison.Ordinal))
+        {
+            throw new ArgumentException($"Unknown session config option '{configId}'.", nameof(configId));
+        }
+
+        if (!_sessions.TryGet(sessionId, out var entry))
+        {
+            throw new ArgumentException($"Unknown ACP session '{sessionId}'.", nameof(sessionId));
+        }
+
+        if (string.IsNullOrWhiteSpace(value?.ValueId) ||
+            !_modelSelectionsById.TryGetValue(value.ValueId, out var selection))
+        {
+            throw new ArgumentException("The selected model is not available.", nameof(value));
+        }
+
+        if (entry.Provider.Equals(selection.ProviderId, StringComparison.OrdinalIgnoreCase) &&
+            entry.Model.Equals(selection.ModelId, StringComparison.Ordinal))
+        {
+            return Task.FromResult<IReadOnlyList<SessionConfigOption>>(BuildConfigOptions(entry));
+        }
+
+        var replacement = _agentFactory.Create(
+            entry.SystemPrompt,
+            selection.ProviderId,
+            selection.ModelId);
+
+        if (!entry.TryReplaceAgent(replacement, selection.ProviderId, selection.ModelId))
+        {
+            replacement.Dispose();
+            throw new InvalidOperationException(
+                "The session model cannot be changed while a prompt is running.");
+        }
+
+        _logger?.LogInformation(
+            "Changed ACP session {SessionId} model to {Provider}/{Model}; conversation context reset",
+            sessionId,
+            selection.ProviderId,
+            selection.ModelId);
+
+        return Task.FromResult<IReadOnlyList<SessionConfigOption>>(BuildConfigOptions(entry));
+    }
+
+    private AcpModelSelection ResolveInitialSelection(string requestedModel)
+    {
+        return _modelSelections.FirstOrDefault(selection =>
+                   selection.ModelId.Equals(requestedModel, StringComparison.Ordinal))
+               ?? _modelSelections.FirstOrDefault(selection =>
+                   selection.ProviderId.Equals(_defaultProvider, StringComparison.OrdinalIgnoreCase) &&
+                   selection.ModelId.Equals(_defaultModel, StringComparison.Ordinal))
+               ?? _modelSelections[0];
+    }
+
+    private List<SessionConfigOption> BuildConfigOptions(AcpSessionEntry entry)
+    {
+        var current = _modelSelections.FirstOrDefault(selection =>
+            selection.ProviderId.Equals(entry.Provider, StringComparison.OrdinalIgnoreCase) &&
+            selection.ModelId.Equals(entry.Model, StringComparison.Ordinal));
+
+        return new List<SessionConfigOption>
+        {
+            new()
+            {
+                Id = AcpModelCatalog.ConfigId,
+                Name = "Model",
+                Description = "Provider and model used for this session",
+                Category = "model",
+                CurrentValueId = current?.ValueId,
+                Groups = _modelSelections
+                    .GroupBy(selection => new { selection.ProviderId, selection.ProviderName })
+                    .Select(group => new SessionConfigSelectGroup
+                    {
+                        Group = group.Key.ProviderId,
+                        Name = group.Key.ProviderName,
+                        Options = group.Select(selection => new SessionConfigSelectOption
+                        {
+                            Value = selection.ValueId,
+                            Name = selection.ModelId,
+                            Description = $"Use {selection.ModelId} through {selection.ProviderName}"
+                        }).ToList()
+                    }).ToList()
+            }
+        };
     }
 
     public Task CancelSessionAsync(string sessionId, CancellationToken cancellationToken)

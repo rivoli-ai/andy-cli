@@ -52,7 +52,8 @@ On Ubuntu and macOS, CI:
 - Publishes a self-contained single-file binary for the runner.
 - Executes `andy-cli --version` against the packaged artifact.
 - Drives the packaged ACP server through `initialize` and `session/new` over
-  stdio without sending a model prompt or requiring provider credentials.
+  stdio, validating the active model config option without sending a model
+  prompt or requiring provider credentials.
 
 The release smoke matrix runs the same ACP handshake through
 `scripts/smoke-test.sh` on Linux x64, macOS x64/ARM64, and Windows x64. This

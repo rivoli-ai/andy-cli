@@ -53,6 +53,9 @@ list or read files in the open project. On the first prompt Andy reports the
 resolved provider/model and then sends progress, tool-start, tool-result, and
 final response updates.
 
+Zed also receives a per-session model picker grouped by the providers available
+to the server. Changing it resets that session's conversation context.
+
 Andy currently exposes 54 built-in tools. The live list from `tools list` is
 authoritative because package upgrades can add or remove tools.
 

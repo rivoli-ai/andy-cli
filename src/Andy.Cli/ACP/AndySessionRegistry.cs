@@ -26,13 +26,15 @@ public sealed class AcpSessionEntry : IDisposable
     /// The backing engine agent. May be null in tests that exercise lifecycle
     /// behavior without a real engine.
     /// </summary>
-    public ISessionAgent? Agent { get; }
+    public ISessionAgent? Agent { get; private set; }
 
     public DateTime CreatedAt { get; }
     public DateTime LastAccessedAt { get; private set; }
     public int MessageCount { get; private set; }
     public string Mode { get; internal set; }
     public string Model { get; internal set; }
+    public string Provider { get; internal set; }
+    public string SystemPrompt { get; }
     public bool IsDisposed { get; private set; }
 
     /// <summary>
@@ -58,12 +60,20 @@ public sealed class AcpSessionEntry : IDisposable
         }
     }
 
-    public AcpSessionEntry(string sessionId, ISessionAgent? agent, string mode, string model)
+    public AcpSessionEntry(
+        string sessionId,
+        ISessionAgent? agent,
+        string mode,
+        string model,
+        string provider = "andy-cli",
+        string? systemPrompt = null)
     {
         SessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
         Agent = agent;
         Mode = mode;
         Model = model;
+        Provider = provider;
+        SystemPrompt = systemPrompt ?? string.Empty;
         CreatedAt = DateTime.UtcNow;
         LastAccessedAt = CreatedAt;
         AccessSequence = Interlocked.Increment(ref _accessCounter);
@@ -143,6 +153,35 @@ public sealed class AcpSessionEntry : IDisposable
             _activeCts?.Dispose();
             _activeCts = null;
         }
+    }
+
+    /// <summary>
+    /// Atomically replaces the session agent when no prompt is running. The
+    /// caller owns and must dispose <paramref name="replacement"/> when this
+    /// method returns false.
+    /// </summary>
+    public bool TryReplaceAgent(ISessionAgent replacement, string provider, string model)
+    {
+        ArgumentNullException.ThrowIfNull(replacement);
+
+        ISessionAgent? previous;
+        lock (_gate)
+        {
+            if (IsDisposed || _activeCts != null)
+            {
+                return false;
+            }
+
+            previous = Agent;
+            Agent = replacement;
+            Provider = provider;
+            Model = model;
+            _modelAnnounced = false;
+            Touch();
+        }
+
+        previous?.Dispose();
+        return true;
     }
 
     /// <summary>

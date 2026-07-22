@@ -96,9 +96,11 @@ secret-injection mechanism. Zed also accepts an `env` object in an agent entry,
 but values stored there are plain configuration data: do not commit secrets or
 paste production credentials into a shared settings file.
 
-ACP mode selects the provider at session creation. The current ACP server does
-not expose model or provider switching; restart the server with different
-environment/configuration to change them.
+ACP mode advertises a grouped model picker for the providers available in the
+server environment. Changing the selection rebuilds the agent for that ACP
+session with the selected provider/model. The session's conversation context is
+reset, while other sessions remain unchanged. Provider availability is derived
+from configured credentials (or a reachable local provider).
 
 ## Current ACP behavior
 
@@ -110,6 +112,7 @@ Andy.Engine and the live Andy Tools registry. It supports:
 - Embedded text and resource context supplied by the client.
 - Cancellation propagated to the active agent operation.
 - Provider/model identification on the first prompt.
+- Per-session provider/model selection through the ACP `model` config option.
 - Progress narration, tool-start notifications, actual tool results, and a final
   response through `session/update`.
 
@@ -118,16 +121,15 @@ Current limitations:
 - Session state is bounded and in-memory; restarting the ACP process loses it.
 - Loading a retained session restores the agent object but cannot replay a
   transcript to the client.
-- Session list, fork, durable resume, model switching, and mode switching are not
-  implemented.
+- Session list, fork, durable resume, and mode switching are not implemented.
 - Image and audio prompt capabilities are not advertised.
 - Intermediate narration and tool activity are incremental, but final model text
   is currently delivered as one completed chunk.
 - Andy CLI is not in the public ACP registry, so it requires a custom agent entry.
 
-The active ACP follow-ups are token/rich-content streaming (#204), model config
-options (#205), persistent session catalog/resume (#206), registry packaging
-(#214), and multimodal prompts (#215).
+The active ACP follow-ups are token/rich-content streaming (#204), persistent
+session catalog/resume (#206), registry packaging (#214), and multimodal prompts
+(#215). Model config options (#205) are implemented.
 
 ## Tools and permissions
 

@@ -26,7 +26,7 @@ public interface ISessionAgent : IDisposable
 /// <summary>Creates <see cref="ISessionAgent"/> instances for new sessions.</summary>
 public interface ISessionAgentFactory
 {
-    ISessionAgent Create(string systemPrompt);
+    ISessionAgent Create(string systemPrompt, string provider, string model);
 }
 
 /// <summary>Adapts the engine's <see cref="SimpleAgent"/> to <see cref="ISessionAgent"/>.</summary>
@@ -34,11 +34,13 @@ internal sealed class SimpleAgentSessionAgent : ISessionAgent
 {
     private readonly SimpleAgent _agent;
     private readonly AcpSessionUpdateSink _sink;
+    private readonly IDisposable? _owner;
 
-    public SimpleAgentSessionAgent(SimpleAgent agent, AcpSessionUpdateSink sink)
+    public SimpleAgentSessionAgent(SimpleAgent agent, AcpSessionUpdateSink sink, IDisposable? owner = null)
     {
         _agent = agent;
         _sink = sink;
+        _owner = owner;
     }
 
     public async Task<SimpleAgentResult> ProcessMessageAsync(
@@ -57,7 +59,11 @@ internal sealed class SimpleAgentSessionAgent : ISessionAgent
         }
     }
 
-    public void Dispose() => _agent.Dispose();
+    public void Dispose()
+    {
+        _agent.Dispose();
+        _owner?.Dispose();
+    }
 }
 
 /// <summary>
@@ -67,6 +73,7 @@ internal sealed class SimpleAgentSessionAgent : ISessionAgent
 internal sealed class SimpleAgentSessionAgentFactory : ISessionAgentFactory
 {
     private readonly ILlmProvider _llmProvider;
+    private readonly Func<string, string, (ILlmProvider Provider, IDisposable? Owner)>? _providerFactory;
     private readonly IToolRegistry _toolRegistry;
     private readonly IToolExecutor _toolExecutor;
     private readonly ILoggerFactory? _loggerFactory;
@@ -86,10 +93,26 @@ internal sealed class SimpleAgentSessionAgentFactory : ISessionAgentFactory
         _maxTurns = maxTurns;
     }
 
-    public ISessionAgent Create(string systemPrompt)
+    public SimpleAgentSessionAgentFactory(
+        Func<string, string, (ILlmProvider Provider, IDisposable? Owner)> providerFactory,
+        IToolRegistry toolRegistry,
+        IToolExecutor toolExecutor,
+        ILoggerFactory? loggerFactory,
+        int maxTurns = 10)
     {
+        _providerFactory = providerFactory ?? throw new ArgumentNullException(nameof(providerFactory));
+        _llmProvider = null!;
+        _toolRegistry = toolRegistry;
+        _toolExecutor = toolExecutor;
+        _loggerFactory = loggerFactory;
+        _maxTurns = maxTurns;
+    }
+
+    public ISessionAgent Create(string systemPrompt, string provider, string model)
+    {
+        var lease = _providerFactory?.Invoke(provider, model) ?? (_llmProvider, null);
         var sink = new AcpSessionUpdateSink(_loggerFactory?.CreateLogger<AcpSessionUpdateSink>());
-        var progressProvider = new AcpProgressLlmProvider(_llmProvider, sink);
+        var progressProvider = new AcpProgressLlmProvider(lease.Item1, sink);
         var observingExecutor = new AcpObservingToolExecutor(_toolExecutor, sink);
         var agent = new SimpleAgent(
             progressProvider,
@@ -99,6 +122,6 @@ internal sealed class SimpleAgentSessionAgentFactory : ISessionAgentFactory
             maxTurns: _maxTurns,
             logger: AndyAgentProvider.CreateAgentLogger(_loggerFactory));
 
-        return new SimpleAgentSessionAgent(agent, sink);
+        return new SimpleAgentSessionAgent(agent, sink, lease.Item2);
     }
 }

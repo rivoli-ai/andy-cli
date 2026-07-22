@@ -103,12 +103,60 @@ def run(binary, cwd, timeout_seconds):
         new_session = _response(messages, 2, timeout_seconds)
         if "error" in new_session:
             raise RuntimeError("session/new returned error: {}".format(new_session["error"]))
-        session_id = new_session.get("result", {}).get("sessionId")
+        session_result = new_session.get("result", {})
+        session_id = session_result.get("sessionId")
         if not isinstance(session_id, str) or not session_id:
             raise RuntimeError("session/new result did not contain sessionId")
+        config_options = session_result.get("configOptions")
+        model_option = next(
+            (
+                option
+                for option in config_options
+                if isinstance(option, dict)
+                and option.get("id") == "model"
+                and option.get("category") == "model"
+                and option.get("currentValue")
+            ),
+            None,
+        ) if isinstance(config_options, list) else None
+        if model_option is None:
+            raise RuntimeError(
+                "session/new result did not contain an active model config option"
+            )
+
+        _send(
+            process,
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "session/set_config_option",
+                "params": {
+                    "sessionId": session_id,
+                    "configId": "model",
+                    "value": model_option["currentValue"],
+                },
+            },
+        )
+        set_config = _response(messages, 3, timeout_seconds)
+        if "error" in set_config:
+            raise RuntimeError(
+                "session/set_config_option returned error: {}".format(
+                    set_config["error"]
+                )
+            )
+        updated_options = set_config.get("result", {}).get("configOptions")
+        if not isinstance(updated_options, list) or not any(
+            option.get("id") == "model"
+            and option.get("currentValue") == model_option["currentValue"]
+            for option in updated_options
+            if isinstance(option, dict)
+        ):
+            raise RuntimeError(
+                "session/set_config_option did not return the active model option"
+            )
 
         print(
-            "acp-smoke: PASS - protocolVersion={} sessionId={}".format(
+            "acp-smoke: PASS - protocolVersion={} sessionId={} modelConfig=active".format(
                 protocol_version, session_id
             )
         )

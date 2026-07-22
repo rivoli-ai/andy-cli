@@ -21,6 +21,7 @@ public class AcpSmokeDriverTests
         Assert.Contains("acp-smoke: PASS", result.Stdout);
         Assert.Contains("protocolVersion=1", result.Stdout);
         Assert.Contains("sessionId=smoke-session", result.Stdout);
+        Assert.Contains("modelConfig=active", result.Stdout);
     }
 
     [Fact]
@@ -36,6 +37,21 @@ public class AcpSmokeDriverTests
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("did not contain integer protocolVersion", result.Stderr);
+    }
+
+    [Fact]
+    public async Task DriverRejectsSessionWithoutModelConfigOption()
+    {
+        if (OperatingSystem.IsWindows() || !HasPython())
+        {
+            return;
+        }
+
+        using var fixture = new Fixture(validInitialize: true, includeModelConfig: false);
+        var result = await fixture.RunAsync();
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("did not contain an active model config option", result.Stderr);
     }
 
     private static bool HasPython()
@@ -62,7 +78,7 @@ public class AcpSmokeDriverTests
         private readonly string _root;
         private readonly string _server;
 
-        public Fixture(bool validInitialize)
+        public Fixture(bool validInitialize, bool includeModelConfig = true)
         {
             _root = Path.Combine(Path.GetTempPath(), $"acp-smoke-test-{Guid.NewGuid():N}");
             Directory.CreateDirectory(_root);
@@ -70,6 +86,9 @@ public class AcpSmokeDriverTests
             var initializeResult = validInitialize
                 ? "{'protocolVersion': 1}"
                 : "{}";
+            var sessionResult = includeModelConfig
+                ? "{'sessionId': 'smoke-session', 'configOptions': [{'id': 'model', 'category': 'model', 'currentValue': 'openai::gpt-4o'}]}"
+                : "{'sessionId': 'smoke-session'}";
             File.WriteAllText(_server, $$"""
                 #!/usr/bin/env python3
                 import json
@@ -80,7 +99,9 @@ public class AcpSmokeDriverTests
                     if request.get('method') == 'initialize':
                         result = {{initializeResult}}
                     elif request.get('method') == 'session/new':
-                        result = {'sessionId': 'smoke-session'}
+                        result = {{sessionResult}}
+                    elif request.get('method') == 'session/set_config_option':
+                        result = {'configOptions': [{'id': 'model', 'category': 'model', 'currentValue': request['params']['value']}]}
                     else:
                         result = {}
                     print(json.dumps({'jsonrpc': '2.0', 'id': request.get('id'), 'result': result}), flush=True)

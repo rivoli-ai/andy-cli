@@ -146,6 +146,127 @@ public class AndyAgentProviderTests
         Assert.Equal("openrouter", metadata.Metadata!["provider"]);
     }
 
+    [Fact]
+    public async Task CreateSessionAsync_AdvertisesGroupedModelConfigOptions()
+    {
+        var selections = ModelSelections();
+        using var provider = new AndyAgentProvider(
+            _mockLlmProvider.Object,
+            _mockToolRegistry.Object,
+            _mockToolExecutor.Object,
+            _mockLogger.Object,
+            defaultModel: "moonshotai/kimi-k3",
+            agentFactory: new FakeAgentFactory(_ => FakeAgent.ReturningSuccess("ok")),
+            defaultProvider: "openrouter",
+            modelSelections: selections);
+
+        var metadata = await provider.CreateSessionAsync(null, CancellationToken.None);
+
+        var option = Assert.Single(metadata.ConfigOptions!);
+        Assert.Equal("model", option.Id);
+        Assert.Equal("model", option.Category);
+        Assert.Equal("openrouter::moonshotai/kimi-k3", option.CurrentValueId);
+        Assert.Collection(
+            option.Groups!,
+            group =>
+            {
+                Assert.Equal("openrouter", group.Group);
+                Assert.Equal("OpenRouter", group.Name);
+                Assert.Equal("moonshotai/kimi-k3", Assert.Single(group.Options).Name);
+            },
+            group =>
+            {
+                Assert.Equal("openai", group.Group);
+                Assert.Equal("OpenAI", group.Name);
+                Assert.Equal("gpt-4o", Assert.Single(group.Options).Name);
+            });
+    }
+
+    [Fact]
+    public async Task SetConfigOptionAsync_RebuildsOnlySelectedSessionAndUpdatesMetadata()
+    {
+        var factory = new FakeAgentFactory(_ => FakeAgent.ReturningSuccess("ok"));
+        using var provider = NewConfigurableProvider(factory);
+        var first = await provider.CreateSessionAsync(null, CancellationToken.None);
+        var second = await provider.CreateSessionAsync(null, CancellationToken.None);
+        var firstOriginalAgent = factory.Created[0].Agent;
+        var secondOriginalAgent = factory.Created[1].Agent;
+
+        var options = await provider.SetConfigOptionAsync(
+            first.SessionId,
+            "model",
+            new SessionConfigValue { ValueId = "openai::gpt-4o" },
+            CancellationToken.None);
+
+        Assert.True(firstOriginalAgent.IsDisposed);
+        Assert.False(secondOriginalAgent.IsDisposed);
+        Assert.Equal(("openai", "gpt-4o"), (factory.Created[2].Provider, factory.Created[2].Model));
+        Assert.Equal("openai::gpt-4o", Assert.Single(options).CurrentValueId);
+
+        var loadedFirst = await provider.LoadSessionAsync(
+            new LoadSessionParams { SessionId = first.SessionId, Cwd = "/tmp" },
+            new Mock<IResponseStreamer>().Object,
+            CancellationToken.None);
+        var loadedSecond = await provider.LoadSessionAsync(
+            new LoadSessionParams { SessionId = second.SessionId, Cwd = "/tmp" },
+            new Mock<IResponseStreamer>().Object,
+            CancellationToken.None);
+
+        Assert.Equal("gpt-4o", loadedFirst!.Model);
+        Assert.Equal("openai", loadedFirst.Metadata!["provider"]);
+        Assert.Equal("moonshotai/kimi-k3", loadedSecond!.Model);
+        Assert.Equal("openrouter", loadedSecond.Metadata!["provider"]);
+    }
+
+    [Fact]
+    public async Task SetConfigOptionAsync_RejectsUnknownSelectionWithoutReplacingAgent()
+    {
+        var factory = new FakeAgentFactory(_ => FakeAgent.ReturningSuccess("ok"));
+        using var provider = NewConfigurableProvider(factory);
+        var session = await provider.CreateSessionAsync(null, CancellationToken.None);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => provider.SetConfigOptionAsync(
+            session.SessionId,
+            "model",
+            new SessionConfigValue { ValueId = "unknown::model" },
+            CancellationToken.None));
+
+        Assert.Single(factory.Created);
+        Assert.False(factory.Created[0].Agent.IsDisposed);
+    }
+
+    [Fact]
+    public async Task SetConfigOptionAsync_RejectsChangeWhilePromptIsRunning()
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var created = 0;
+        var factory = new FakeAgentFactory(_ => factoryAgent());
+        FakeAgent factoryAgent() => created++ == 0
+            ? FakeAgent.Blocking(_ => started.TrySetResult())
+            : FakeAgent.ReturningSuccess("replacement");
+
+        using var provider = NewConfigurableProvider(factory);
+        var session = await provider.CreateSessionAsync(null, CancellationToken.None);
+        var promptTask = provider.ProcessPromptAsync(
+            session.SessionId,
+            new PromptMessage { Text = "wait" },
+            new Mock<IResponseStreamer>().Object,
+            CancellationToken.None);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => provider.SetConfigOptionAsync(
+            session.SessionId,
+            "model",
+            new SessionConfigValue { ValueId = "openai::gpt-4o" },
+            CancellationToken.None));
+
+        Assert.Equal(2, factory.Created.Count);
+        Assert.True(factory.Created[1].Agent.IsDisposed);
+        await provider.CancelSessionAsync(session.SessionId, CancellationToken.None);
+        var response = await promptTask;
+        Assert.Equal(StopReason.Cancelled, response.StopReason);
+    }
+
     /// <summary>Adapter for the conformant LoadSessionAsync(LoadSessionParams, IResponseStreamer, ct) signature.</summary>
     private Task<SessionMetadata?> LoadAsync(string sessionId) =>
         _provider.LoadSessionAsync(
@@ -608,11 +729,38 @@ public class AndyAgentProviderTests
             defaultModel: null,
             agentFactory: factory);
 
+    private AndyAgentProvider NewConfigurableProvider(ISessionAgentFactory factory) => new(
+        _mockLlmProvider.Object,
+        _mockToolRegistry.Object,
+        _mockToolExecutor.Object,
+        _mockLogger.Object,
+        defaultModel: "moonshotai/kimi-k3",
+        agentFactory: factory,
+        defaultProvider: "openrouter",
+        modelSelections: ModelSelections());
+
+    private static IReadOnlyList<AcpModelSelection> ModelSelections() =>
+        new[]
+        {
+            new AcpModelSelection(
+                "openrouter::moonshotai/kimi-k3",
+                "openrouter",
+                "OpenRouter",
+                "moonshotai/kimi-k3"),
+            new AcpModelSelection("openai::gpt-4o", "openai", "OpenAI", "gpt-4o")
+        };
+
     private sealed class FakeAgentFactory : ISessionAgentFactory
     {
         private readonly Func<string, FakeAgent> _create;
+        public List<(string Provider, string Model, FakeAgent Agent)> Created { get; } = new();
         public FakeAgentFactory(Func<string, FakeAgent> create) => _create = create;
-        public ISessionAgent Create(string systemPrompt) => _create(systemPrompt);
+        public ISessionAgent Create(string systemPrompt, string provider, string model)
+        {
+            var agent = _create(systemPrompt);
+            Created.Add((provider, model, agent));
+            return agent;
+        }
     }
 
     private sealed class FakeAgent : ISessionAgent
