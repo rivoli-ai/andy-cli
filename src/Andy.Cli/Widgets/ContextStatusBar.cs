@@ -1,4 +1,7 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
+using Andy.Cli.Services;
 using Andy.Cli.Themes;
 using DL = Andy.Tui.DisplayList;
 
@@ -12,18 +15,46 @@ namespace Andy.Cli.Widgets
         Critical
     }
 
+    /// <summary>Kinds of segments composed into the single status line.</summary>
+    internal enum StatusSegmentKind
+    {
+        Status,
+        Model,
+        Usage,
+        Live,
+        Cost,
+        Turns
+    }
+
     /// <summary>
-    /// Persistent status bar at the bottom of the screen showing context usage metrics,
-    /// live per-turn token counts, model information, and conversation state.
+    /// One segment of the collapsed status line. Segments are rendered in display order,
+    /// separated by " | ". When the line would overflow the available width, segments are
+    /// dropped in descending <see cref="DropPriority"/> order (highest dropped first).
+    /// </summary>
+    internal readonly record struct StatusSegment(StatusSegmentKind Kind, string Text, int DropPriority);
+
+    /// <summary>
+    /// Single persistent status line at the bottom of the screen. Collapses what used to be
+    /// three rows (status message, key hints, context bar) into one line showing the current
+    /// status, model information, token usage, session cost, and turn count, separated by
+    /// a simple ASCII " | " separator. Least important segments are dropped first when the
+    /// terminal is too narrow.
     /// </summary>
     public sealed class ContextStatusBar
     {
+        internal const string Separator = " | ";
+
         private int _inputTokens;
         private int _outputTokens;
         private int _maxTokens;
         private int _turnCount;
         private string _modelName = string.Empty;
         private string _providerName = string.Empty;
+
+        // Transient status text (e.g. "Thinking"), replaces the old StatusMessage row.
+        private string _statusText = string.Empty;
+        private bool _statusAnimated;
+        private DateTime _statusSince = DateTime.Now;
 
         // Live per-turn stats (set every frame from the render loop while a turn is active).
         private TurnStats? _liveStats;
@@ -35,6 +66,7 @@ namespace Andy.Cli.Widgets
         private readonly DL.Rgb24 _dimFg = new DL.Rgb24(100, 100, 110);
         private readonly DL.Rgb24 _warningFg = new DL.Rgb24(200, 180, 80);
         private readonly DL.Rgb24 _criticalFg = new DL.Rgb24(200, 80, 80);
+        private readonly DL.Rgb24 _statusFg = new DL.Rgb24(150, 200, 255);
 
         /// <summary>
         /// Update token counts and context metrics for the current conversation.
@@ -65,6 +97,22 @@ namespace Andy.Cli.Widgets
         {
             _modelName = modelName ?? string.Empty;
             _providerName = providerName ?? string.Empty;
+        }
+
+        /// <summary>
+        /// Set the transient status text shown as the first segment of the line
+        /// (e.g. "Thinking" while a request is in flight). Pass an empty string to clear.
+        /// When <paramref name="animated"/> is true, trailing dots cycle over time.
+        /// </summary>
+        public void SetStatusText(string? text, bool animated = false)
+        {
+            var newText = text ?? string.Empty;
+            if (newText != _statusText)
+            {
+                _statusSince = DateTime.Now;
+            }
+            _statusText = newText;
+            _statusAnimated = animated;
         }
 
         private int TotalTokens => _inputTokens + _outputTokens;
@@ -99,22 +147,38 @@ namespace Andy.Cli.Widgets
         }
 
         /// <summary>
-        /// Format the live per-turn token counter for display.
-        /// Returns e.g. "2.1K in / 480 out" while a turn is in progress,
-        /// or empty string when idle.
+        /// Cumulative session cost in USD formatted for display (e.g. "$0.0123"),
+        /// or empty when the model's pricing is unknown or no tokens were used yet.
         /// </summary>
-        private string FormatLiveTurnTokens()
+        internal string FormatCost()
+        {
+            if (TotalTokens <= 0) return string.Empty;
+            var cost = ModelPricing.ComputeCostUsd(_modelName, _providerName, _inputTokens, _outputTokens);
+            return cost == null ? string.Empty : ModelPricing.FormatUsd(cost.Value);
+        }
+
+        /// <summary>
+        /// Format the live per-turn token counter for display.
+        /// Returns e.g. "2.1K in -> 480 out ($0.0123)" while a turn is in progress,
+        /// or empty string when idle. The per-request cost is appended when pricing is known.
+        /// </summary>
+        internal string FormatLiveTurnTokens()
         {
             if (_liveStats == null || !_liveStats.IsActive) return string.Empty;
 
             var stats = _liveStats;
-            var parts = new System.Collections.Generic.List<string>();
+            var parts = new List<string>();
             if (stats.InputTokens > 0)
                 parts.Add($"{TokenFormat.Short(stats.InputTokens)} in");
             if (stats.OutputTokens > 0)
                 parts.Add($"{TokenFormat.Short(stats.OutputTokens)} out");
             if (parts.Count == 0) return string.Empty;
-            return string.Join(" \u2192 ", parts);
+
+            string live = string.Join(" -> ", parts);
+            var cost = ModelPricing.ComputeCostUsd(_modelName, _providerName, stats.InputTokens, stats.OutputTokens);
+            if (cost != null)
+                live += $" ({ModelPricing.FormatUsd(cost.Value)})";
+            return live;
         }
 
         /// <summary>
@@ -135,6 +199,15 @@ namespace Andy.Cli.Widgets
             return _turnCount == 1 ? "1 turn" : $"{_turnCount} turns";
         }
 
+        private string FormatStatus()
+        {
+            if (string.IsNullOrEmpty(_statusText)) return string.Empty;
+            if (!_statusAnimated) return _statusText;
+            double elapsed = (DateTime.Now - _statusSince).TotalSeconds;
+            int dotCount = (int)(elapsed * 2) % 4; // cycle 0-3 dots every 2 seconds
+            return _statusText + new string('.', dotCount);
+        }
+
         private DL.Rgb24 LevelColor() => Level switch
         {
             UsageLevel.Critical => _criticalFg,
@@ -143,7 +216,95 @@ namespace Andy.Cli.Widgets
         };
 
         /// <summary>
-        /// Render the context status bar at the bottom of the viewport.
+        /// Build the segments of the status line in display order. Drop priorities:
+        /// model (1) is kept the longest, then usage (2), cost (3), status (4), turns (5).
+        /// </summary>
+        internal List<StatusSegment> BuildSegments()
+        {
+            var segments = new List<StatusSegment>();
+
+            string statusStr = FormatStatus();
+            if (!string.IsNullOrEmpty(statusStr))
+                segments.Add(new StatusSegment(StatusSegmentKind.Status, statusStr, 4));
+
+            if (!string.IsNullOrEmpty(_modelName))
+                segments.Add(new StatusSegment(StatusSegmentKind.Model, ModelSegmentText(), 1));
+
+            string liveStr = FormatLiveTurnTokens();
+            if (!string.IsNullOrEmpty(liveStr))
+            {
+                segments.Add(new StatusSegment(StatusSegmentKind.Live, liveStr, 2));
+            }
+            else
+            {
+                segments.Add(new StatusSegment(StatusSegmentKind.Usage, UsageSegmentText(), 2));
+            }
+
+            string costStr = FormatCost();
+            if (!string.IsNullOrEmpty(costStr))
+                segments.Add(new StatusSegment(StatusSegmentKind.Cost, costStr, 3));
+
+            segments.Add(new StatusSegment(StatusSegmentKind.Turns, FormatTurns(), 5));
+
+            return segments;
+        }
+
+        private string ModelSegmentText()
+        {
+            string modelNameShort = TruncateModelName(_modelName, 20);
+            string providerPart = !string.IsNullOrEmpty(_providerName) ? $" ({_providerName})" : "";
+            return $"Model: {modelNameShort}{providerPart}";
+        }
+
+        private string UsageSegmentText()
+        {
+            string usageStr = FormatUsage();
+            string percentageStr = FormatPercentage();
+            return string.IsNullOrEmpty(percentageStr) ? usageStr : $"{usageStr} {percentageStr}";
+        }
+
+        /// <summary>
+        /// Fit the segments into <paramref name="maxWidth"/> columns. Segments are removed
+        /// in descending drop-priority order (least important first) until the joined line
+        /// fits. If the single remaining segment is still too wide it is truncated with
+        /// an ASCII ellipsis.
+        /// </summary>
+        internal static List<StatusSegment> FitSegments(List<StatusSegment> segments, int maxWidth)
+        {
+            var fitted = new List<StatusSegment>(segments);
+
+            static int JoinedWidth(List<StatusSegment> segs) =>
+                segs.Sum(s => s.Text.Length) + Math.Max(0, segs.Count - 1) * Separator.Length;
+
+            while (fitted.Count > 1 && JoinedWidth(fitted) > maxWidth)
+            {
+                int dropIndex = 0;
+                for (int i = 1; i < fitted.Count; i++)
+                {
+                    if (fitted[i].DropPriority >= fitted[dropIndex].DropPriority)
+                        dropIndex = i;
+                }
+                fitted.RemoveAt(dropIndex);
+            }
+
+            if (fitted.Count == 1 && fitted[0].Text.Length > maxWidth)
+            {
+                if (maxWidth < 4)
+                {
+                    fitted.Clear();
+                }
+                else
+                {
+                    var s = fitted[0];
+                    fitted[0] = s with { Text = s.Text.Substring(0, maxWidth - 3) + "..." };
+                }
+            }
+
+            return fitted;
+        }
+
+        /// <summary>
+        /// Render the collapsed status line on the bottom row of the viewport.
         /// </summary>
         public void Render((int Width, int Height) viewport, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
@@ -159,86 +320,85 @@ namespace Andy.Cli.Widgets
             b.PushClip(new DL.ClipPush(0, y, width, 1));
             b.DrawRect(new DL.Rect(0, y, width, 1, bg));
 
-            string usageStr = FormatUsage();
-            string percentageStr = FormatPercentage();
-            string turnsStr = FormatTurns();
-            string liveTokensStr = FormatLiveTurnTokens();
-
-            // Left side: Model info
             int x = 1;
-            if (!string.IsNullOrEmpty(_modelName))
-            {
-                string modelLabel = "Model: ";
-                string modelNameShort = TruncateModelName(_modelName, 20);
-                string providerPart = !string.IsNullOrEmpty(_providerName) ? $" ({_providerName})" : "";
+            int avail = Math.Max(0, width - 2);
+            var segments = FitSegments(BuildSegments(), avail);
 
-                b.DrawText(new DL.TextRun(x, y, modelLabel, _dimFg, bg, DL.CellAttrFlags.None));
-                x += modelLabel.Length;
-                b.DrawText(new DL.TextRun(x, y, modelNameShort, _accent, bg, DL.CellAttrFlags.Bold));
-                x += modelNameShort.Length;
-                b.DrawText(new DL.TextRun(x, y, providerPart, _dimFg, bg, DL.CellAttrFlags.None));
-                x += providerPart.Length;
-            }
-
-            // Build right-side content: live tokens (during turn) or cumulative usage + turns (idle)
-            string rightSection;
-            if (!string.IsNullOrEmpty(liveTokensStr))
+            for (int i = 0; i < segments.Count; i++)
             {
-                // During a turn: show live per-turn in/out tokens
-                rightSection = liveTokensStr;
-            }
-            else
-            {
-                // Idle: show cumulative usage + turns
-                rightSection = string.IsNullOrEmpty(percentageStr)
-                    ? $"{usageStr} {turnsStr}"
-                    : $"{usageStr} {percentageStr} {turnsStr}";
-            }
-
-            int rightX = width - rightSection.Length - 2;
-            if (rightX > x + 2)
-            {
-                // Draw separator
-                b.DrawText(new DL.TextRun(rightX - 2, y, " | ", _dimFg, bg, DL.CellAttrFlags.None));
-
-                if (!string.IsNullOrEmpty(liveTokensStr))
+                if (i > 0)
                 {
-                    // Live turn tokens: accent-colored, bold, with subtle background emphasis
-                    b.DrawText(new DL.TextRun(rightX, y, liveTokensStr, _accent, bg, DL.CellAttrFlags.Bold));
+                    b.DrawText(new DL.TextRun(x, y, Separator, _dimFg, bg, DL.CellAttrFlags.None));
+                    x += Separator.Length;
                 }
-                else
-                {
-                    // Cumulative usage
-                    b.DrawText(new DL.TextRun(rightX, y, usageStr, _fg, bg, DL.CellAttrFlags.None));
-                    int cursor = rightX + usageStr.Length;
-
-                    // Draw percentage with color based on usage level (only when known)
-                    if (!string.IsNullOrEmpty(percentageStr))
-                    {
-                        b.DrawText(new DL.TextRun(cursor, y, $" {percentageStr}", LevelColor(), bg, DL.CellAttrFlags.Bold));
-                        cursor += percentageStr.Length + 1;
-                    }
-
-                    // Draw turns
-                    b.DrawText(new DL.TextRun(cursor, y, $" {turnsStr}", _dimFg, bg, DL.CellAttrFlags.None));
-                }
+                x = DrawSegment(b, x, y, segments[i], bg);
             }
 
             b.Pop();
         }
 
+        private int DrawSegment(DL.DisplayListBuilder b, int x, int y, StatusSegment segment, DL.Rgb24? bg)
+        {
+            switch (segment.Kind)
+            {
+                case StatusSegmentKind.Model when segment.Text == ModelSegmentText():
+                    {
+                        // Untruncated model segment: label dim, name accented, provider dim.
+                        string modelLabel = "Model: ";
+                        string modelNameShort = TruncateModelName(_modelName, 20);
+                        string providerPart = !string.IsNullOrEmpty(_providerName) ? $" ({_providerName})" : "";
+
+                        b.DrawText(new DL.TextRun(x, y, modelLabel, _dimFg, bg, DL.CellAttrFlags.None));
+                        x += modelLabel.Length;
+                        b.DrawText(new DL.TextRun(x, y, modelNameShort, _accent, bg, DL.CellAttrFlags.Bold));
+                        x += modelNameShort.Length;
+                        if (providerPart.Length > 0)
+                        {
+                            b.DrawText(new DL.TextRun(x, y, providerPart, _dimFg, bg, DL.CellAttrFlags.None));
+                            x += providerPart.Length;
+                        }
+                        return x;
+                    }
+                case StatusSegmentKind.Usage when segment.Text == UsageSegmentText():
+                    {
+                        // Untruncated usage segment: counts plain, percentage colored by level.
+                        string usageStr = FormatUsage();
+                        string percentageStr = FormatPercentage();
+
+                        b.DrawText(new DL.TextRun(x, y, usageStr, _fg, bg, DL.CellAttrFlags.None));
+                        x += usageStr.Length;
+                        if (!string.IsNullOrEmpty(percentageStr))
+                        {
+                            b.DrawText(new DL.TextRun(x, y, $" {percentageStr}", LevelColor(), bg, DL.CellAttrFlags.Bold));
+                            x += percentageStr.Length + 1;
+                        }
+                        return x;
+                    }
+                case StatusSegmentKind.Live:
+                    b.DrawText(new DL.TextRun(x, y, segment.Text, _accent, bg, DL.CellAttrFlags.Bold));
+                    return x + segment.Text.Length;
+                case StatusSegmentKind.Status:
+                    b.DrawText(new DL.TextRun(x, y, segment.Text, _statusFg, bg, DL.CellAttrFlags.None));
+                    return x + segment.Text.Length;
+                case StatusSegmentKind.Cost:
+                    b.DrawText(new DL.TextRun(x, y, segment.Text, _fg, bg, DL.CellAttrFlags.Bold));
+                    return x + segment.Text.Length;
+                case StatusSegmentKind.Turns:
+                    b.DrawText(new DL.TextRun(x, y, segment.Text, _dimFg, bg, DL.CellAttrFlags.None));
+                    return x + segment.Text.Length;
+                default:
+                    b.DrawText(new DL.TextRun(x, y, segment.Text, _fg, bg, DL.CellAttrFlags.None));
+                    return x + segment.Text.Length;
+            }
+        }
+
         /// <summary>
-        /// Get the width needed to render the status bar.
+        /// Get the width needed to render the full (undropped) status line.
         /// </summary>
         public int GetWidth()
         {
-            string rightSection = string.Join(" ", FormatUsage(), FormatPercentage(), FormatTurns()).Replace("  ", " ").Trim();
-            string leftSection = string.IsNullOrEmpty(_modelName)
-                ? string.Empty
-                : $"Model: {TruncateModelName(_modelName, 20)}" +
-                  (string.IsNullOrEmpty(_providerName) ? "" : $" ({_providerName})");
-
-            return leftSection.Length + 4 + rightSection.Length; // +4 for separator and padding
+            var segments = BuildSegments();
+            return segments.Sum(s => s.Text.Length) + Math.Max(0, segments.Count - 1) * Separator.Length;
         }
 
         /// <summary>

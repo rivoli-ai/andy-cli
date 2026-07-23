@@ -260,23 +260,9 @@ class Program
             var promptHistory = new List<string>(); // Store user prompts for history navigation
             int historyIndex = -1; // -1 means not navigating history, showing current input
 
-            var hints = new KeyHintsBar();
-
-            // Rebuild the key-hints bar for the current scroll mode and tool-output state.
-            // Centralized so the Ctrl+O expand/collapse hint stays in sync wherever the
-            // hints are refreshed (initial render, mode switches, and the Ctrl+O toggle).
-            void UpdateHints()
-            {
-                bool mouseOn = rawInput?.MouseEnabled ?? false;
-                hints.SetHints(FooterHints.Build(
-                    scrollMode == ScrollMode.PromptHistory, ToolOutputView.Expanded, mouseOn));
-            }
-
-            UpdateHints();
             var toast = new Toast(); // Don't show initial toast as it interferes with prompt
             var tokenCounter = new TokenCounter();
             var contextStatusBar = new ContextStatusBar();
-            var statusMessage = new StatusMessage();
             var prompt = new PromptLine();
             bool isProcessingMessage = false; // Track if we're processing a message
             prompt.SetBorder(true);
@@ -1086,8 +1072,6 @@ class Program
                             toast.Show(on
                                 ? "Mouse capture ON (wheel scrolls; Option+drag to select text, Cmd+C to copy)"
                                 : "Mouse capture OFF (plain-drag native text selection enabled)", 120);
-                            // Refresh the footer so the Mouse On/Off indicator matches the new state.
-                            UpdateHints();
                         }
                         return;
                     }
@@ -1110,7 +1094,6 @@ class Program
                         toast.Show(expanded
                             ? "Tool output: expanded (full params + result preview)"
                             : "Tool output: collapsed (compact summary)", 90);
-                        UpdateHints();
                         return;
                     }
 
@@ -1481,21 +1464,21 @@ class Program
                             {
                                 try
                                 {
-                                    statusMessage.SetMessage("Thinking", animated: true);
+                                    contextStatusBar.SetStatusText("Thinking", animated: true);
 
                                     // Process message with tool support (streaming disabled until properly implemented)
                                     var response = await aiService.ProcessMessageAsync(cmd, enableStreaming: false);
 
                                     // Token counter is now updated in real-time by SimpleAssistantService
 
-                                    statusMessage.SetMessage("Ready for next question", animated: false);
+                                    contextStatusBar.SetStatusText("Ready", animated: false);
                                 }
                                 catch (Exception ex)
                                 {
                                     Andy.Cli.Services.CrashLog.Write("interactive.ProcessMessageAsync", ex);
                                     feed.AddMarkdownRich(ConsoleColors.ErrorPrefix(ex.Message));
                                     feed.AddMarkdownRich(ConsoleColors.ErrorPrefix($"        (full trace: {Andy.Cli.Services.CrashLog.Path})"));
-                                    statusMessage.SetMessage("Error occurred", animated: false);
+                                    contextStatusBar.SetStatusText("Error occurred", animated: false);
                                 }
                                 finally
                                 {
@@ -1522,7 +1505,6 @@ class Program
                         {
                             toast.Show("Scroll mode: Feed", 90);
                         }
-                        UpdateHints();
                         return;
                     }
 
@@ -1654,21 +1636,11 @@ class Program
                 var baseDl = b.Build();
                 var wb = new DL.DisplayListBuilder();
 
-                // Calculate heights for bottom UI elements.
-                // The context status bar now occupies its own full-width bottom row (the token
-                // counter that used to share the hints row is folded into it), so the hints bar
-                // gets the full viewport width and reserves nothing on its right.
-                int reservedRightWidth = 0;
-
-                // Get the actual height needed for hints bar (may be multi-line)
-                int hintsBarHeight = hints.GetRequiredHeight(viewport.Width);
-
                 // Bottom layout (from bottom up):
-                // - 1 line: context status bar (context metrics + model info)
-                // - hintsBarHeight lines: hints bar
-                // - 1 line: status message
+                // - 1 line: single status line (status text + model + tokens + cost + turns)
+                // The former status-message row and key-hints bar are collapsed into it.
                 // Toast overlaps with content area when visible
-                int bottomReserved = hintsBarHeight + 2; // status bar + hints + message
+                int bottomReserved = 1;
 
                 // Update context status bar with current metrics
                 // Use cumulative token counts from the TokenCounter
@@ -1709,7 +1681,7 @@ class Program
                     int promptH = Math.Min(prompt.GetDesiredHeight(), Math.Max(3, viewport.Height / 2));
 
                     // Position prompt and help from the bottom up (no gaps)
-                    // Layout from bottom: hints(hintsBarHeight) + status(1) + message(1) + help + prompt
+                    // Layout from bottom: status line(1) + help + prompt
                     int promptY = Math.Max(3, viewport.Height - bottomReserved - helpH - promptH);
                     int helpY = promptY + promptH;
 
@@ -1774,22 +1746,12 @@ class Program
                     b.DrawText(new DL.TextRun(2, 3, $"Min: {MIN_WIDTH}x{MIN_HEIGHT}", new DL.Rgb24(200, 200, 200), null, DL.CellAttrFlags.None));
                 }
 
-                // Render bottom UI elements (context status bar, hints, status message)
-                // These are positioned from the bottom up
-                int statusMessageY = viewport.Height - hintsBarHeight - 2;
-                statusMessage.RenderAt(2, statusMessageY, Math.Max(0, viewport.Width - 4), baseDl, wb);
-
+                // Render bottom UI elements: a single status line on the bottom row.
                 toast.Tick(); // Advance toast TTL
-                int toastY = viewport.Height - hintsBarHeight - 3;
+                int toastY = viewport.Height - 3;
                 toast.RenderAt(2, toastY, baseDl, wb);
 
-                // Render hints into a viewport one row shorter so they sit ABOVE the context
-                // status bar (which the bar owns at viewport.Height - 1). KeyHintsBar anchors
-                // itself to the bottom of the viewport it is given, so shrinking the height by
-                // one lifts it clear of the bar instead of being painted over.
-                hints.Render((viewport.Width, viewport.Height - 1), baseDl, wb, reservedRightWidth);
-
-                // Render the context status bar on the bottom row of the viewport
+                // Render the collapsed status line on the bottom row of the viewport
                 contextStatusBar.SetLiveStats(aiService?.LiveStats);
                 contextStatusBar.Render(viewport, baseDl, wb);
 
