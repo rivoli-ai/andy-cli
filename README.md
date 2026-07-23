@@ -30,6 +30,8 @@ runtime, and an Agent Client Protocol (ACP) server for editor integrations.
 - **UI Themes** - 34 built-in themes, persistence, and optional transparent
   backgrounds through `/theme`
 - **Code Indexing** - Index a codebase for fast code-aware search
+- **Interactive MCP Tools** - Connect project-configured stdio or HTTP MCP
+  servers and expose their tools in the TUI
 - **Headless Agent Runtime** - Non-interactive agent runtime with structured exit codes
 - **ACP Server Mode** - Run as an Agent Client Protocol server for editor integrations
 - **Observability** - Instrumentation and a performance HUD; crash logging for diagnostics
@@ -93,6 +95,19 @@ providers are configured, detection prefers them in this order:
 - `ANDY_DEBUG=true` - Enable debug logging
 - `ANDY_STRICT_ERRORS=1` - Enable strict error handling
 
+### Interactive MCP servers
+
+Interactive mode loads MCP servers from `Mcp:Servers` in `appsettings.json`
+and from `<working-directory>/.andy/mcp-servers.json`, with the project file
+taking precedence. Both stdio and Streamable HTTP transports are supported.
+Use `${VARIABLE_NAME}` placeholders for credentials; a server referencing an
+unset variable is rejected without printing the expanded value.
+
+Connected tools appear in `/tools list` with IDs such as
+`mcp_filesystem_read_file`. Use `/mcp list` or `/mcp status` for server state.
+See [`docs/mcp-configuration.md`](docs/mcp-configuration.md) for the complete
+schema, examples, security guidance, and current limitations.
+
 ### Examples
 
 ```bash
@@ -144,6 +159,8 @@ dotnet run --project src/Andy.Cli
 - `/model detect` - Show provider detection diagnostics
 - `/tools list` - List available tools
 - `/tools info <tool_name>` - Show details for a tool
+- `/mcp list` - List configured MCP servers
+- `/mcp status` - Show MCP connection state and registered tool IDs
 - `/permissions` - View and edit tool permissions (aliases: `perms`, `perm`)
 - `/theme` - List and switch the UI theme (alias: `themes`)
 - `/theme transparent on|off` - Toggle a supported theme's transparent background
@@ -248,6 +265,7 @@ this repository). The application is built on a set of Andy.* NuGet packages:
 - [`docs/README.md`](docs/README.md) - Documentation index
 - [`docs/README_COMMANDS.md`](docs/README_COMMANDS.md) - Commands and shortcuts
 - [`docs/headless-runtime.md`](docs/headless-runtime.md) - Headless config and execution contract
+- [`docs/mcp-configuration.md`](docs/mcp-configuration.md) - Interactive MCP server configuration
 - [`docs/ZED_INTEGRATION.md`](docs/ZED_INTEGRATION.md) - ACP editor integration
 - [`docs/CLI_AGENT_FEATURE_COMPARISON.md`](docs/CLI_AGENT_FEATURE_COMPARISON.md) - Rider CLI-agent comparison
 
@@ -292,7 +310,7 @@ Andy.Tui checkouts. The helper uses an isolated project-reference overlay and
 leaves committed package references and lock files unchanged. The same check is
 available as the manual `Source compatibility` GitHub Actions workflow.
 
-Dependency status (2026-07-21): the CLI's direct NuGet references and recursive
+Dependency status (2026-07-23): the CLI's direct NuGet references and recursive
 Andy package graph were refreshed to the latest verified stable or prerelease
 versions for the .NET 8 target. The package lock files and dependency manifest
 record the resulting known-good graph.

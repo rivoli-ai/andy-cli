@@ -8,6 +8,7 @@ using Andy.Tui.Backend.Terminal;
 using Andy.Cli.Hosting;
 using Andy.Cli.Input;
 using Andy.Cli.Instrumentation;
+using Andy.Cli.Mcp;
 using Andy.Cli.Widgets;
 using Andy.Cli.Commands;
 using Andy.Cli.Services;
@@ -291,6 +292,7 @@ class Program
             {
                 new InlineCommandHelp.CommandInfo { Name = "model", Description = "Manage AI models (list, switch, info, test)", Aliases = new[] { "m" } },
                 new InlineCommandHelp.CommandInfo { Name = "tools", Description = "Manage and list available tools", Aliases = new[] { "tool", "t" } },
+                new InlineCommandHelp.CommandInfo { Name = "mcp", Description = "List MCP servers and connection status", Aliases = Array.Empty<string>() },
                 new InlineCommandHelp.CommandInfo { Name = "theme", Description = "List, switch, or toggle transparency of the UI theme", Aliases = new[] { "themes" } },
                 new InlineCommandHelp.CommandInfo { Name = "clear", Description = "Clear conversation history", Aliases = Array.Empty<string>() },
                 new InlineCommandHelp.CommandInfo { Name = "help", Description = "Show help information", Aliases = new[] { "?" } },
@@ -387,9 +389,20 @@ class Program
             // Initialize tool registry and register tools
             var toolRegistry = AppCompositionRoot.InitializeToolRegistry(serviceProvider);
 
+            // Load project/appsettings MCP servers before creating the agent so
+            // discovered remote tools are included in its initial tool set.
+            var mcpConfiguration = McpConfigurationLoader.Load(
+                configuration,
+                Directory.GetCurrentDirectory());
+            await using var mcpToolHost = await InteractiveMcpToolHost.BuildAsync(
+                mcpConfiguration,
+                toolRegistry,
+                serviceProvider.GetService<ILoggerFactory>());
+
             // Initialize commands
             var modelCommand = new ModelCommand(serviceProvider);
             var toolsCommand = new ToolsCommand(serviceProvider);
+            var mcpCommand = new McpCommand(mcpToolHost);
             var permissionsCommand = new PermissionsCommand(serviceProvider);
             var permissionsManager = new Andy.Cli.Widgets.PermissionsManager(Directory.GetCurrentDirectory());
             var themeCommand = new ThemeCommand(themeMemory);
@@ -654,6 +667,19 @@ class Program
                             var result = await toolsCommand.ExecuteAsync(new[] { "info" }.Concat(args).ToArray());
                             feed.AddMarkdownRich(result.Message);
                         }
+                    }
+                },
+                new CommandPalette.CommandItem
+                {
+                    Name = "MCP Status",
+                    Description = "Show configured MCP servers, connection state, and tools",
+                    Category = "Tools",
+                    Aliases = new[] { "mcp", "mcp status", "mcp list" },
+                    AsyncAction = async args =>
+                    {
+                        var subcommand = args.Length == 0 ? new[] { "status" } : args;
+                        var result = await mcpCommand.ExecuteAsync(subcommand);
+                        feed.AddMarkdownRich("```\n" + result.Message + "\n```");
                     }
                 },
                 new CommandPalette.CommandItem
@@ -1312,6 +1338,13 @@ class Program
                                     }
                                     return;
                                 }
+                                else if (commandName == "mcp")
+                                {
+                                    feed.AddUserMessage(cmd);
+                                    var result = await mcpCommand.ExecuteAsync(args);
+                                    feed.AddMarkdownRich("```\n" + result.Message + "\n```");
+                                    return;
+                                }
                                 else if (commandName == "permissions" || commandName == "perms" || commandName == "perm")
                                 {
                                     // No args -> open the interactive manager; subcommands run the command.
@@ -1365,7 +1398,9 @@ class Program
                                         "### Tool Commands:\n" +
                                         "- **/tools list [category]**: List available tools\n" +
                                         "- **/tools info <tool_name>**: Show tool details\n" +
-                                        "- **/tools execute <tool_name> [params]**: Run a tool\n\n" +
+                                        "- **/tools execute <tool_name> [params]**: Run a tool\n" +
+                                        "- **/mcp list**: List configured MCP servers\n" +
+                                        "- **/mcp status**: Show MCP connection state and registered tools\n\n" +
                                         "### Permission Commands:\n" +
                                         "- **/permissions**: List effective permission rules by layer\n" +
                                         "- **/permissions allow|ask|deny <tool[(spec)]> [--scope user|project|local]**: Persist a rule\n" +

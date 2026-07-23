@@ -207,7 +207,7 @@ execution modes. The current code also carries an explicit alpha warning.
 | Models | **Andy.Llm** plus a centralized provider registry. Supported providers are OpenRouter, OpenAI, Anthropic, Cerebras, Groq, Google Gemini, and local Ollama. |
 | Tools | **Andy.Tools**, **Andy.Tools.Data**, and **Andy.Tools.Pdf** provide the registry, execution framework, DuckDB dataframe tools, and managed PDF tools. |
 | Permissions | **Andy.Permissions** gates tool execution. Interactive mode can ask; non-interactive modes fail closed unless explicitly configured. |
-| External tools | **Andy.MCP** supports remote MCP tools. Headless configuration also supports subprocess CLI tools. |
+| External tools | **Andy.MCP** supports interactive stdio and Streamable HTTP servers configured through appsettings or `.andy/mcp-servers.json`; connected tools appear in `/tools list` and `/mcp status`. Headless configuration separately supports HTTP MCP and subprocess CLI tools. |
 | ACP | **Andy.Acp.Core** hosts the ACP server used by Rider/Zed and `AndyAgentProvider` maps ACP sessions to per-session Engine agents. |
 | UI | **Andy.Tui** provides the streaming terminal interface, command palette, themes, tool traces, diffs, and performance HUD. |
 
@@ -333,7 +333,7 @@ credential mechanism rather than committing them to `acp.json`.
 | Repository work | File/text/git/shell/code-index tools | Covers the core loop, though no dedicated LSP/refactoring engine is exposed as a tool |
 | Web capability | Raw `http_request`; no first-class web search or browser automation | Behind Codex, Gemini, Cline, Factory, DeepAgents, and similar agents for web/UI validation |
 | Multimodality | PDF parsing is strong; ACP image/audio prompts are absent | Document analysis is strong, visual debugging is weak |
-| Customization | Provider/model settings, system prompt, built-in registry, MCP and CLI tool bindings | No user-facing skills, plugins, hooks, custom subagents, or portable agent profiles yet |
+| Customization | Provider/model settings, system prompt, built-in registry, interactive stdio/HTTP MCP servers, and headless MCP/CLI tool bindings | No user-facing skills, plugins, hooks, custom subagents, or portable agent profiles yet; live MCP add/remove/reload and gateway discovery remain open |
 | Multi-agent work | Single Engine agent per session | Behind Factory Missions, fast-agent workflows, DeepAgents, Gemini subagents, Amp, and Mistral Vibe |
 | ACP lifecycle | Create, in-process load, embedded context, cancel, progress | Behind agents that advertise list/fork/resume and persistent histories |
 | Distribution | Source/build/publish workflow; no ACP registry entry | More setup in Rider than one-click registry agents |

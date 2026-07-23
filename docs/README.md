@@ -15,6 +15,8 @@ linked below.
   supported behavior, limitations, and troubleshooting.
 - [CLI coding-agent comparison](CLI_AGENT_FEATURE_COMPARISON.md) - Current Rider/ACP
   command and feature comparison, including Andy Engine and Tools.
+- [Interactive MCP configuration](mcp-configuration.md) - Project/appsettings
+  configuration, stdio and HTTP transports, commands, security, and troubleshooting.
 
 ## Headless runtime
 

@@ -1,6 +1,6 @@
 # Andy CLI command reference
 
-Updated: 2026-07-21
+Updated: 2026-07-23
 
 Examples use the published executable name, `andy-cli`. From a source checkout,
 replace it with `dotnet run --project src/Andy.Cli --`.
@@ -49,7 +49,21 @@ IDs are `openrouter`, `openai`, `anthropic`, `cerebras`, `groq`, `google`, and
 
 Use IDs from `/tools list`; do not infer an ID from the display name. The current
 catalog contains 54 tools, including 28 dataframe and six PDF tools. The catalog
-is package-version dependent, so the live command is authoritative.
+is package-version dependent, and interactive MCP tools are added at startup, so
+the live command is authoritative.
+
+### MCP servers
+
+| Command | Behavior |
+| --- | --- |
+| `/mcp list` | List configured MCP servers, transport, connection state, and tool count. |
+| `/mcp status` | Include registered tool IDs and sanitized failure details. |
+| `/mcp help` | Show MCP command usage. |
+
+Interactive MCP servers come from `Mcp:Servers` in `appsettings.json` and the
+project-local `.andy/mcp-servers.json`. See
+[Interactive MCP configuration](mcp-configuration.md) for schemas, environment
+interpolation, supported transports, and current management limitations.
 
 ### Permissions
 
