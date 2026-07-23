@@ -196,7 +196,7 @@ namespace Andy.Cli.Tests.Widgets
             var b = new DL.DisplayListBuilder();
             item.RenderSlice(0, 0, Width, 0, item.MeasureLineCount(Width), new DL.DisplayListBuilder().Build(), b);
             foreach (var op in b.Build().Ops)
-                if (op is DL.TextRun tr && tr.Content == "●")
+                if (op is DL.TextRun tr && tr.Content == "*")
                     return tr;
             return null;
         }
