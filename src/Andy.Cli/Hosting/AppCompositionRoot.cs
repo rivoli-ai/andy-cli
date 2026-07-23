@@ -84,6 +84,36 @@ public static class AppCompositionRoot
             toolRegistry.RegisterTool(registration.ToolType, registration.Configuration);
         }
 
+        RegisterSkillTools(serviceProvider, toolRegistry);
+
         return toolRegistry;
+    }
+
+    /// <summary>
+    /// Registers the Agent Skills tools (`skill` and `skill_file`). Unlike the built-in tools
+    /// above, these require constructor injection (the shared <c>ISkillCatalog</c>), which the
+    /// Activator-based <see cref="IToolRegistry.RegisterTool(System.Type, Dictionary{string, object?})"/>
+    /// path rejects (it demands a parameterless constructor), so they go through the registry's
+    /// factory overload instead. No-op when no skill catalog is registered.
+    /// </summary>
+    private static void RegisterSkillTools(System.IServiceProvider serviceProvider, IToolRegistry toolRegistry)
+    {
+        var skillCatalog = serviceProvider.GetService<Andy.Skills.Tools.ISkillCatalog>();
+        if (skillCatalog == null)
+        {
+            return;
+        }
+
+        toolRegistry.RegisterTool(
+            new Andy.Skills.Tools.SkillTool(skillCatalog).Metadata,
+            sp => new Andy.Skills.Tools.SkillTool(
+                sp.GetRequiredService<Andy.Skills.Tools.ISkillCatalog>()),
+            new Dictionary<string, object?>());
+
+        toolRegistry.RegisterTool(
+            new Andy.Skills.Tools.SkillResourceTool(skillCatalog).Metadata,
+            sp => new Andy.Skills.Tools.SkillResourceTool(
+                sp.GetRequiredService<Andy.Skills.Tools.ISkillCatalog>()),
+            new Dictionary<string, object?>());
     }
 }

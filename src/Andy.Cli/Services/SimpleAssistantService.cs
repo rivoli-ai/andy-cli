@@ -112,7 +112,8 @@ public class SimpleAssistantService : IDisposable
         string providerName,
         TokenCounter? tokenCounter = null,
         ILoggerFactory? loggerFactory = null,
-        IReadOnlyDictionary<string, object?>? extraBody = null)
+        IReadOnlyDictionary<string, object?>? extraBody = null,
+        string? systemPromptSuffix = null)
     {
         _feed = feed;
         _tokenCounter = tokenCounter;
@@ -137,6 +138,13 @@ public class SimpleAssistantService : IDisposable
 
         // Build system prompt using the new SystemPrompts helper
         var systemPrompt = Andy.Cli.Services.Prompts.SystemPrompts.GetDefaultCliPrompt();
+
+        // Host-supplied addendum (e.g. the Agent Skills summary block: skill names and
+        // descriptions only; the agent pulls a skill's body on demand via the `skill` tool).
+        if (!string.IsNullOrWhiteSpace(systemPromptSuffix))
+        {
+            systemPrompt = systemPrompt + "\n\n" + systemPromptSuffix.Trim();
+        }
 
         // Store system prompt in instrumentation hub for dashboard display
         InstrumentationHub.Instance.SetSystemPrompt(systemPrompt);

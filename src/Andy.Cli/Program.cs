@@ -382,6 +382,7 @@ class Program
             var mcpCommand = new McpCommand(mcpToolHost);
             var permissionsCommand = new PermissionsCommand(serviceProvider);
             var permissionsManager = new Andy.Cli.Widgets.PermissionsManager(Directory.GetCurrentDirectory());
+            var skillsCommand = new Andy.Cli.Commands.SkillsCommand(serviceProvider);
             var themeCommand = new ThemeCommand(themeMemory);
             var commandPalette = new CommandPalette();
 
@@ -398,6 +399,26 @@ class Program
             var currentModel = modelCommand.GetCurrentModel();
             var currentProvider = modelCommand.GetCurrentProvider();
             var systemPrompt = BuildSystemPrompt(availableTools, currentModel, currentProvider);
+
+            // Agent Skills summary for the system prompt: names and descriptions only (lazy
+            // disclosure); the agent loads a skill's full instructions on demand through the
+            // `skill` tool. Empty when no skills are discovered. Recomputed lazily so /restart
+            // and model switches pick up skills enabled/disabled or added mid-session.
+            string ComposeSkillsPromptSection()
+            {
+                try
+                {
+                    var skillCatalog = serviceProvider.GetService<Andy.Skills.Tools.ISkillCatalog>();
+                    if (skillCatalog == null) return string.Empty;
+                    var skills = skillCatalog.GetSkillsAsync().GetAwaiter().GetResult();
+                    return Andy.Skills.SkillPromptComposer.Compose(skills);
+                }
+                catch
+                {
+                    // Skills are optional; a discovery failure must never block startup.
+                    return string.Empty;
+                }
+            }
 
             // Conversation will be managed internally by AssistantService
 
@@ -457,7 +478,8 @@ class Program
                     currentProvider,
                     tokenCounter,
                     loggerFactory,
-                    extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, currentProvider));
+                    extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, currentProvider),
+                    systemPromptSuffix: ComposeSkillsPromptSection());
 
                 var providerUrl = ProviderUrlResolver.Resolve(currentProvider);
 
@@ -511,7 +533,8 @@ class Program
                         provider,
                         tokenCounter,
                         loggerFactory,
-                        extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, provider));
+                        extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, provider),
+                        systemPromptSuffix: ComposeSkillsPromptSection());
                 }
                 else
                 {
@@ -607,7 +630,8 @@ class Program
                                         newProvider,
                                         tokenCounter,
                                         loggerFactory,
-                                        extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, newProvider));
+                                        extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, newProvider),
+                                        systemPromptSuffix: ComposeSkillsPromptSection());
                                 }
 
                                 feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
@@ -684,6 +708,29 @@ class Program
                             var result = await toolsCommand.ExecuteAsync(new[] { "info" }.Concat(args).ToArray());
                             feed.AddMarkdownRich(result.Message);
                         }
+                    }
+                },
+                new CommandPalette.CommandItem
+                {
+                    Name = "List Skills",
+                    Description = "Show discovered agent skills and their enabled state",
+                    Category = "Tools",
+                    Aliases = new[] { "skills", "skill list" },
+                    AsyncAction = async args =>
+                    {
+                        var result = await skillsCommand.ExecuteAsync(args.Length == 0 ? Array.Empty<string>() : args);
+                        feed.AddMarkdownRich("```\n" + result.Message + "\n```");
+                    }
+                },
+                new CommandPalette.CommandItem
+                {
+                    Name = "Manage Permissions",
+                    Description = "Open the interactive permission rules manager",
+                    Category = "Tools",
+                    Aliases = new[] { "permissions", "perms" },
+                    Action = args =>
+                    {
+                        permissionsManager.Open();
                     }
                 },
                 new CommandPalette.CommandItem
@@ -1352,7 +1399,8 @@ class Program
                                                     newProvider,
                                                     tokenCounter,
                                                     loggerFactory,
-                                                    extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, newProvider));
+                                                    extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, newProvider),
+                                                    systemPromptSuffix: ComposeSkillsPromptSection());
                                             }
 
                                             feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
@@ -1395,6 +1443,14 @@ class Program
                                     feed.AddUserMessage(cmd);
                                     var result = await permissionsCommand.ExecuteAsync(args);
                                     // Fence the output so the layered rule list stays aligned (monospace).
+                                    feed.AddMarkdownRich("```\n" + result.Message + "\n```");
+                                    return;
+                                }
+                                else if (commandName == "skills" || commandName == "skill")
+                                {
+                                    feed.AddUserMessage(cmd);
+                                    var result = await skillsCommand.ExecuteAsync(args);
+                                    // Fence the output so the aligned skill list stays monospace.
                                     feed.AddMarkdownRich("```\n" + result.Message + "\n```");
                                     return;
                                 }
@@ -2254,6 +2310,10 @@ class Program
             case "perms":
             case "perm":
                 command = new PermissionsCommand(serviceProvider);
+                break;
+            case "skills":
+            case "skill":
+                command = new Andy.Cli.Commands.SkillsCommand(serviceProvider);
                 break;
             case "help":
             case "?":

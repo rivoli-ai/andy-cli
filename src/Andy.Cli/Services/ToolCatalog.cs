@@ -79,6 +79,28 @@ public static class ToolCatalog
         // TrimmerRootAssembly (see Andy.Cli.csproj) so the tool constructors survive trimming/AOT.
         // Useful for understanding financial filings (10-K) and earnings-call transcripts.
         Andy.Tools.Pdf.ServiceCollectionExtensions.AddAndyPdfTools(services);
+
+        // Agent Skills (Andy.Skills via Andy.Skills.Tools). Skills are discovered from the
+        // conventional roots: <workspace>/.andy/skills, then ~/.andy/skills. The catalog is
+        // decorated with the CLI's persisted disable list so `/skills disable <name>` is honored
+        // by the skill tools themselves (a disabled skill cannot be loaded), not just hidden
+        // from listings. NOTE: the upstream AddAndySkills extension is deliberately NOT used
+        // here - it registers the `skill` / `skill_file` tools as ToolRegistrationInfo entries,
+        // but those tools require constructor injection (ISkillCatalog), which this app's
+        // Activator-based IToolRegistry.RegisterTool(Type) path rejects. The tools instead
+        // register through the registry's factory overload in
+        // AppCompositionRoot.InitializeToolRegistry.
+        // Andy.Skills / Andy.Skills.Tools are TrimmerRootAssembly entries (see Andy.Cli.csproj).
+        var workspace = System.IO.Directory.GetCurrentDirectory();
+        var skillOptions = new Andy.Skills.Tools.SkillCatalogOptions();
+        foreach (var root in Andy.Skills.SkillDiscovery.DefaultRoots(workspace))
+        {
+            skillOptions.Roots.Add(root);
+        }
+        services.AddSingleton(skillOptions);
+        services.AddSingleton<Andy.Skills.Tools.ISkillCatalog>(sp => new FilteredSkillCatalog(
+            new Andy.Skills.Tools.SkillCatalog(sp.GetRequiredService<Andy.Skills.Tools.SkillCatalogOptions>()),
+            SkillsDisableList.PathFor(workspace)));
     }
 
     /// <summary>

@@ -276,6 +276,22 @@
           "Microsoft.Extensions.DependencyInjection.Abstractions": "8.0.2"
         }
       },
+      "Andy.Skills": {
+        "type": "Transitive",
+        "resolved": "2026.7.21-rc.17",
+        "contentHash": "63Y3jvueMuMeL+2ylb4jnNF2nsFK/iJkV7ZEAS1NncQ3suTWtar+cVYP1RG9jKGvLW5/keu31hyHiCESCC2TYA=="
+      },
+      "Andy.Skills.Tools": {
+        "type": "Transitive",
+        "resolved": "2026.7.21-rc.17",
+        "contentHash": "42K5k6KZG8biTwxAa3seoc27T6ot0PACA9LpRcc64V07pRMgTYw9480ouLuxR7UBAaHfHEmu8n4ZiGx9qSUeHw==",
+        "dependencies": {
+          "Andy.Skills": "2026.7.21-rc.17",
+          "Andy.Tools": "2026.6.27-rc.80",
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "8.0.2",
+          "Microsoft.Extensions.Logging.Abstractions": "8.0.2"
+        }
+      },
       "Andy.Tools.Data": {
         "type": "Transitive",
         "resolved": "2026.7.21-rc.86",
@@ -2227,6 +2243,7 @@
           "Andy.MCP": "[2026.5.16-rc.31, )",
           "Andy.Model": "[2026.7.21-rc.13, )",
           "Andy.Permissions": "[2026.7.21-rc.14, )",
+          "Andy.Skills.Tools": "[2026.7.21-rc.17, )",
           "Andy.Tools": "[2026.7.21-rc.86, )",
           "Andy.Tools.Data": "[2026.7.21-rc.86, )",
           "Andy.Tools.Pdf": "[2026.7.21-rc.86, )",
