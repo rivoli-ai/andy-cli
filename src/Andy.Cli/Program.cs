@@ -926,7 +926,9 @@ class Program
                     int iw = Math.Max(8, bw - 4);
 
                     var toolLine = $"Tool: {request.ToolDisplayName ?? request.ToolId}";
-                    var summaryLines = Andy.Cli.Widgets.TextWrap.Wrap(request.ActionSummary, iw);
+                    // Body lines carry a per-line kind so command lines render color-coded
+                    // (danger-level coloring for destructive patterns; issue #237).
+                    var summaryLines = Andy.Cli.Widgets.PermissionDialogContent.BuildBodyLines(request, iw);
 
                     // Grow the dialog to show as many summary lines as fit; scroll if longer.
                     const int chrome = 8; // borders(2) + title + blank + tool + blank + buttons + hints
@@ -958,7 +960,12 @@ class Program
                     int sy = by + 4;
                     for (int i = 0; i < summaryVisible; i++)
                     {
-                        pb.DrawText(new DL.TextRun(bx + 2, sy + i, summaryLines[scroll + i], new DL.Rgb24(200, 200, 210), panelBg, DL.CellAttrFlags.None));
+                        var bodyLine = summaryLines[scroll + i];
+                        var lineFg = Andy.Cli.Widgets.PermissionDialogContent.ColorFor(bodyLine.Kind);
+                        var lineAttrs = bodyLine.Kind == Andy.Cli.Widgets.PermissionLineKind.DangerousCommand
+                            ? DL.CellAttrFlags.Bold
+                            : DL.CellAttrFlags.None;
+                        pb.DrawText(new DL.TextRun(bx + 2, sy + i, bodyLine.Text, lineFg, panelBg, lineAttrs));
                     }
 
                     int btnY = sy + summaryVisible + 1;
@@ -1018,6 +1025,9 @@ class Program
                 {
                     var decision = await ShowPermissionDialogAsync(pendingPermission.Request);
                     pendingPermission.Completion.TrySetResult(decision);
+                    // Record the decision in the transcript so there is a visible, auditable
+                    // trace of what was approved or denied (issue #224).
+                    feed.AddItem(new Andy.Cli.Widgets.PermissionDecisionItem(pendingPermission.Request, decision));
                     continue;
                 }
 
