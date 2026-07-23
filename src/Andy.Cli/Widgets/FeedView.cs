@@ -1744,18 +1744,18 @@ namespace Andy.Cli.Widgets
             _planExpanded = expanded;
             var plan = new List<(string, Role)>();
 
-            // Header: status marker + tool id (always one line; truncated horizontally at draw).
-            plan.Add(($"{StatusMarker} {_toolId}", Role.Header));
+            // Header (always one line; truncated horizontally at draw). Collapsed mode shows a
+            // human-readable action summary ("Reading src/Program.cs") instead of the raw tool
+            // id + arguments (#223); the expanded view keeps the tool id and full parameters.
+            var header = expanded
+                ? _toolId
+                : Services.ToolCallSummarizer.Summarize(_toolId, _parameters);
+            plan.Add(($"{StatusMarker} {header}", Role.Header));
 
             if (!expanded)
             {
-                // COLLAPSED: today's compact view — one inline param line + one result line.
-                if (_parameters.Count > 0)
-                {
-                    var pairs = _parameters.Take(3).Select(kv => $"{kv.Key}={TruncateInline(kv.Value)}");
-                    var more = _parameters.Count > 3 ? $", +{_parameters.Count - 3} more" : "";
-                    plan.Add((string.Join(", ", pairs) + more, Role.Param));
-                }
+                // COLLAPSED: the human-readable header already describes the arguments,
+                // so only a one-line result summary follows.
                 if (!string.IsNullOrEmpty(_resultSummary))
                 {
                     plan.Add(("Result: " + _resultSummary, Role.ResultLabel));
@@ -1797,14 +1797,6 @@ namespace Andy.Cli.Widgets
             }
 
             _plan = plan;
-        }
-
-        private static string TruncateInline(object? value)
-        {
-            var s = value?.ToString() ?? "null";
-            if (s.Length > 40) s = s.Substring(0, 37) + "...";
-            // Collapse whitespace
-            return s.Replace("\n", " ").Replace("\r", " ").Trim();
         }
 
         private static string FirstLine(string s)
@@ -2466,11 +2458,18 @@ namespace Andy.Cli.Widgets
                 // the spinner / elapsed clock animate without changing the row count.
                 if (i == 0)
                 {
+                    // Collapsed mode shows a human-readable action summary ("Reading
+                    // src/Program.cs") instead of the raw "tool_name(args)" line (#223).
+                    // The expanded view keeps the tool name + raw arguments.
+                    string HeaderBody()
+                        => ToolOutputView.Expanded
+                            ? BuildRawHeaderBody()
+                            : Services.ToolCallSummarizer.Summarize(_toolName, _parameters);
+
                     if (!_isComplete)
                     {
                         var spinner = _spinnerFrames[_animationFrame];
-                        var paramDisplay = GetParameterDisplay();
-                        var toolDisplay = $"{spinner} {_toolName}" + (string.IsNullOrEmpty(paramDisplay) ? "()" : $"({paramDisplay})");
+                        var toolDisplay = $"{spinner} {HeaderBody()}";
                         if (toolDisplay.Length > width) toolDisplay = toolDisplay.Substring(0, Math.Max(0, width - 1));
                         b.DrawText(new DL.TextRun(x, row, toolDisplay, white, null, DL.CellAttrFlags.None));
                     }
@@ -2488,8 +2487,7 @@ namespace Andy.Cli.Widgets
                         const string marker = "*"; // green/red status marker
                         b.DrawText(new DL.TextRun(x, row, marker, symbolColor, null, DL.CellAttrFlags.None));
 
-                        var paramDisplay = GetParameterDisplay();
-                        var toolDisplay = $" {_toolName}" + (string.IsNullOrEmpty(paramDisplay) ? "()" : $"({paramDisplay})");
+                        var toolDisplay = $" {HeaderBody()}";
                         int tx = x + marker.Length;
                         if (toolDisplay.Length > width - marker.Length) toolDisplay = toolDisplay.Substring(0, Math.Max(0, width - marker.Length - 1));
                         b.DrawText(new DL.TextRun(tx, row, toolDisplay, white, null, DL.CellAttrFlags.None));
@@ -2682,6 +2680,16 @@ namespace Andy.Cli.Widgets
                 if (!string.IsNullOrWhiteSpace(raw))
                     return FirstLine(raw);
             return FirstLine(s);
+        }
+
+        /// <summary>
+        /// The raw "tool_name(args)" header body, shown in the expanded view so the exact
+        /// tool id and arguments stay available next to the human-readable collapsed summary.
+        /// </summary>
+        private string BuildRawHeaderBody()
+        {
+            var paramDisplay = GetParameterDisplay();
+            return _toolName + (string.IsNullOrEmpty(paramDisplay) ? "()" : $"({paramDisplay})");
         }
 
         private string GetParameterDisplay()
