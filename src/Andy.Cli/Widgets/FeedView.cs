@@ -77,6 +77,24 @@ namespace Andy.Cli.Widgets
         /// This is the case while the user is pinned at/near the bottom.</summary>
         public bool IsAutoScrollEnabled => _scrollOffset <= PinnedToBottomThresholdLines;
 
+        // Number of items appended while the user was scrolled up reading history.
+        // Rendered as a "N new messages" overlay on the last visible line so the
+        // user knows there is pending content below; cleared as soon as the view
+        // returns to (or near) the bottom.
+        private int _newItemsBelow;
+
+        /// <summary>Items appended below the viewport while the user was scrolled up.
+        /// Zero whenever the view is at/near the bottom.</summary>
+        public int NewItemsBelowCount => _newItemsBelow;
+
+        /// <summary>True when the "N new messages" overlay should be drawn: the user is
+        /// scrolled up reading history and content has been appended below.</summary>
+        public bool IsNewItemsOverlayVisible => _newItemsBelow > 0 && _scrollOffset > PinnedToBottomThresholdLines;
+
+        /// <summary>Overlay label for a given pending-item count (plain ASCII, no emojis).</summary>
+        internal static string FormatNewItemsOverlay(int count)
+            => count == 1 ? "1 new message" : $"{count} new messages";
+
         /// <summary>Replace the time source used for the idle auto-scroll timer (testing hook).</summary>
         internal void SetClockForTesting(Func<DateTime> clock) => _clock = clock ?? (() => DateTime.UtcNow);
 
@@ -119,6 +137,7 @@ namespace Andy.Cli.Widgets
                 _scrollOffset = 0;
                 _followTail = true;
                 _lastScrollActivityUtc = DateTime.MinValue;
+                _newItemsBelow = 0; // the new content is (about to be) visible
             }
             else
             {
@@ -128,6 +147,9 @@ namespace Andy.Cli.Widgets
                 // (see _autoScrollHoldAnchor), so here we only mark that a hold is
                 // pending. Render clamps it to valid bounds.
                 _autoScrollHoldAnchor = true;
+                // The appended item lands below the viewport; surface it in the
+                // "N new messages" overlay until the user scrolls back down.
+                _newItemsBelow++;
             }
         }
 
@@ -501,6 +523,7 @@ namespace Andy.Cli.Widgets
             _totalLinesCache = 0;
             _autoScrollHoldAnchor = false;
             _lastScrollActivityUtc = DateTime.MinValue;
+            _newItemsBelow = 0;
         }
 
         /// <summary>Scroll the feed by delta lines (positive = up). Returns current offset.</summary>
@@ -526,9 +549,17 @@ namespace Andy.Cli.Widgets
             // whether auto-scroll should resume. A pending hold is no longer needed
             // because the user explicitly moved the view.
             _autoScrollHoldAnchor = false;
-            _lastScrollActivityUtc = _scrollOffset <= PinnedToBottomThresholdLines
-                ? DateTime.MinValue // back at/near the bottom: auto-scroll is active again
-                : _clock();
+            if (_scrollOffset <= PinnedToBottomThresholdLines)
+            {
+                // Back at/near the bottom: auto-scroll is active again and the
+                // pending content is visible, so the overlay disappears.
+                _lastScrollActivityUtc = DateTime.MinValue;
+                _newItemsBelow = 0;
+            }
+            else
+            {
+                _lastScrollActivityUtc = _clock();
+            }
             return _scrollOffset;
         }
 
@@ -545,6 +576,7 @@ namespace Andy.Cli.Widgets
             _followTail = true;
             _autoScrollHoldAnchor = false;
             _lastScrollActivityUtc = DateTime.MinValue;
+            _newItemsBelow = 0;
         }
 
         /// <summary>Advance animation state one frame.</summary>
@@ -662,6 +694,21 @@ namespace Andy.Cli.Widgets
                 itemsSnapshot[i].RenderSlice(x + 1, cy, w - 2, sliceStart, maxLines, baseDl, b);
                 cy += maxLines;
                 drawn += maxLines;
+            }
+
+            // When the user is scrolled up and content has been appended below,
+            // overlay a pending-content notice on the last visible line so they
+            // know there is new output waiting at the bottom. Plain ASCII.
+            if (IsNewItemsOverlayVisible)
+            {
+                string label = " " + FormatNewItemsOverlay(_newItemsBelow) + " ";
+                if (label.Length <= w)
+                {
+                    int lx = x + Math.Max(0, w - label.Length - 1);
+                    int ly = y + h - 1;
+                    b.DrawText(new DL.TextRun(lx, ly, label,
+                        new DL.Rgb24(100, 150, 255), new DL.Rgb24(30, 30, 40), DL.CellAttrFlags.Bold));
+                }
             }
 
             b.Pop();

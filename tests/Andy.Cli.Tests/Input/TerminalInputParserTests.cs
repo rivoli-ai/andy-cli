@@ -56,12 +56,24 @@ public class TerminalInputParserTests
     }
 
     [Fact]
-    public void NonWheelMouseEvents_AreIgnored()
+    public void LeftButtonPress_DecodesToMouseDown()
     {
-        // Left button press (button 0) carries no CLI behavior.
-        Assert.Empty(Decode("\x1b[<0;10;5M"));
-        // Release.
+        // A left-button press is surfaced so the app can release mouse capture
+        // for native text selection while the user is scrolled up (issue #230).
+        var ev = Single(Decode("\x1b[<0;10;5M"));
+        Assert.Equal(TerminalInputKind.MouseDown, ev.Kind);
+    }
+
+    [Fact]
+    public void NonLeftAndNonPressMouseEvents_AreIgnored()
+    {
+        // Left button release.
         Assert.Empty(Decode("\x1b[<0;10;5m"));
+        // Middle (1) and right (2) button presses carry no CLI behavior.
+        Assert.Empty(Decode("\x1b[<1;10;5M"));
+        Assert.Empty(Decode("\x1b[<2;10;5M"));
+        // Motion/drag report (bit 0x20) must not be mistaken for a press.
+        Assert.Empty(Decode("\x1b[<32;10;5M"));
     }
 
     // ----- Keys the Andy.Tui.Input decoder drops -----

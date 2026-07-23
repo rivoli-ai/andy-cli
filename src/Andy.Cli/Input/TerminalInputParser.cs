@@ -10,7 +10,11 @@ public enum TerminalInputKind
     /// <summary>A keyboard event; see <see cref="TerminalInputEvent.Key"/>.</summary>
     Key,
     /// <summary>A mouse wheel scroll; see <see cref="TerminalInputEvent.WheelDelta"/>.</summary>
-    Wheel
+    Wheel,
+    /// <summary>A left mouse button press (no modifiers decoded). Used to detect the
+    /// start of a click/drag so mouse capture can be released for native text
+    /// selection while the user is scrolled up reading history.</summary>
+    MouseDown
 }
 
 /// <summary>
@@ -34,6 +38,7 @@ public readonly struct TerminalInputEvent
 
     public static TerminalInputEvent FromKey(ConsoleKeyInfo key) => new(TerminalInputKind.Key, key, 0);
     public static TerminalInputEvent FromWheel(int delta) => new(TerminalInputKind.Wheel, default, delta);
+    public static TerminalInputEvent FromMouseDown() => new(TerminalInputKind.MouseDown, default, 0);
 }
 
 /// <summary>
@@ -195,7 +200,15 @@ public sealed class TerminalInputParser
                         else if (low == 1) outEvents.Add(TerminalInputEvent.FromWheel(-1)); // wheel down
                         // low 2/3 are horizontal wheel; ignored.
                     }
-                    // Non-wheel mouse (press/release/move) has no CLI behavior.
+                    else if (c == (byte)'M'          // press ('m' is release)
+                             && (btn & 0x20) == 0    // not a motion/drag report
+                             && (btn & 0x03) == 0)   // left button
+                    {
+                        // Left-button press: surfaced so the app can release mouse
+                        // capture for native text selection while scrolled up.
+                        outEvents.Add(TerminalInputEvent.FromMouseDown());
+                    }
+                    // Other mouse events (release, move, middle/right) have no CLI behavior.
                 }
                 return i + 1;
             }
