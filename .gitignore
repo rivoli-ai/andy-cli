@@ -103,3 +103,9 @@ SHA256SUMS.txt
 # Andy local permission layer (the project layer may be committed deliberately;
 # the local layer and runtime data under ./.andy are developer-specific)
 .andy/permissions.local.json
+
+# Local secrets and environment files (API keys live in the environment, never in git)
+.env
+.env.*
+!.env.example
+*.local.json
