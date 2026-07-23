@@ -72,6 +72,7 @@ strongly-typed view is `HeadlessRunConfig` in
 | `output` | Yes | object | Where the final output file goes and where the event stream goes. |
 | `event_sink` | No | object | NATS subject and/or FIFO path. Required (with `path`) when `output.stream` is `fifo`. |
 | `permissions` | No | object | Per-run permission allow-list; see [Built-in tools and permission gating](#built-in-tools-and-permission-gating). The only enforceable per-run tool control in v1. |
+| `required_actions` | No | array | Up to 32 observed tool-success assertions that must pass before output publication. Empty or absent preserves the previous behavior. |
 | `limits` | Yes | object | Iteration and wall-clock caps. |
 
 > **Removed in v1 (rivoli-ai/andy-cli#180): `policy_id` and `boundaries`.** The
@@ -160,6 +161,40 @@ The runtime recognizes the current Engine `max_turns_exceeded` stop reason and
 the legacy `max_turns` spelling. Both map to `Timeout`; unrelated unsuccessful
 agent results remain `AgentFailure`.
 
+### `required_actions`
+
+Optional array with at most 32 unique requirements. Each requirement is checked
+against terminal outcomes recorded by `ObservingToolExecutor`; text in the
+model's response never counts as evidence.
+
+> **Implementation status (2026-07-22):** schema validation, runtime gating,
+> bounded/redacted verification evidence, and success/non-success regression
+> coverage are complete.
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `tool_name` | Yes | Exact tool ID that must finish with `outcome=success`. |
+| `command_equals` | No | Exact command constraint for `execute_command` only. Leading/trailing whitespace, control characters, multiline values, and glob characters (`*`, `?`, `[`, `]`) are rejected. Matching never interprets a shell pattern or regular expression. |
+| `at_least` | No | Required number of successful matching calls, 1-100; defaults to 1. |
+
+For example, require at least one successful test command:
+
+```json
+"required_actions": [
+  {
+    "tool_name": "execute_command",
+    "command_equals": "dotnet test",
+    "at_least": 1
+  }
+]
+```
+
+After the agent loop converges, the runner emits
+`required_action_verification`. If any requirement is missing or its matching
+calls ended as `failed`, `denied`, `timed_out`, or `cancelled`, the run exits
+with `AgentFailure` (1) and does not write `output.file`. Event evidence includes
+the observed call IDs and outcomes, but only a digest of `command_equals`.
+
 ## Worked example: OpenRouter + Mimo
 
 A complete, valid v1 config using OpenRouter with the Mimo model. OpenRouter
@@ -227,7 +262,7 @@ so the numeric values are load-bearing and must not be reordered.
 | Code | Name | Meaning |
 | --- | --- | --- |
 | 0 | Success | Run completed; output file written. |
-| 1 | AgentFailure | The agent loop ran but did not converge (non-timeout LLM/tool failure); also covers tool-wiring, provider-resolution, and output-write failures. |
+| 1 | AgentFailure | The agent loop ran but did not converge (non-timeout LLM/tool failure); also covers unmet required actions, tool-wiring, provider-resolution, and output-write failures. |
 | 2 | ConfigError | Config missing, unparseable, or invalid, or bad CLI args. |
 | 3 | Cancelled | Cooperative cancellation (e.g. SIGTERM) before completion. |
 | 4 | Timeout | Wall-clock `timeout_seconds` or `max_iterations` exceeded. |
@@ -328,6 +363,7 @@ provide.
 | `workspace.branch` | Verified against the workspace's git HEAD. | Mismatch/unverifiable fails fast (exit 1). |
 | `output.stream: fifo` + `event_sink.path` | Event stream redirected to the FIFO. | Missing path rejected (schema + validator, exit 2). |
 | `permissions.allowed_tools` | Relaxes named tools from fail-closed default. | Unlisted tools stay denied. |
+| `required_actions` | Verified from actual terminal tool outcomes before output publication. | Any missing or non-success requirement exits 1 and writes no output file. |
 | `agent.revision`, `event_sink.nats_subject` | Informational metadata; carried but not acted on by the agent (the container runtime consumes them). | n/a |
 | `policy_id`, `boundaries` | **Removed.** Rejected as unknown properties. | Rejected (exit 2). |
 

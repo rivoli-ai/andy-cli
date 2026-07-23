@@ -223,6 +223,7 @@ public static class HeadlessAgentRunner
         // reflects a synthesized deny. Resolved here (before the agent is built) so
         // the same auditor feeds the end-of-run tool-usage audit.
         var auditor = new ToolUsageAuditor();
+        var requiredActionVerifier = new RequiredActionVerifier(config.RequiredActions);
         var toolAuthorizer = services
             .GetService(typeof(Andy.Permissions.Authorization.IToolPermissionAuthorizer))
             as Andy.Permissions.Authorization.IToolPermissionAuthorizer;
@@ -232,7 +233,8 @@ public static class HeadlessAgentRunner
             auditor,
             toolAuthorizer,
             toolHost.Registry,
-            workingDirectory: !string.IsNullOrWhiteSpace(config.Workspace.Root) ? config.Workspace.Root : null);
+            workingDirectory: !string.IsNullOrWhiteSpace(config.Workspace.Root) ? config.Workspace.Root : null,
+            requiredActionVerifier: requiredActionVerifier);
 
         var maxTurns = config.Limits.MaxIterations > 0 ? config.Limits.MaxIterations : 10;
 
@@ -254,11 +256,25 @@ public static class HeadlessAgentRunner
             workingDirectory: workingDirectory,
             logger: loggerFactory.CreateLogger<SimpleAgent>());
 
+        RequiredActionVerificationResult? requiredActionVerification = null;
+
+        void EmitRequiredActionVerification()
+        {
+            if (!requiredActionVerifier.HasRequirements || requiredActionVerification is not null)
+            {
+                return;
+            }
+
+            requiredActionVerification = requiredActionVerifier.Verify();
+            emitter.EmitRequiredActionVerification(requiredActionVerification);
+        }
+
         // Finalize a run that has reached the agent loop: emit the AX.4 tool-usage
-        // audit (once, just before `finished`) then the terminal `finished` event.
+        // audit, required-action evidence when configured, then the terminal event.
         void Finalize(HeadlessExitCode code, int iters)
         {
             EmitToolUsageAudit(emitter, auditor, services, toolHost.Registry, allowedTools);
+            EmitRequiredActionVerification();
             finish(code, iters);
         }
 
@@ -349,6 +365,20 @@ public static class HeadlessAgentRunner
         }
 
         var output = result.Response ?? string.Empty;
+
+        // #219: a plausible model response is not evidence that a required action
+        // happened. Verify actual terminal tool outcomes before format validation
+        // or output publication, and fail closed when any assertion is unmet.
+        EmitRequiredActionVerification();
+        if (requiredActionVerification is { Satisfied: false })
+        {
+            var unmet = requiredActionVerification.Requirements.Count(requirement => !requirement.Satisfied);
+            emitter.EmitError(
+                $"Required action verification failed: {unmet} requirement(s) were unmet.",
+                fatal: true);
+            Finalize(HeadlessExitCode.AgentFailure, iterations);
+            return HeadlessExitCode.AgentFailure;
+        }
 
         // rivoli-ai/andy-cli#180: enforce agent.output_format. A format label
         // beginning with "json" requires the final output to be valid JSON;

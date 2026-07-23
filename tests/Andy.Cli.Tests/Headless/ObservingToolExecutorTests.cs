@@ -105,12 +105,20 @@ public class ObservingToolExecutorTests
         IToolExecutor inner,
         out StringWriter sink,
         out ToolUsageAuditor auditor,
-        IToolPermissionAuthorizer? authorizer)
+        IToolPermissionAuthorizer? authorizer,
+        RequiredActionVerifier? requiredActionVerifier = null)
     {
         sink = new StringWriter();
         var emitter = new HeadlessEventEmitter(sink);
         auditor = new ToolUsageAuditor();
-        return new ObservingToolExecutor(inner, emitter, auditor, authorizer, registry: null, workingDirectory: null);
+        return new ObservingToolExecutor(
+            inner,
+            emitter,
+            auditor,
+            authorizer,
+            registry: null,
+            workingDirectory: null,
+            requiredActionVerifier: requiredActionVerifier);
     }
 
     [Fact]
@@ -259,6 +267,54 @@ public class ObservingToolExecutorTests
         var startIds = starts.Select(e => e.Data.GetProperty("call_id").GetString()).ToHashSet();
         var finishIds = finishes.Select(e => e.Data.GetProperty("call_id").GetString()).ToHashSet();
         Assert.Equal(startIds, finishIds);
+    }
+
+    [Theory]
+    [InlineData(ToolCallOutcome.Failed)]
+    [InlineData(ToolCallOutcome.Denied)]
+    [InlineData(ToolCallOutcome.TimedOut)]
+    [InlineData(ToolCallOutcome.Cancelled)]
+    public async Task NonSuccessTerminalOutcomes_AreRecordedAsRequirementEvidence(string outcome)
+    {
+        var result = outcome switch
+        {
+            ToolCallOutcome.TimedOut => new ToolExecutionResult
+            {
+                IsSuccessful = false,
+                HitResourceLimits = true
+            },
+            ToolCallOutcome.Cancelled => new ToolExecutionResult
+            {
+                IsSuccessful = false,
+                WasCancelled = true
+            },
+            _ => new ToolExecutionResult
+            {
+                IsSuccessful = false,
+                ErrorMessage = "not successful"
+            }
+        };
+        var verifier = new RequiredActionVerifier(
+            [new Andy.Cli.HeadlessConfig.HeadlessRequiredAction { ToolName = "execute_command" }]);
+        var authorizer = outcome == ToolCallOutcome.Denied
+            ? new FakeAuthorizer()
+            : new FakeAuthorizer("execute_command");
+        var sut = Build(
+            new FakeExecutor(() => Task.FromResult(result)),
+            out _,
+            out _,
+            authorizer,
+            verifier);
+
+        await sut.ExecuteAsync(
+            "execute_command",
+            new Dictionary<string, object?> { ["command"] = "dotnet test" },
+            new ToolExecutionContext());
+
+        var requirement = Assert.Single(verifier.Verify().Requirements);
+        var call = Assert.Single(requirement.Calls);
+        Assert.Equal(outcome, call.Outcome);
+        Assert.False(requirement.Satisfied);
     }
 
     [Fact]

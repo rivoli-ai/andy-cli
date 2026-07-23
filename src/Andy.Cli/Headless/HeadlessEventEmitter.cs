@@ -103,6 +103,29 @@ public sealed class HeadlessEventEmitter : IDisposable
             })
         });
 
+    public void EmitRequiredActionVerification(RequiredActionVerificationResult result)
+        => Write(HeadlessEventKind.RequiredActionVerification, new
+        {
+            satisfied = result.Satisfied,
+            requirements = result.Requirements.Select(requirement => new
+            {
+                index = requirement.Index,
+                tool_name = requirement.ToolName,
+                command_digest = requirement.CommandEquals is null
+                    ? null
+                    : ComputeDigest(requirement.CommandEquals),
+                at_least = requirement.AtLeast,
+                observed_matches = requirement.ObservedMatches,
+                successful_matches = requirement.SuccessfulMatches,
+                satisfied = requirement.Satisfied,
+                calls = requirement.Calls.Select(call => new
+                {
+                    call_id = call.CallId,
+                    outcome = call.Outcome
+                })
+            })
+        });
+
     public void EmitOutputWritten(string path, long bytes)
         => Write(HeadlessEventKind.OutputWritten, new { path, bytes });
 
@@ -165,6 +188,7 @@ public enum HeadlessEventKind
     ToolCallStarted,
     ToolCallFinished,
     ToolUsageAudit,
+    RequiredActionVerification,
     OutputWritten,
     Error,
     Finished

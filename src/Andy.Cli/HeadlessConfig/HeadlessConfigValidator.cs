@@ -71,6 +71,29 @@ public static class HeadlessConfigValidator
                 + "streaming requires an absolute FIFO path in event_sink.path.";
         }
 
+        for (var index = 0; index < config.RequiredActions.Count; index++)
+        {
+            var requirement = config.RequiredActions[index];
+            if (requirement.CommandEquals is null)
+            {
+                continue;
+            }
+
+            if (!string.Equals(requirement.ToolName, "execute_command", StringComparison.Ordinal))
+            {
+                return $"required_actions[{index}].command_equals is only valid when "
+                    + "tool_name is 'execute_command'.";
+            }
+
+            if (!RequiredCommandMatcher.TryNormalize(
+                requirement.CommandEquals,
+                out _,
+                out var commandError))
+            {
+                return $"required_actions[{index}].command_equals is invalid: {commandError}";
+            }
+        }
+
         return null;
     }
 
@@ -122,5 +145,54 @@ public static class HeadlessConfigValidator
             }
         }
         return true;
+    }
+}
+
+public static class RequiredCommandMatcher
+{
+    private static readonly char[] s_patternCharacters = ['*', '?', '[', ']'];
+
+    public static bool TryNormalize(string command, out string normalized, out string? error)
+    {
+        normalized = string.Empty;
+        error = null;
+
+        if (string.IsNullOrWhiteSpace(command))
+        {
+            error = "the exact command must not be empty.";
+            return false;
+        }
+
+        if (!string.Equals(command, command.Trim(), StringComparison.Ordinal))
+        {
+            error = "leading or trailing whitespace is not allowed; provide the exact normalized command.";
+            return false;
+        }
+
+        if (command.Any(char.IsControl))
+        {
+            error = "control characters and multi-line commands are not allowed.";
+            return false;
+        }
+
+        if (command.IndexOfAny(s_patternCharacters) >= 0)
+        {
+            error = "glob pattern characters (*, ?, [, ]) are not allowed; command matching is exact.";
+            return false;
+        }
+
+        normalized = command;
+        return true;
+    }
+
+    public static bool IsExactMatch(string expected, object? actual)
+    {
+        if (!TryNormalize(expected, out var normalizedExpected, out _)
+            || actual is not string actualCommand)
+        {
+            return false;
+        }
+
+        return string.Equals(normalizedExpected, actualCommand.Trim(), StringComparison.Ordinal);
     }
 }

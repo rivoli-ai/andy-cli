@@ -222,6 +222,58 @@ public class HeadlessV1ContractTests
         Assert.True(result.IsSuccess, result.Error);
     }
 
+    // ---- required actions use exact, non-pattern command matching ------------
+
+    [Fact]
+    public async Task Loader_RequiredExecuteCommand_Accepted()
+    {
+        var json = BaseConfig.Replace(
+            "\"tools\": [],",
+            "\"tools\": [], \"required_actions\": [{ \"tool_name\": \"execute_command\", "
+                + "\"command_equals\": \"dotnet test\", \"at_least\": 1 }],");
+
+        var result = await LoadJsonAsync(json);
+
+        Assert.True(result.IsSuccess, result.Error);
+        var requirement = Assert.Single(result.Config!.RequiredActions);
+        Assert.Equal("dotnet test", requirement.CommandEquals);
+        Assert.Equal(1, requirement.AtLeast);
+    }
+
+    [Fact]
+    public void Validator_CommandConstraintOnNonCommandTool_Rejected()
+    {
+        var config = new HeadlessRunConfig
+        {
+            RequiredActions =
+            [
+                new HeadlessRequiredAction
+                {
+                    ToolName = "read_file",
+                    CommandEquals = "dotnet test"
+                }
+            ]
+        };
+
+        var error = HeadlessConfigValidator.Validate(config);
+
+        Assert.Contains("only valid", error);
+    }
+
+    [Theory]
+    [InlineData(" dotnet test")]
+    [InlineData("dotnet test ")]
+    [InlineData("dotnet test\n")]
+    [InlineData("dotnet test *")]
+    [InlineData("dotnet test ?")]
+    public void RequiredCommandMatcher_RejectsAmbiguousOrUnsafeForms(string command)
+    {
+        var ok = RequiredCommandMatcher.TryNormalize(command, out _, out var error);
+
+        Assert.False(ok);
+        Assert.NotNull(error);
+    }
+
     // ---- validator unit surface ----------------------------------------------
 
     [Theory]

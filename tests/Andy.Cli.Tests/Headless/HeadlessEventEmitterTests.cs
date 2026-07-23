@@ -89,6 +89,40 @@ public class HeadlessEventEmitterTests
     }
 
     [Fact]
+    public void EmitRequiredActionVerification_UsesBoundedCallEvidenceAndCommandDigest()
+    {
+        var (sw, emitter) = NewEmitter();
+        var result = new RequiredActionVerificationResult(
+            Satisfied: false,
+            Requirements:
+            [
+                new RequiredActionVerificationEntry(
+                    Index: 0,
+                    ToolName: "execute_command",
+                    CommandEquals: "dotnet test",
+                    AtLeast: 1,
+                    ObservedMatches: 1,
+                    SuccessfulMatches: 0,
+                    Satisfied: false,
+                    Calls: [new RequiredActionCallEvidence("call-1", ToolCallOutcome.Denied)])
+            ]);
+
+        emitter.EmitRequiredActionVerification(result);
+
+        using var doc = ParseSingleLine(sw.ToString());
+        Assert.Equal("required_action_verification", doc.RootElement.GetProperty("kind").GetString());
+        var requirement = Assert.Single(
+            doc.RootElement.GetProperty("data").GetProperty("requirements").EnumerateArray());
+        Assert.False(requirement.GetProperty("satisfied").GetBoolean());
+        Assert.StartsWith("sha256:", requirement.GetProperty("command_digest").GetString());
+        Assert.False(requirement.TryGetProperty("command_equals", out _));
+        var call = Assert.Single(requirement.GetProperty("calls").EnumerateArray());
+        Assert.Equal("call-1", call.GetProperty("call_id").GetString());
+        Assert.Equal("denied", call.GetProperty("outcome").GetString());
+        Assert.DoesNotContain("dotnet test", sw.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Emit_FromMultipleThreads_LinesNeverInterleave()
     {
         var (sw, emitter) = NewEmitter();

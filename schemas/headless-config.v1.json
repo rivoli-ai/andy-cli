@@ -189,6 +189,38 @@
         }
       }
     },
+    "required_actions": {
+      "type": "array",
+      "maxItems": 32,
+      "uniqueItems": true,
+      "description": "Bounded machine-checkable actions that must succeed before output publication. Requirements are evaluated from actual observed tool outcomes, never from model claims. Absent or empty preserves the existing success contract.",
+      "items": {
+        "type": "object",
+        "required": ["tool_name"],
+        "additionalProperties": false,
+        "properties": {
+          "tool_name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "description": "Tool that must complete successfully."
+          },
+          "command_equals": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "pattern": "^[^\\u0000-\\u001f\\u007f*?\\[\\]]+$",
+            "description": "Optional exact normalized command match. Valid only for execute_command; glob-like patterns, control characters, and multi-line values are rejected. Regular-expression syntax is never interpreted."
+          },
+          "at_least": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 1,
+            "description": "Minimum number of matching successful terminal outcomes."
+          }
+        }
+      }
+    },
     "limits": {
       "type": "object",
       "required": ["max_iterations", "timeout_seconds"],

@@ -25,6 +25,7 @@
         "tool_call_started",
         "tool_call_finished",
         "tool_usage_audit",
+        "required_action_verification",
         "output_written",
         "error",
         "finished"
@@ -98,6 +99,47 @@
               "tool_name":   { "type": "string" },
               "invocations": { "type": "integer", "minimum": 1, "description": "How many times the agent invoked this tool." },
               "permitted":   { "type": "boolean", "description": "true ⇒ the permission engine permitted this tool (in the allow-list or an auto-allowed read-only built-in); false ⇒ the tool was denied (fail-closed) at execution time." }
+            }
+          }
+        }
+      }
+    },
+    "required_action_verification": {
+      "type": "object",
+      "description": "Machine-checkable verification of config.required_actions against actual terminal tool outcomes. Emitted once when requirements were declared, before output publication on a converged run and before finished on every other run.",
+      "required": ["satisfied", "requirements"],
+      "properties": {
+        "satisfied": {
+          "type": "boolean",
+          "description": "true only when every declared requirement has at least its configured number of successful matching calls."
+        },
+        "requirements": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "required": ["index", "tool_name", "at_least", "observed_matches", "successful_matches", "satisfied", "calls"],
+            "properties": {
+              "index": { "type": "integer", "minimum": 0, "maximum": 31 },
+              "tool_name": { "type": "string" },
+              "command_digest": { "type": "string", "description": "SHA-256 digest of command_equals when present. The raw command is not emitted." },
+              "at_least": { "type": "integer", "minimum": 1, "maximum": 100 },
+              "observed_matches": { "type": "integer", "minimum": 0 },
+              "successful_matches": { "type": "integer", "minimum": 0 },
+              "satisfied": { "type": "boolean" },
+              "calls": {
+                "type": "array",
+                "maxItems": 16,
+                "description": "Bounded terminal evidence for matching calls. Each id pairs with the normal tool_call_started/tool_call_finished events.",
+                "items": {
+                  "type": "object",
+                  "required": ["call_id", "outcome"],
+                  "properties": {
+                    "call_id": { "type": "string" },
+                    "outcome": { "type": "string", "enum": ["success", "failed", "denied", "timed_out", "cancelled"] }
+                  }
+                }
+              }
             }
           }
         }

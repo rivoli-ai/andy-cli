@@ -42,7 +42,25 @@ public sealed record HeadlessRunConfig
     // and writing it into the config. AX.4 only CONSUMES it.
     public HeadlessPermissions? Permissions { get; init; }
 
+    // Machine-checkable actions that must have at least the configured number
+    // of successful, observed executions before the final output is published.
+    // The runtime evaluates these from ObservingToolExecutor records, never from
+    // the model's final prose.
+    public IReadOnlyList<HeadlessRequiredAction> RequiredActions { get; init; } = [];
+
     public HeadlessLimits Limits { get; init; } = new();
+}
+
+public sealed record HeadlessRequiredAction
+{
+    public string ToolName { get; init; } = string.Empty;
+
+    // Optional exact command constraint for execute_command. This is deliberately
+    // not a glob or regular expression: normalized exact matching avoids unsafe or
+    // ambiguous success claims.
+    public string? CommandEquals { get; init; }
+
+    public int AtLeast { get; init; } = 1;
 }
 
 public sealed record HeadlessPermissions

@@ -78,6 +78,8 @@ public class HeadlessAgentRunnerStabilityTests
             Assert.Equal(HeadlessEventEmitter.SchemaVersion, e.SchemaVersion);
             Assert.False(string.IsNullOrEmpty(e.Kind));
         }
+
+        Assert.DoesNotContain(events, e => e.Kind == "required_action_verification");
     }
 
     [Fact]
@@ -113,6 +115,144 @@ public class HeadlessAgentRunnerStabilityTests
         Assert.True(kinds.IndexOf("tool_call_started") < kinds.IndexOf("tool_call_finished"));
         Assert.True(kinds.IndexOf("started") < kinds.IndexOf("tool_call_started"));
         Assert.True(kinds.IndexOf("tool_call_finished") < kinds.LastIndexOf("finished"));
+    }
+
+    [Fact]
+    public async Task SuccessfulRequiredAction_EmitsEvidenceBeforePublishingOutput()
+    {
+        using var ws = new TempDir();
+        var config = NewConfig(ws) with
+        {
+            Tools = new[] { CrossPlatform.NoOpCliTool("noop") },
+            RequiredActions =
+            [
+                new HeadlessRequiredAction { ToolName = "noop" }
+            ]
+        };
+        var provider = new FakeLlmProvider(
+            FakeLlmProvider.ToolCallResponse("noop", "model-call"),
+            FakeLlmProvider.TextResponse("verified"));
+
+        var (events, code) = await RunAsync(config, provider);
+
+        Assert.Equal(HeadlessExitCode.Success, code);
+        var verification = events.Single(e => e.Kind == "required_action_verification");
+        Assert.True(verification.Data.GetProperty("satisfied").GetBoolean());
+        var requirement = Assert.Single(verification.Data.GetProperty("requirements").EnumerateArray());
+        Assert.Equal(1, requirement.GetProperty("successful_matches").GetInt32());
+        Assert.True(requirement.GetProperty("satisfied").GetBoolean());
+        var call = Assert.Single(requirement.GetProperty("calls").EnumerateArray());
+        Assert.Equal(
+            events.Single(e => e.Kind == "tool_call_finished").Data.GetProperty("call_id").GetString(),
+            call.GetProperty("call_id").GetString());
+        Assert.Equal("success", call.GetProperty("outcome").GetString());
+
+        var kinds = events.Select(e => e.Kind).ToList();
+        Assert.True(kinds.IndexOf("required_action_verification") < kinds.IndexOf("output_written"));
+    }
+
+    [Fact]
+    public async Task MissingRequiredAction_FailsBeforeOutputPublication()
+    {
+        using var ws = new TempDir();
+        var config = NewConfig(ws) with
+        {
+            RequiredActions =
+            [
+                new HeadlessRequiredAction { ToolName = "execute_command" }
+            ]
+        };
+        var provider = new FakeLlmProvider(FakeLlmProvider.TextResponse("I ran all checks."));
+
+        var (events, code) = await RunAsync(config, provider);
+
+        Assert.Equal(HeadlessExitCode.AgentFailure, code);
+        Assert.False(File.Exists(config.Output.File));
+        Assert.DoesNotContain(events, e => e.Kind == "output_written");
+        var verification = events.Single(e => e.Kind == "required_action_verification");
+        Assert.False(verification.Data.GetProperty("satisfied").GetBoolean());
+        var requirement = Assert.Single(verification.Data.GetProperty("requirements").EnumerateArray());
+        Assert.Equal(0, requirement.GetProperty("observed_matches").GetInt32());
+        Assert.False(requirement.GetProperty("satisfied").GetBoolean());
+        Assert.Contains(events, e =>
+            e.Kind == "error"
+            && e.Data.GetProperty("message").GetString()!.Contains(
+                "Required action verification failed",
+                StringComparison.Ordinal));
+        Assert.Equal(
+            (int)HeadlessExitCode.AgentFailure,
+            events.Last().Data.GetProperty("exit_code").GetInt32());
+    }
+
+    [Fact]
+    public async Task DeniedRequiredAction_CannotProduceSuccess()
+    {
+        using var ws = new TempDir();
+        var config = NewConfig(ws) with
+        {
+            RequiredActions =
+            [
+                new HeadlessRequiredAction { ToolName = "delete_file" }
+            ]
+        };
+        var provider = new FakeLlmProvider(
+            FakeLlmProvider.ToolCallResponse("delete_file", "denied-call"),
+            FakeLlmProvider.TextResponse("done"));
+
+        var (events, code) = await RunAsync(config, provider);
+
+        Assert.Equal(HeadlessExitCode.AgentFailure, code);
+        Assert.False(File.Exists(config.Output.File));
+        Assert.Equal(
+            "denied",
+            events.Single(e => e.Kind == "tool_call_finished").Data.GetProperty("outcome").GetString());
+        var verification = events.Single(e => e.Kind == "required_action_verification");
+        var requirement = Assert.Single(verification.Data.GetProperty("requirements").EnumerateArray());
+        Assert.Equal(1, requirement.GetProperty("observed_matches").GetInt32());
+        Assert.Equal(0, requirement.GetProperty("successful_matches").GetInt32());
+        Assert.Equal(
+            "denied",
+            Assert.Single(requirement.GetProperty("calls").EnumerateArray())
+                .GetProperty("outcome")
+                .GetString());
+    }
+
+    [Fact]
+    public async Task ExactRequiredCommand_IsVerifiedFromObservedParameters()
+    {
+        using var ws = new TempDir();
+        const string command = "dotnet --version";
+        var config = NewConfig(ws) with
+        {
+            Permissions = new HeadlessPermissions { AllowedTools = ["execute_command"] },
+            RequiredActions =
+            [
+                new HeadlessRequiredAction
+                {
+                    ToolName = "execute_command",
+                    CommandEquals = command
+                }
+            ]
+        };
+        var provider = new FakeLlmProvider(
+            FakeLlmProvider.ToolCallResponse(
+                "execute_command",
+                "command-call",
+                """{"command":"dotnet --version"}"""),
+            FakeLlmProvider.TextResponse("command completed"));
+
+        var (events, code) = await RunAsync(config, provider);
+
+        Assert.Equal(HeadlessExitCode.Success, code);
+        Assert.True(File.Exists(config.Output.File));
+        Assert.Equal(
+            "success",
+            events.Single(e => e.Kind == "tool_call_finished").Data.GetProperty("outcome").GetString());
+        var verification = events.Single(e => e.Kind == "required_action_verification");
+        var requirement = Assert.Single(verification.Data.GetProperty("requirements").EnumerateArray());
+        Assert.True(requirement.GetProperty("satisfied").GetBoolean());
+        Assert.True(requirement.TryGetProperty("command_digest", out _));
+        Assert.DoesNotContain(command, verification.Data.GetRawText(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -482,25 +622,28 @@ public class HeadlessAgentRunnerStabilityTests
         };
 
         // An assistant message carrying a single tool call drives one tool turn.
-        public static LlmResponse ToolCallResponse(string toolName, string callId) => new()
-        {
-            AssistantMessage = new Message
+        public static LlmResponse ToolCallResponse(
+            string toolName,
+            string callId,
+            string argumentsJson = "{\"args\":[]}") => new()
             {
-                Role = Role.Assistant,
-                Content = string.Empty,
-                ToolCalls = new List<ToolCall>
+                AssistantMessage = new Message
+                {
+                    Role = Role.Assistant,
+                    Content = string.Empty,
+                    ToolCalls = new List<ToolCall>
                 {
                     new()
                     {
                         Id = callId,
                         Name = toolName,
-                        ArgumentsJson = "{\"args\":[]}",
+                        ArgumentsJson = argumentsJson,
                     },
                 },
-            },
-            FinishReason = "tool_calls",
-            Model = "scripted-model",
-        };
+                },
+                FinishReason = "tool_calls",
+                Model = "scripted-model",
+            };
     }
 
     // Helpers that pick real, no-dependency binaries for the cli-transport

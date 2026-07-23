@@ -186,6 +186,35 @@ public class HeadlessConfigContractTests
     }
 
     [Fact]
+    public void ValidateEvent_RequiredActionVerification_Passes()
+    {
+        const string json = """
+        {
+          "schema_version": 1,
+          "ts": "2026-07-22T12:00:00+00:00",
+          "kind": "required_action_verification",
+          "data": {
+            "satisfied": false,
+            "requirements": [{
+              "index": 0,
+              "tool_name": "execute_command",
+              "command_digest": "sha256:abc",
+              "at_least": 1,
+              "observed_matches": 1,
+              "successful_matches": 0,
+              "satisfied": false,
+              "calls": [{"call_id": "call-1", "outcome": "denied"}]
+            }]
+          }
+        }
+        """;
+
+        var result = HeadlessConfigContract.ValidateEvent(json);
+
+        Assert.True(result.IsValid, string.Join("; ", result.Errors));
+    }
+
+    [Fact]
     public void GetConfigSchemaText_ReturnsEmbeddedSchema()
     {
         var text = HeadlessConfigContract.GetConfigSchemaText();

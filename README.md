@@ -178,7 +178,10 @@ dotnet run --project src/Andy.Cli -- --version
 Run the agent non-interactively from a config file. The headless runtime
 returns structured exit codes (see the `HeadlessExitCode` enum: `Success`,
 `ConfigError`, `AgentFailure`, `Timeout`, and others) so it can be scripted
-in CI and automation. See `docs/headless-runtime.md` for full details.
+in CI and automation. Optional `required_actions` assertions verify actual
+successful tool outcomes before publishing output, so a denied, failed, timed
+out, cancelled, or missing required action cannot produce exit 0. See
+`docs/headless-runtime.md` for full details.
 
 ```bash
 dotnet run --project src/Andy.Cli -- run --headless --config <path>

@@ -241,6 +241,8 @@ and internal error. It supports:
 - NDJSON progress events to stdout or a FIFO.
 - Built-in tools plus configured `cli` subprocess tools and remote `mcp` tools.
 - A per-run `permissions.allowed_tools` allowlist for mutating operations.
+- Bounded `required_actions` assertions that verify actual successful tool
+  outcomes and prevent false-success output publication.
 
 ### Built-in Andy Tools catalog
 

@@ -294,6 +294,66 @@ public class HeadlessConfigSchemaTests
     }
 
     [Fact]
+    public void RequiredActions_ExactCommandRequirementValidates()
+    {
+        var schema = LoadSchema();
+        var config = MinimalValidConfig();
+        config["required_actions"] = JsonArrayOf(
+            new JsonObject
+            {
+                ["tool_name"] = "execute_command",
+                ["command_equals"] = "dotnet test",
+                ["at_least"] = 2
+            });
+
+        var result = schema.Evaluate(ToElement(config));
+
+        Assert.True(result.IsValid, FormatErrors(result));
+    }
+
+    [Fact]
+    public void RequiredActions_AbsentRemainsBackwardCompatible()
+    {
+        var result = LoadSchema().Evaluate(ToElement(MinimalValidConfig()));
+
+        Assert.True(result.IsValid, FormatErrors(result));
+    }
+
+    [Fact]
+    public void RequiredActions_RejectsUnsafeCommandPattern()
+    {
+        var schema = LoadSchema();
+        var config = MinimalValidConfig();
+        config["required_actions"] = JsonArrayOf(
+            new JsonObject
+            {
+                ["tool_name"] = "execute_command",
+                ["command_equals"] = "dotnet test *"
+            });
+
+        var result = schema.Evaluate(ToElement(config));
+
+        Assert.False(result.IsValid, "command_equals must reject glob-like patterns");
+    }
+
+    [Fact]
+    public void RequiredActions_RejectsUnboundedCount()
+    {
+        var schema = LoadSchema();
+        var config = MinimalValidConfig();
+        var requirements = new JsonArray();
+        for (var index = 0; index < 33; index++)
+        {
+            requirements.Add(new JsonObject { ["tool_name"] = $"tool-{index}" });
+        }
+        config["required_actions"] = requirements;
+
+        var result = schema.Evaluate(ToElement(config));
+
+        Assert.False(result.IsValid, "required_actions must be bounded to 32 entries");
+    }
+
+    [Fact]
     public void Limits_MaxIterationsZero_Rejected()
     {
         var schema = LoadSchema();

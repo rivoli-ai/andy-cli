@@ -130,6 +130,28 @@ Cross-repo remainder: a full engine-native `ToolCompleted`/`ToolResult` event
 on `SimpleAgent` (andy-engine) would let hosts that do NOT own the executor
 observe completion. Until then the CLI-owned executor wrap is the exact signal.
 
+### `required_action_verification`
+
+Emitted once when `config.required_actions` is non-empty. On a converged run it
+is emitted before `output_written`; on another terminal path it is emitted
+before `finished`.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `satisfied` | boolean | `true` only when every requirement reached its `at_least` successful-match count. |
+| `requirements` | array | One entry per declared requirement, in config order; maximum 32. |
+| `requirements[].index` | integer | Zero-based config index. |
+| `requirements[].tool_name` | string | Required tool ID. |
+| `requirements[].command_digest` | string | Optional digest of `command_equals`; the raw command is not emitted. |
+| `requirements[].at_least` | integer | Required successful-match count. |
+| `requirements[].observed_matches` | integer | Matching calls with any terminal outcome. |
+| `requirements[].successful_matches` | integer | Matching calls whose terminal outcome was `success`. |
+| `requirements[].satisfied` | boolean | Whether this individual requirement passed. |
+| `requirements[].calls` | array | Up to 16 matching `{call_id, outcome}` evidence entries. IDs pair with the ordinary tool events. |
+
+An unmet requirement produces a fatal `error`, exit code 1, and no
+`output_written` event. Absent/empty requirements do not add this event.
+
 ### `output_written`
 
 Emitted after the final output file is written atomically.
@@ -161,7 +183,7 @@ Emitted once, last, on every run.
 
 ## Digests
 
-`args_digest` and `result_digest` are SHA-256 hashes of the canonical
+`args_digest`, `result_digest`, and `command_digest` are SHA-256 hashes of the canonical
 `snake_case` JSON of the args/result, prefixed `sha256:` (computed by
 `HeadlessEventEmitter.ComputeDigest`). They let consumers correlate or dedupe
 without the producer emitting raw payloads that might contain secrets.

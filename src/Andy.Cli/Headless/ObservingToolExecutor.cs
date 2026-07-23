@@ -40,6 +40,7 @@ public sealed class ObservingToolExecutor : IToolExecutor
     private readonly IToolPermissionAuthorizer? _authorizer;
     private readonly IToolRegistry? _registry;
     private readonly string? _workingDirectory;
+    private readonly RequiredActionVerifier? _requiredActionVerifier;
 
     public ObservingToolExecutor(
         IToolExecutor inner,
@@ -47,7 +48,8 @@ public sealed class ObservingToolExecutor : IToolExecutor
         ToolUsageAuditor auditor,
         IToolPermissionAuthorizer? authorizer,
         IToolRegistry? registry,
-        string? workingDirectory)
+        string? workingDirectory,
+        RequiredActionVerifier? requiredActionVerifier = null)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
         _emitter = emitter ?? throw new ArgumentNullException(nameof(emitter));
@@ -55,6 +57,7 @@ public sealed class ObservingToolExecutor : IToolExecutor
         _authorizer = authorizer;
         _registry = registry;
         _workingDirectory = workingDirectory;
+        _requiredActionVerifier = requiredActionVerifier;
     }
 
     public event EventHandler<ToolExecutionStartedEventArgs>? ExecutionStarted
@@ -144,6 +147,11 @@ public sealed class ObservingToolExecutor : IToolExecutor
                 durationMs: stopwatch.ElapsedMilliseconds,
                 error: "permission denied",
                 outcome: ToolCallOutcome.Denied);
+            _requiredActionVerifier?.RecordTerminalOutcome(
+                callId,
+                toolId,
+                parameters,
+                ToolCallOutcome.Denied);
             return new ToolExecutionResult
             {
                 IsSuccessful = false,
@@ -166,6 +174,11 @@ public sealed class ObservingToolExecutor : IToolExecutor
                 durationMs: stopwatch.ElapsedMilliseconds,
                 error: "cancelled",
                 outcome: ToolCallOutcome.Cancelled);
+            _requiredActionVerifier?.RecordTerminalOutcome(
+                callId,
+                toolId,
+                parameters,
+                ToolCallOutcome.Cancelled);
             throw;
         }
         catch (Exception ex)
@@ -178,6 +191,11 @@ public sealed class ObservingToolExecutor : IToolExecutor
                 durationMs: stopwatch.ElapsedMilliseconds,
                 error: Describe(ex),
                 outcome: ToolCallOutcome.Failed);
+            _requiredActionVerifier?.RecordTerminalOutcome(
+                callId,
+                toolId,
+                parameters,
+                ToolCallOutcome.Failed);
             throw;
         }
 
@@ -188,7 +206,7 @@ public sealed class ObservingToolExecutor : IToolExecutor
         // SafeDigest (which never throws) and the exactly-one emission on the deny,
         // cancel, and failure branches, this guarantees one finished per start.
         stopwatch.Stop();
-        EmitFinish(callId, toolId, stopwatch.ElapsedMilliseconds, result);
+        EmitFinish(callId, toolId, parameters, stopwatch.ElapsedMilliseconds, result);
         return result;
     }
 
@@ -198,6 +216,7 @@ public sealed class ObservingToolExecutor : IToolExecutor
     private void EmitFinish(
         string callId,
         string toolId,
+        IReadOnlyDictionary<string, object?>? parameters,
         long durationMs,
         ToolExecutionResult result)
     {
@@ -250,6 +269,7 @@ public sealed class ObservingToolExecutor : IToolExecutor
             resultDigest,
             error,
             outcome);
+        _requiredActionVerifier?.RecordTerminalOutcome(callId, toolId, parameters, outcome);
     }
 
     // Evaluates the live permission engine with the REAL parameters at execution
