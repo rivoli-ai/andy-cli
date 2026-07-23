@@ -612,6 +612,21 @@ public class SimpleAssistantService : IDisposable
     }
 
     /// <summary>
+    /// Exports the agent's full conversation transcript (message history including tool
+    /// calls/results) as the engine's versioned snapshot, for session persistence (issue #231).
+    /// </summary>
+    public Andy.Engine.TranscriptSnapshot ExportTranscript() => _agent.ExportTranscript();
+
+    /// <summary>
+    /// Restores a previously exported transcript into this service's agent, re-seeding the
+    /// complete conversation history (issue #231). The agent must still have an empty
+    /// conversation (a freshly constructed service); the engine validates the snapshot and
+    /// throws without mutating state when it is invalid or the conversation is non-empty.
+    /// </summary>
+    public void RestoreTranscript(Andy.Engine.TranscriptSnapshot snapshot) =>
+        _agent.RestoreTranscript(snapshot);
+
+    /// <summary>
     /// Clear the conversation context
     /// </summary>
     public void ClearContext()
