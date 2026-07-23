@@ -19,6 +19,7 @@ namespace Andy.Cli.Services
         private readonly ILogger<UiUpdatingToolExecutor>? _logger;
         private readonly IToolRegistry? _toolRegistry;
         private readonly ToolCallLoopDetector _loopDetector = new();
+        private readonly WorkingDirectoryTracker _workingDirectory;
 
         public event EventHandler<ToolExecutionStartedEventArgs>? ExecutionStarted
         {
@@ -38,11 +39,12 @@ namespace Andy.Cli.Services
             remove { _innerExecutor.SecurityViolation -= value; }
         }
 
-        public UiUpdatingToolExecutor(IToolExecutor innerExecutor, ILogger<UiUpdatingToolExecutor>? logger = null, IToolRegistry? toolRegistry = null)
+        public UiUpdatingToolExecutor(IToolExecutor innerExecutor, ILogger<UiUpdatingToolExecutor>? logger = null, IToolRegistry? toolRegistry = null, WorkingDirectoryTracker? workingDirectoryTracker = null)
         {
             _innerExecutor = innerExecutor;
             _logger = logger;
             _toolRegistry = toolRegistry;
+            _workingDirectory = workingDirectoryTracker ?? WorkingDirectoryTracker.Instance;
         }
 
         public async Task<ToolExecutionResult> ExecuteAsync(string toolId, Dictionary<string, object?> parameters, ToolExecutionContext? context = null)
@@ -52,6 +54,13 @@ namespace Andy.Cli.Services
 
             // Ensure we have a context with a correlation ID
             context ??= new ToolExecutionContext();
+
+            // Keep tools operating in the session's tracked working directory (rivoli-ai/andy-cli#235).
+            // The engine's SimpleAgent stamps a working-directory snapshot FROZEN at agent construction
+            // into every context, so once the session cd's (via a standalone `cd` in execute_command,
+            // tracked below) that snapshot is stale. The tracker is the live source of truth shared
+            // with the header at the top of the UI.
+            context.WorkingDirectory = _workingDirectory.Current;
 
             // The Andy.Permissions gate is the CLI's consent authority (allow/ask/deny per call). Grant the
             // capability flags on the profile so the lower-level capability checks
@@ -186,6 +195,13 @@ namespace Andy.Cli.Services
 
             var result = await _innerExecutor.ExecuteAsync(toolId, dispatchParameters, context);
             toolStopwatch.Stop();
+
+            // A successful standalone `cd` persists for the rest of the session: it moves the
+            // tracked working directory, so subsequent tool calls (and the header) follow it.
+            if (result.IsSuccessful && string.Equals(toolId, "execute_command", StringComparison.OrdinalIgnoreCase))
+            {
+                TrackDirectoryChange(dispatchParameters);
+            }
 
             // Track completion and update UI with result
             // IMPORTANT: We must track completion BEFORE SimpleAssistantService tries to read it
@@ -639,13 +655,51 @@ namespace Andy.Cli.Services
             return _innerExecutor.GetStatistics();
         }
 
+        // --- Session working directory tracking (rivoli-ai/andy-cli#235) --------------------
+
+        /// <summary>
+        /// After a successful execute_command, applies a persistent directory change when the
+        /// command was a standalone `cd`. Resolution honors an explicit working_directory
+        /// parameter when the model supplied one, otherwise the tracked session directory.
+        /// </summary>
+        private void TrackDirectoryChange(Dictionary<string, object?> parameters)
+        {
+            try
+            {
+                if (!parameters.TryGetValue("command", out var cmdObj) || cmdObj is null) return;
+
+                string? baseDir = null;
+                if (parameters.TryGetValue("working_directory", out var wdObj) &&
+                    wdObj?.ToString() is { Length: > 0 } wd)
+                {
+                    baseDir = wd;
+                }
+
+                var applied = _workingDirectory.ApplyExecutedCommand(cmdObj.ToString(), baseDir);
+                if (applied != null)
+                {
+                    _logger?.LogInformation("[UI_EXECUTOR] Session working directory changed to {Directory}", applied);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "[UI_EXECUTOR] Failed to track working directory change");
+            }
+        }
+
         // --- File write/edit diff rendering -------------------------------------------------
 
-        // Single-file mutating tools whose target is the `file_path` parameter. replace_text is
-        // intentionally excluded: it can rewrite many files across a directory tree, so capturing
-        // a meaningful "before" for all of them is out of scope here.
-        private static readonly HashSet<string> FileDiffToolIds =
-            new(StringComparer.OrdinalIgnoreCase) { "write_file", "edit_file" };
+        // Single-file mutating tools mapped to the parameter that names their target file.
+        // replace_text targets `target_path`, which may also be a whole directory (with
+        // file_patterns) - that multi-file mode is skipped in TryCaptureBeforeWrite because a
+        // single before/after diff is meaningless there.
+        private static readonly Dictionary<string, string> FileDiffToolTargetParams =
+            new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["write_file"] = "file_path",
+                ["edit_file"] = "file_path",
+                ["replace_text"] = "target_path",
+            };
 
         // Skip diffing files larger than this (either before or after) to keep the UI responsive.
         private const long MaxDiffFileBytes = 512 * 1024;
@@ -656,8 +710,8 @@ namespace Andy.Cli.Services
         {
             try
             {
-                if (!FileDiffToolIds.Contains(toolId)) return null;
-                if (!parameters.TryGetValue("file_path", out var fpObj) || fpObj is null) return null;
+                if (!FileDiffToolTargetParams.TryGetValue(toolId, out var targetParam)) return null;
+                if (!parameters.TryGetValue(targetParam, out var fpObj) || fpObj is null) return null;
                 var rawPath = fpObj.ToString();
                 if (string.IsNullOrWhiteSpace(rawPath)) return null;
 
@@ -666,7 +720,14 @@ namespace Andy.Cli.Services
                     : context!.WorkingDirectory;
                 var resolved = Path.IsPathRooted(rawPath) ? rawPath : Path.GetFullPath(Path.Combine(workingDir, rawPath));
 
+                // replace_text pointed at a directory rewrites many files (with file_patterns);
+                // a single before/after diff cannot represent that, so skip.
+                if (Directory.Exists(resolved)) return null;
+
                 bool existed = File.Exists(resolved);
+
+                // replace_text edits in place and cannot create a file; nothing to diff without one.
+                if (!existed && string.Equals(toolId, "replace_text", StringComparison.OrdinalIgnoreCase)) return null;
                 string before = "";
                 if (existed)
                 {

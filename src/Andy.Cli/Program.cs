@@ -1619,7 +1619,10 @@ class Program
 
                 var leftSection = $"Andy CLI{version}";
                 var rightSection = $"[{gitInfo.branch}@{gitInfo.commit}]";
-                var currentPath = Directory.GetCurrentDirectory();
+                // The session's tracked working directory, not the process cwd: tools operate
+                // against the tracker (a `cd` via execute_command moves it), so the header must
+                // read the same source of truth to stay in sync (rivoli-ai/andy-cli#235).
+                var currentPath = Andy.Cli.Services.WorkingDirectoryTracker.Instance.Current;
 
                 // Calculate available space for centered path
                 int leftLen = leftSection.Length;
