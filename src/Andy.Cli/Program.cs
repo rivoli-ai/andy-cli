@@ -276,6 +276,11 @@ class Program
             var inlineCommandHelp = new InlineCommandHelp();
             inlineCommandHelp.SetCommands(Andy.Cli.Commands.SlashCommandCatalog.CreateInlineHelpCommands());
 
+            // Inline tool-approval prompt (issue #222): permission requests take over the prompt
+            // area instead of a modal overlay, so the transcript stays visible while deciding.
+            var inlineApproval = new Andy.Cli.Widgets.InlineApprovalPrompt();
+            Andy.Cli.Services.PendingPermissionRequest? activeApprovalRequest = null;
+
             // Initialize the tool execution tracker with the feed view
             ToolExecutionTracker.Instance.SetFeedView(feed);
             feed.AddMarkdownRich("**Ready to assist!** What can I help you learn or explore today?");
@@ -937,107 +942,6 @@ class Program
                 return confirmExit;
             }
 
-            // Modal asking the user to approve/deny a tool call. Runs on the main thread (which owns the
-            // input queue and renderer), reusing the same render + blocking-keypress primitive as the exit
-            // dialog. Returns the decision to hand back to the awaiting agent task.
-            async Task<PermissionDecision> ShowPermissionDialogAsync(PermissionRequest request)
-            {
-                string[] labels = { "Allow once", "Allow (session)", "Deny" };
-                int selected = 2; // default to the safe choice
-                bool open = true;
-                int scroll = 0; // first visible wrapped summary line
-
-                while (open)
-                {
-                    var pb = new DL.DisplayListBuilder();
-                    pb.PushClip(new DL.ClipPush(0, 0, viewport.Width, viewport.Height));
-                    pb.DrawRect(new DL.Rect(0, 0, viewport.Width, viewport.Height, new DL.Rgb24(0, 0, 0)));
-
-                    var panelBg = new DL.Rgb24(30, 30, 40);
-                    int bw = Math.Min(Math.Max(48, viewport.Width - 4), 96);
-                    int iw = Math.Max(8, bw - 4);
-
-                    var toolLine = $"Tool: {request.ToolDisplayName ?? request.ToolId}";
-                    // Body lines carry a per-line kind so command lines render color-coded
-                    // (danger-level coloring for destructive patterns; issue #237).
-                    var summaryLines = Andy.Cli.Widgets.PermissionDialogContent.BuildBodyLines(request, iw);
-
-                    // Grow the dialog to show as many summary lines as fit; scroll if longer.
-                    const int chrome = 8; // borders(2) + title + blank + tool + blank + buttons + hints
-                    int maxSummary = Math.Max(1, viewport.Height - 2 - chrome);
-                    int summaryVisible = Math.Min(summaryLines.Count, maxSummary);
-                    int maxScroll = Math.Max(0, summaryLines.Count - summaryVisible);
-                    scroll = Math.Clamp(scroll, 0, maxScroll);
-
-                    int bh = summaryVisible + chrome;
-                    int bx = (viewport.Width - bw) / 2;
-                    int by = Math.Max(0, (viewport.Height - bh) / 2);
-
-                    pb.PushClip(new DL.ClipPush(bx, by, bw, bh));
-                    pb.DrawRect(new DL.Rect(bx, by, bw, bh, panelBg));
-                    pb.DrawBorder(new DL.Border(bx, by, bw, bh, "double", new DL.Rgb24(200, 200, 80)));
-
-                    string title = "Permission required";
-                    pb.DrawText(new DL.TextRun(bx + (bw - title.Length) / 2, by + 1, title, new DL.Rgb24(255, 255, 255), panelBg, DL.CellAttrFlags.Bold));
-
-                    var tool = toolLine.Length <= iw ? toolLine : toolLine[..Math.Max(0, iw - 1)] + "…";
-                    pb.DrawText(new DL.TextRun(bx + 2, by + 3, tool, new DL.Rgb24(220, 220, 160), panelBg, DL.CellAttrFlags.None));
-
-                    if (maxScroll > 0)
-                    {
-                        string pos = $"[{scroll + 1}-{scroll + summaryVisible}/{summaryLines.Count} ↑↓]";
-                        pb.DrawText(new DL.TextRun(bx + bw - 2 - pos.Length, by + 3, pos, new DL.Rgb24(150, 150, 170), panelBg, DL.CellAttrFlags.None));
-                    }
-
-                    int sy = by + 4;
-                    for (int i = 0; i < summaryVisible; i++)
-                    {
-                        var bodyLine = summaryLines[scroll + i];
-                        var lineFg = Andy.Cli.Widgets.PermissionDialogContent.ColorFor(bodyLine.Kind);
-                        var lineAttrs = bodyLine.Kind == Andy.Cli.Widgets.PermissionLineKind.DangerousCommand
-                            ? DL.CellAttrFlags.Bold
-                            : DL.CellAttrFlags.None;
-                        pb.DrawText(new DL.TextRun(bx + 2, sy + i, bodyLine.Text, lineFg, panelBg, lineAttrs));
-                    }
-
-                    int btnY = sy + summaryVisible + 1;
-                    int x = bx + 2;
-                    for (int i = 0; i < labels.Length; i++)
-                    {
-                        bool on = i == selected;
-                        var bg = on ? new DL.Rgb24(60, 90, 130) : new DL.Rgb24(40, 40, 50);
-                        var fg = on ? new DL.Rgb24(255, 255, 255) : new DL.Rgb24(180, 180, 180);
-                        string text = on ? $"[ {labels[i]} ]" : $"  {labels[i]}  ";
-                        pb.DrawRect(new DL.Rect(x, btnY, text.Length, 1, bg));
-                        pb.DrawText(new DL.TextRun(x, btnY, text, fg, bg, on ? DL.CellAttrFlags.Bold : DL.CellAttrFlags.None));
-                        x += text.Length + 2;
-                    }
-
-                    string hints = maxScroll > 0 ? "← → Select  ↑ ↓ Scroll  Enter Confirm  Esc Deny" : "← → Navigate  Enter Select  Esc Deny";
-                    pb.DrawText(new DL.TextRun(bx + Math.Max(2, (bw - hints.Length) / 2), by + bh - 1, hints, new DL.Rgb24(120, 120, 150), panelBg, DL.CellAttrFlags.None));
-
-                    pb.Pop();
-                    await scheduler.RenderOnceAsync(pb.Build(), viewport, caps, pty, CancellationToken.None);
-
-                    var k = ReadKeyBlocking();
-                    if (k.Key == ConsoleKey.LeftArrow) selected = (selected + labels.Length - 1) % labels.Length;
-                    else if (k.Key == ConsoleKey.RightArrow || k.Key == ConsoleKey.Tab) selected = (selected + 1) % labels.Length;
-                    else if (k.Key == ConsoleKey.UpArrow) scroll -= 1;
-                    else if (k.Key == ConsoleKey.DownArrow) scroll += 1;
-                    else if (k.Key == ConsoleKey.PageUp) scroll -= 5;
-                    else if (k.Key == ConsoleKey.PageDown) scroll += 5;
-                    else if (k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.D || k.Key == ConsoleKey.N) { selected = 2; open = false; }
-                    else if (k.Key == ConsoleKey.Enter || k.Key == ConsoleKey.Spacebar) open = false;
-                }
-
-                return selected switch
-                {
-                    0 => new PermissionDecision(true, PersistScope.Once),
-                    1 => new PermissionDecision(true, PersistScope.Session),
-                    _ => new PermissionDecision(false, PersistScope.Once),
-                };
-            }
-
             while (running)
             {
                 // Check for terminal resize
@@ -1052,15 +956,20 @@ class Program
                 }
 
                 // Service a pending tool-permission request (posted by the agent's background task) on
-                // this input-owning thread, then re-render on the next iteration.
-                if (permissionBroker.TryDequeue(out var pendingPermission) && pendingPermission != null)
+                // this input-owning thread. The request is shown INLINE in the prompt area
+                // (issue #222): the transcript stays visible/scrollable, text input is suspended,
+                // and the normal render/input loop keeps running while the user decides.
+                if (!inlineApproval.IsActive && permissionBroker.TryDequeue(out var pendingPermission) && pendingPermission != null)
                 {
-                    var decision = await ShowPermissionDialogAsync(pendingPermission.Request);
-                    pendingPermission.Completion.TrySetResult(decision);
-                    // Record the decision in the transcript so there is a visible, auditable
-                    // trace of what was approved or denied (issue #224).
-                    feed.AddItem(new Andy.Cli.Widgets.PermissionDecisionItem(pendingPermission.Request, decision));
-                    continue;
+                    activeApprovalRequest = pendingPermission;
+                    inlineApproval.Begin(pendingPermission.Request);
+                }
+                else if (inlineApproval.IsActive && activeApprovalRequest != null && activeApprovalRequest.Completion.Task.IsCompleted)
+                {
+                    // The awaiting side resolved without us (e.g. cancellation denied the request);
+                    // dismiss the inline prompt and restore normal input.
+                    inlineApproval.Dismiss();
+                    activeApprovalRequest = null;
                 }
 
                 // Input (prefer KeyAvailable; fallback to Console.In.Peek in non-interactive contexts)
@@ -1072,6 +981,31 @@ class Program
                         if (await ShowExitConfirmationAsync())
                         {
                             running = false;
+                        }
+                        return;
+                    }
+
+                    // Inline approval owns the keyboard while a permission request is pending
+                    // (issue #222): choice keys go to the approval prompt, PageUp/PageDown keep
+                    // scrolling the transcript, and everything else is swallowed so no text
+                    // reaches the suspended prompt.
+                    if (inlineApproval.IsActive)
+                    {
+                        if (k.Key == ConsoleKey.PageUp || k.Key == ConsoleKey.PageDown)
+                        {
+                            int approvalFeedPage = Math.Max(1, viewport.Height - 5);
+                            feed.ScrollLines(k.Key == ConsoleKey.PageUp ? int.MaxValue : int.MinValue, approvalFeedPage);
+                            return;
+                        }
+
+                        var approvalDecision = inlineApproval.HandleKey(k);
+                        if (approvalDecision is { } decided && activeApprovalRequest != null)
+                        {
+                            activeApprovalRequest.Completion.TrySetResult(decided);
+                            // Record the decision in the transcript so there is a visible, auditable
+                            // trace of what was approved or denied (issue #224).
+                            feed.AddItem(new Andy.Cli.Widgets.PermissionDecisionItem(activeApprovalRequest.Request, decided));
+                            activeApprovalRequest = null;
                         }
                         return;
                     }
@@ -1739,9 +1673,10 @@ class Program
                 // Ensure we have enough space to render
                 if (viewport.Width > 10 && viewport.Height > 8)
                 {
-                    // Update inline command help filter based on current prompt text
+                    // Update inline command help filter based on current prompt text.
+                    // Slash-command help is suppressed while an inline approval is pending.
                     inlineCommandHelp.UpdateFilter(prompt.Text);
-                    int helpH = inlineCommandHelp.GetHeight();
+                    int helpH = inlineApproval.IsActive ? 0 : inlineCommandHelp.GetHeight();
 
                     // Keep the prompt's wrap width in sync with its render width so soft-wrapping,
                     // height measurement and cursor positioning all agree. Render width below is
@@ -1750,7 +1685,12 @@ class Program
                     int promptRenderW = Math.Max(1, viewport.Width - 4);
                     prompt.SetWrapWidth(Math.Max(0, promptRenderW - 2 - 3));
 
-                    int promptH = Math.Min(prompt.GetDesiredHeight(), Math.Max(3, viewport.Height / 2));
+                    // While an approval is pending, the approval panel replaces the prompt in the
+                    // same slot; like the prompt, it may grow up to half the viewport (its body
+                    // scrolls beyond that).
+                    int promptH = inlineApproval.IsActive
+                        ? inlineApproval.GetDesiredHeight(promptRenderW, Math.Max(Andy.Cli.Widgets.InlineApprovalPrompt.ChromeRows + 1, viewport.Height / 2))
+                        : Math.Min(prompt.GetDesiredHeight(), Math.Max(3, viewport.Height / 2));
 
                     // Position prompt and help from the bottom up (no gaps)
                     // Layout from bottom: status line(1) + help + prompt
@@ -1763,7 +1703,15 @@ class Program
                     // main area: stacked feed with bottom-follow and animation
                     feed.Tick();
                     feed.Render(new L.Rect(2, 3, Math.Max(1, viewport.Width - 4), outputH), baseDl, wb);
-                    prompt.Render(new L.Rect(2, promptY, Math.Max(1, viewport.Width - 4), promptH), baseDl, wb);
+                    if (inlineApproval.IsActive)
+                    {
+                        // The approval panel takes the prompt's slot; text input is suspended.
+                        inlineApproval.Render(new L.Rect(2, promptY, Math.Max(1, viewport.Width - 4), promptH), baseDl, wb);
+                    }
+                    else
+                    {
+                        prompt.Render(new L.Rect(2, promptY, Math.Max(1, viewport.Width - 4), promptH), baseDl, wb);
+                    }
 
                     // Render inline command help below the prompt (if visible)
                     if (helpH > 0)
@@ -1856,7 +1804,9 @@ class Program
                 // the diff renderer never overwrites. Manual scrolling changes the
                 // offset discretely (per wheel notch / PageUp), so this is one repaint
                 // per scroll action, not per frame.
-                int reflowSig = HashCode.Combine(feed.ItemCount, feed.RenderedLineCount, (int)scrollMode, feed.ScrollOffset);
+                // The inline approval panel swaps in/out of the prompt slot (usually with a
+                // different height), so opening/closing it also forces a full repaint.
+                int reflowSig = HashCode.Combine(feed.ItemCount, feed.RenderedLineCount, (int)scrollMode, feed.ScrollOffset, inlineApproval.IsActive);
                 if (reflowSig != lastReflowSig)
                 {
                     lastReflowSig = reflowSig;
@@ -1872,7 +1822,7 @@ class Program
                 // the display buffer. However, this creates mixed output paths which is not ideal
                 // architecturally. Consider refactoring to route cursor operations through the TUI
                 // library's PTY interface or checking if Andy.Tui has built-in cursor support.
-                if (!isProcessingMessage && prompt.TryGetTerminalCursor(out int col1, out int row1))
+                if (!isProcessingMessage && !inlineApproval.IsActive && prompt.TryGetTerminalCursor(out int col1, out int row1))
                 {
                     if (!cursorStyledShown)
                     {
@@ -1882,9 +1832,9 @@ class Program
                     }
                     Console.Write($"\u001b[{row1};{col1}H");
                 }
-                else if (isProcessingMessage)
+                else if (isProcessingMessage || inlineApproval.IsActive)
                 {
-                    // Hide cursor completely during processing
+                    // Hide cursor completely during processing and while an approval is pending
                     if (cursorStyledShown)
                     {
                         Console.Write("\u001b[?25l"); // Hide cursor
