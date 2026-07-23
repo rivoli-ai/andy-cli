@@ -499,6 +499,160 @@ class Program
                 }
             }
 
+            // Session persistence (issue #231): every interactive session gets a short
+            // filesystem-safe id and its full transcript (the engine's TranscriptSnapshot,
+            // including tool calls/results) is saved - redacted - after each completed turn
+            // to ~/.andy/sessions/<id>.json. The user can exit and later restore the full
+            // conversation context with `andy-cli --resume <id>` / `--continue`, or switch
+            // sessions in place with /resume. /sessions lists what can be resumed.
+            var sessionStore = new Andy.Cli.Services.Sessions.SessionStore();
+            var sessionsCommand = new Andy.Cli.Commands.SessionsCommand(sessionStore);
+            var sessionId = Andy.Cli.Services.Sessions.SessionStore.NewSessionId();
+
+            void SaveSession()
+            {
+                try
+                {
+                    var service = aiService;
+                    if (service == null) return;
+                    sessionStore.Save(
+                        sessionId,
+                        service.ExportTranscript(),
+                        modelCommand.GetCurrentProvider(),
+                        modelCommand.GetCurrentModel());
+                }
+                catch (Exception ex)
+                {
+                    // Session persistence must never break the conversation loop.
+                    Andy.Cli.Services.CrashLog.Write("session.Save", ex);
+                }
+            }
+
+            void ReplaySessionIntoFeed(Andy.Engine.TranscriptSnapshot snapshot)
+            {
+                foreach (var entry in Andy.Cli.Services.Sessions.SessionReplayFormatter.Format(snapshot))
+                {
+                    switch (entry.Kind)
+                    {
+                        case Andy.Cli.Services.Sessions.SessionReplayFormatter.EntryKind.User:
+                            feed.AddUserMessage(entry.Text);
+                            break;
+                        case Andy.Cli.Services.Sessions.SessionReplayFormatter.EntryKind.Assistant:
+                            feed.AddMarkdownRich(entry.Text);
+                            break;
+                        default:
+                            feed.AddMarkdownRich(ConsoleColors.Dim(entry.Text));
+                            break;
+                    }
+                }
+            }
+
+            // Startup resume: restore the requested (or most recent) saved session into the
+            // freshly built agent. The engine re-seeds the complete message history, so the
+            // model continues with full prior context; the feed replays the conversation so
+            // the user sees it too.
+            var resumeArgs = Andy.Cli.Hosting.SessionResumeArgs.Parse(args);
+            if (resumeArgs.Error != null)
+            {
+                feed.AddMarkdownRich(ConsoleColors.WarningPrefix($"[session] {resumeArgs.Error} Starting a new session."));
+            }
+            else if (resumeArgs.RequestsResume)
+            {
+                if (aiService == null)
+                {
+                    feed.AddMarkdownRich(ConsoleColors.WarningPrefix("[session] Cannot resume: no AI provider is available."));
+                }
+                else
+                {
+                    var targetId = resumeArgs.ContinueLatest
+                        ? sessionStore.Latest()?.SessionId
+                        : resumeArgs.SessionId;
+                    if (targetId == null)
+                    {
+                        feed.AddMarkdownRich(ConsoleColors.NotePrefix("[session] No saved sessions to continue; starting a new session."));
+                    }
+                    else
+                    {
+                        try
+                        {
+                            var record = sessionStore.Load(targetId);
+                            if (record == null)
+                            {
+                                feed.AddMarkdownRich(ConsoleColors.WarningPrefix($"[session] Session '{targetId}' was not found (list sessions with /sessions). Starting a new session."));
+                            }
+                            else
+                            {
+                                aiService.RestoreTranscript(record.Snapshot);
+                                sessionId = targetId;
+                                ReplaySessionIntoFeed(record.Snapshot);
+                                feed.AddMarkdownRich($"[session] Resumed session {targetId} ({record.Summary.TurnCount} turn{(record.Summary.TurnCount == 1 ? "" : "s")} restored)");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            feed.AddMarkdownRich(ConsoleColors.WarningPrefix($"[session] Could not resume '{targetId}': {ex.Message}. Starting a new session."));
+                        }
+                    }
+                }
+            }
+            feed.AddMarkdownRich(ConsoleColors.Dim($"[session] {sessionId} (resume after exit: andy-cli --resume {sessionId})"));
+
+            // In-place session switch for /resume <id>: replaces the assistant service with a
+            // fresh instance (the engine only restores into an EMPTY conversation), restores
+            // the saved transcript, and replays it into a cleared feed. Returns an error
+            // message, or null on success.
+            async Task<string?> ResumeSavedSessionAsync(string targetId)
+            {
+                if (llmProvider == null || aiService == null)
+                {
+                    return "No AI provider is available; cannot resume a session.";
+                }
+
+                Andy.Cli.Services.Sessions.SessionRecord? record;
+                try
+                {
+                    record = sessionStore.Load(targetId);
+                }
+                catch (Exception ex)
+                {
+                    return $"Could not load session '{targetId}': {ex.Message}";
+                }
+                if (record == null)
+                {
+                    return $"Session '{targetId}' was not found. Use /sessions to list saved sessions.";
+                }
+
+                // Persist the outgoing session before switching away from it.
+                SaveSession();
+                aiService.Dispose();
+
+                var resumeToolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
+                var resumeLoggerFactory = serviceProvider.GetService<ILoggerFactory>();
+                var resumeModel = modelCommand.GetCurrentModel();
+                var resumeProvider = modelCommand.GetCurrentProvider();
+                aiService = new SimpleAssistantService(
+                    llmProvider,
+                    toolRegistry,
+                    resumeToolExecutor,
+                    feed,
+                    resumeModel,
+                    resumeProvider,
+                    tokenCounter,
+                    resumeLoggerFactory,
+                    extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, resumeProvider));
+                aiService.RestoreTranscript(record.Snapshot);
+                sessionId = targetId;
+
+                tokenCounter.Reset();
+                promptHistory.Clear();
+                historyIndex = -1;
+                feed.Clear();
+                ReplaySessionIntoFeed(record.Snapshot);
+                feed.AddMarkdownRich($"[session] Resumed session {targetId} ({record.Summary.TurnCount} turn{(record.Summary.TurnCount == 1 ? "" : "s")} restored)");
+                await Task.CompletedTask;
+                return null;
+            }
+
             // Full session reset for /restart: unlike /clear (which clears the
             // conversation history in place on the existing agent), this replaces
             // the assistant service with a fresh instance (new agent, empty history
@@ -536,6 +690,10 @@ class Program
                 promptHistory.Clear();
                 historyIndex = -1;
                 feed.Clear();
+                // A restarted session is a NEW session: rotate the id so the previous
+                // session's saved transcript stays resumable and the fresh conversation
+                // is persisted under its own id (issue #231).
+                sessionId = Andy.Cli.Services.Sessions.SessionStore.NewSessionId();
                 return Task.CompletedTask;
             });
 
@@ -838,6 +996,8 @@ class Program
                             "- **exit**, **bye**, **quit**: Exit the application (without slash)\n" +
                             "- **/clear**: Clear conversation history\n" +
                             "- **/restart**: Restart the session (fresh conversation context, counters, and prompt history)\n" +
+                            "- **/sessions**: List saved sessions that can be resumed\n" +
+                            "- **/resume [session-id]**: Resume a saved session (most recent when no id is given)\n" +
                             "- **/help**: Show this help message\n\n" +
                             "### Model Commands:\n" +
                             "- **/model list**: Show available models\n" +
@@ -1371,6 +1531,8 @@ class Program
                                         "- **exit**, **bye**, **quit**: Exit the application (without slash)\n" +
                                         "- **/clear**: Clear conversation history\n" +
                                         "- **/restart**: Restart the session (fresh conversation context, counters, and prompt history)\n" +
+                                        "- **/sessions**: List saved sessions that can be resumed\n" +
+                                        "- **/resume [session-id]**: Resume a saved session (most recent when no id is given)\n" +
                                         "- **/help**: Show this help message\n\n" +
                                         "### Model Commands:\n" +
                                         "- **/model list**: Show available models\n" +
@@ -1418,7 +1580,45 @@ class Program
                                     }
                                     tokenCounter.Reset();
                                     feed.Clear();
+                                    // The cleared conversation continues under a NEW session id so
+                                    // the pre-clear transcript stays resumable instead of being
+                                    // overwritten by the now-empty conversation (issue #231).
+                                    sessionId = Andy.Cli.Services.Sessions.SessionStore.NewSessionId();
                                     feed.AddMarkdownRich("**Chat cleared!** Ready for a fresh conversation.");
+                                    return;
+                                }
+                                else if (commandName == "sessions")
+                                {
+                                    // List saved sessions that can be resumed (issue #231).
+                                    feed.AddUserMessage(cmd);
+                                    var result = await sessionsCommand.ExecuteAsync(args);
+                                    // Fence the output so the fixed-width listing stays aligned.
+                                    feed.AddMarkdownRich("```\n" + result.Message + "\n```");
+                                    return;
+                                }
+                                else if (commandName == "resume")
+                                {
+                                    // Switch to a saved session in place (issue #231). With no
+                                    // argument, resume the most recently updated saved session.
+                                    feed.AddUserMessage(cmd);
+                                    var targetId = args.Length > 0
+                                        ? args[0]
+                                        : sessionStore.Latest()?.SessionId;
+                                    if (targetId == null)
+                                    {
+                                        feed.AddMarkdownRich(ConsoleColors.NotePrefix("No saved sessions to resume."));
+                                        return;
+                                    }
+                                    if (!Andy.Cli.Services.Sessions.SessionStore.IsValidSessionId(targetId))
+                                    {
+                                        feed.AddMarkdownRich(ConsoleColors.WarningPrefix($"Invalid session id: '{targetId}'."));
+                                        return;
+                                    }
+                                    var resumeError = await ResumeSavedSessionAsync(targetId);
+                                    if (resumeError != null)
+                                    {
+                                        feed.AddMarkdownRich(ConsoleColors.WarningPrefix(resumeError));
+                                    }
                                     return;
                                 }
                                 else if (commandName == "restart")
@@ -1486,6 +1686,11 @@ class Program
 
                                     // Process message with tool support (streaming disabled until properly implemented)
                                     var response = await aiService.ProcessMessageAsync(cmd, enableStreaming: false);
+
+                                    // Persist the transcript after every completed turn so the
+                                    // session survives an exit or crash and can be resumed later
+                                    // with --resume/--continue (issue #231).
+                                    SaveSession();
 
                                     // Token counter is now updated in real-time by SimpleAssistantService
 
@@ -2241,6 +2446,11 @@ class Program
             case "perm":
                 command = new PermissionsCommand(serviceProvider);
                 break;
+            case "sessions":
+                // List interactive sessions saved under ~/.andy/sessions that can be
+                // resumed with --resume <id> / --continue (issue #231).
+                command = new SessionsCommand(new Andy.Cli.Services.Sessions.SessionStore());
+                break;
             case "help":
             case "?":
                 Console.WriteLine("Andy CLI - AI Assistant Command Line Interface");
@@ -2251,7 +2461,12 @@ class Program
                 Console.WriteLine("  model, m       - Manage AI models");
                 Console.WriteLine("  tools, t       - Manage and list available tools");
                 Console.WriteLine("  permissions    - View and modify tool permission rules");
+                Console.WriteLine("  sessions       - List saved sessions that can be resumed");
                 Console.WriteLine("  help, ?        - Show this help message");
+                Console.WriteLine();
+                Console.WriteLine("Interactive session flags:");
+                Console.WriteLine("  --resume <session-id>  - Resume a saved session with its full context");
+                Console.WriteLine("  --continue             - Resume the most recently updated session");
                 Console.WriteLine();
                 Console.WriteLine("Run without arguments to start the interactive TUI mode.");
                 return;
