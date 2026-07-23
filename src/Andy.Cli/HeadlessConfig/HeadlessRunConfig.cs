@@ -21,6 +21,7 @@ public sealed record HeadlessRunConfig
     public IReadOnlyDictionary<string, string>? EnvVars { get; init; }
     public HeadlessOutput Output { get; init; } = new();
     public HeadlessEventSink? EventSink { get; init; }
+    public HeadlessTranscript? Transcript { get; init; }
 
     // rivoli-ai/andy-cli#180: policy_id and boundaries were removed from the v1
     // contract. The runtime enforced neither, so carrying them created FALSE
@@ -116,6 +117,21 @@ public sealed record HeadlessEventSink
 {
     public string? NatsSubject { get; init; }
     public string? Path { get; init; }
+}
+
+// Optional durable diagnostic sink. Presence enables one atomic, uniquely named
+// NDJSON transcript per invocation. Limits have conservative runtime defaults so
+// older v1 producers may opt in with an empty object without creating unbounded
+// storage.
+public sealed record HeadlessTranscript
+{
+    public string? Directory { get; init; }
+    public int MaxRecordBytes { get; init; } = 65_536;
+    public int MaxRunBytes { get; init; } = 4_194_304;
+    public int MaxAgeDays { get; init; } = 14;
+    public int MaxFiles { get; init; } = 200;
+    public long MaxTotalBytes { get; init; } = 268_435_456;
+    public IReadOnlyList<string> RedactEnvVars { get; init; } = [];
 }
 
 public sealed record HeadlessLimits

@@ -34,14 +34,19 @@ public sealed class HeadlessEventEmitter : IDisposable
     };
 
     private readonly TextWriter _writer;
+    private readonly HeadlessTranscriptSession? _transcript;
     private readonly object _writeLock = new();
     private readonly TimeProvider _clock;
     private bool _disposed;
 
-    public HeadlessEventEmitter(TextWriter writer, TimeProvider? clock = null)
+    public HeadlessEventEmitter(
+        TextWriter writer,
+        TimeProvider? clock = null,
+        HeadlessTranscriptSession? transcript = null)
     {
         _writer = writer;
         _clock = clock ?? TimeProvider.System;
+        _transcript = transcript;
     }
 
     public void EmitStarted(Guid runId, string agentSlug, string modelProvider, string modelId, int toolCount)
@@ -133,7 +138,31 @@ public sealed class HeadlessEventEmitter : IDisposable
         => Write(HeadlessEventKind.Error, new { message, fatal });
 
     public void EmitFinished(int exitCode, long durationMs, int iterations)
-        => Write(HeadlessEventKind.Finished, new { exit_code = exitCode, duration_ms = durationMs, iterations });
+    {
+        var line = Serialize(
+            HeadlessEventKind.Finished,
+            new { exit_code = exitCode, duration_ms = durationMs, iterations });
+
+        lock (_writeLock)
+        {
+            if (_disposed) return;
+
+            var transcriptError = _transcript?.Complete(line);
+            if (!string.IsNullOrWhiteSpace(transcriptError))
+            {
+                WritePrimary(Serialize(
+                    HeadlessEventKind.Error,
+                    new
+                    {
+                        message = transcriptError,
+                        fatal = false
+                    }));
+            }
+
+            WritePrimary(line);
+            _writer.Flush();
+        }
+    }
 
     // SHA-256 hex of canonical (snake_case) JSON for tool args / results.
     // Producers feed this into the *_digest fields rather than emitting raw
@@ -149,9 +178,21 @@ public sealed class HeadlessEventEmitter : IDisposable
 
     private void Write(HeadlessEventKind kind, object data)
     {
-        // Wrapping the per-event payload in a JsonObject lets the writer keep
-        // the envelope shape (schema_version/ts/kind/data) explicit at the
-        // serializer call site rather than sprinkling it into every Emit*.
+        var line = Serialize(kind, data);
+
+        lock (_writeLock)
+        {
+            if (_disposed) return;
+            _transcript?.Capture(line);
+            WritePrimary(line);
+            _writer.Flush();
+        }
+    }
+
+    private string Serialize(HeadlessEventKind kind, object data)
+    {
+        // Keep the envelope shape explicit at the serializer call site rather
+        // than sprinkling it into every Emit* method.
         var envelope = new
         {
             schema_version = SchemaVersion,
@@ -160,15 +201,10 @@ public sealed class HeadlessEventEmitter : IDisposable
             data
         };
 
-        var line = JsonSerializer.Serialize(envelope, s_jsonOptions);
-
-        lock (_writeLock)
-        {
-            if (_disposed) return;
-            _writer.WriteLine(line);
-            _writer.Flush();
-        }
+        return JsonSerializer.Serialize(envelope, s_jsonOptions);
     }
+
+    private void WritePrimary(string line) => _writer.WriteLine(line);
 
     public void Dispose()
     {
@@ -177,6 +213,7 @@ public sealed class HeadlessEventEmitter : IDisposable
             if (_disposed) return;
             _disposed = true;
             _writer.Flush();
+            _transcript?.Dispose();
         }
     }
 }

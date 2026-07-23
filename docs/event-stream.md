@@ -1,6 +1,6 @@
 # Event stream
 
-Updated: 2026-07-22
+Updated: 2026-07-23
 
 The headless runtime emits a structured event stream while it runs. The format
 is NDJSON: one JSON object per line. The authoritative contract is
@@ -60,7 +60,10 @@ runtime setup begins.
 
 ### `llm_chunk`
 
-Incremental LLM output text. Optional; emitted when streaming is surfaced.
+Assistant-model output text. The current Engine integration emits retained
+assistant messages in turn order when the run finalizes; a future
+token-streaming Engine can emit incremental chunks without changing this
+contract.
 
 | Field | Type | Notes |
 | --- | --- | --- |
@@ -171,6 +174,9 @@ exit.
 | `message` | string | The error message. |
 | `fatal` | boolean | Optional. `true` means terminal: the next event is `finished` and the process exits non-zero. |
 
+A configured transcript-persistence failure is emitted with `fatal=false`.
+The primary output and exit contract continue, and `finished` remains last.
+
 ### `finished`
 
 Emitted once, last, on every run.
@@ -188,6 +194,20 @@ Emitted once, last, on every run.
 `HeadlessEventEmitter.ComputeDigest`). They let consumers correlate or dedupe
 without the producer emitting raw payloads that might contain secrets.
 
+## Durable transcript
+
+When the headless config contains `transcript`, the runtime captures this
+canonical event sequence to an atomic per-run NDJSON file. Persistence applies
+an additional secret-redaction pass and replaces oversized records with bounded
+preview/digest metadata. Tool arguments and results remain digests, never raw
+payloads. The transcript receives its terminal `finished` record before the temp
+file is fsynced and renamed; only then is `finished` written to the primary
+stream. If transcript completion fails, the primary stream receives a nonfatal
+`error` immediately before `finished`.
+
+See [Headless runtime: durable transcripts](headless-runtime.md#durable-transcripts)
+for configuration, naming, retention, and incident-use guidance.
+
 ## Sample stream
 
 A typical successful run with one tool call (NDJSON; one object per line):
@@ -196,6 +216,7 @@ A typical successful run with one tool call (NDJSON; one object per line):
 {"schema_version":1,"ts":"2026-04-25T22:31:14.001+00:00","kind":"started","data":{"run_id":"f6c2b0d4-2c1e-4a3f-9b21-2f7e0c5d8a90","agent_slug":"code-reviewer","model_provider":"openrouter","model_id":"xiaomi/mimo-v2.5","tool_count":2}}
 {"schema_version":1,"ts":"2026-04-25T22:31:15.220+00:00","kind":"tool_call_started","data":{"call_id":"a1b2c3d4e5f6","tool_name":"read_file"}}
 {"schema_version":1,"ts":"2026-04-25T22:31:15.246+00:00","kind":"tool_call_finished","data":{"call_id":"a1b2c3d4e5f6","tool_name":"read_file","ok":true,"outcome":"success","duration_ms":26}}
+{"schema_version":1,"ts":"2026-04-25T22:31:18.500+00:00","kind":"llm_chunk","data":{"text":"Review complete.","turn":3}}
 {"schema_version":1,"ts":"2026-04-25T22:31:18.540+00:00","kind":"output_written","data":{"path":"/workspace/.andy/output.txt","bytes":2048}}
 {"schema_version":1,"ts":"2026-04-25T22:31:18.541+00:00","kind":"tool_usage_audit","data":{"allowed_tools":[],"tools":[{"tool_name":"read_file","invocations":1,"permitted":true}]}}
 {"schema_version":1,"ts":"2026-04-25T22:31:18.542+00:00","kind":"finished","data":{"exit_code":0,"duration_ms":4541,"iterations":3}}

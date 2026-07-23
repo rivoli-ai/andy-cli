@@ -180,7 +180,9 @@ returns structured exit codes (see the `HeadlessExitCode` enum: `Success`,
 `ConfigError`, `AgentFailure`, `Timeout`, and others) so it can be scripted
 in CI and automation. Optional `required_actions` assertions verify actual
 successful tool outcomes before publishing output, so a denied, failed, timed
-out, cancelled, or missing required action cannot produce exit 0. See
+out, cancelled, or missing required action cannot produce exit 0. An optional
+`transcript` block persists an atomic, redacted, size-bounded per-run NDJSON
+record with deterministic age/count/total-storage retention. See
 `docs/headless-runtime.md` for full details.
 
 ```bash

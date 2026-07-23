@@ -54,7 +54,10 @@ public static class HeadlessAgentRunner
         CancellationToken ct = default,
         Func<string, string?>? currentBranchResolver = null)
     {
-        var emitter = new HeadlessEventEmitter(eventStream);
+        var transcriptCreation = HeadlessTranscriptSession.TryCreate(config);
+        using var emitter = new HeadlessEventEmitter(
+            eventStream,
+            transcript: transcriptCreation.Session);
         var stopwatch = Stopwatch.StartNew();
         var finished = false;
 
@@ -78,6 +81,12 @@ public static class HeadlessAgentRunner
             modelProvider: config.Model.Provider,
             modelId: config.Model.Id,
             toolCount: config.Tools.Count);
+
+        if (!string.IsNullOrWhiteSpace(transcriptCreation.Error))
+        {
+            stderr.WriteLine($"andy-cli run --headless: {transcriptCreation.Error}");
+            emitter.EmitError(transcriptCreation.Error, fatal: false);
+        }
 
         try
         {
@@ -257,6 +266,25 @@ public static class HeadlessAgentRunner
             logger: loggerFactory.CreateLogger<SimpleAgent>());
 
         RequiredActionVerificationResult? requiredActionVerification = null;
+        var modelHistoryEmitted = false;
+
+        void EmitModelHistory()
+        {
+            if (modelHistoryEmitted)
+            {
+                return;
+            }
+
+            modelHistoryEmitted = true;
+            var turn = 0;
+            foreach (var message in agent.GetHistory()
+                .Where(message =>
+                    message.Role == Andy.Model.Model.Role.Assistant
+                    && !string.IsNullOrWhiteSpace(message.Content)))
+            {
+                emitter.EmitLlmChunk(message.Content!, turn++);
+            }
+        }
 
         void EmitRequiredActionVerification()
         {
@@ -273,6 +301,7 @@ public static class HeadlessAgentRunner
         // audit, required-action evidence when configured, then the terminal event.
         void Finalize(HeadlessExitCode code, int iters)
         {
+            EmitModelHistory();
             EmitToolUsageAudit(emitter, auditor, services, toolHost.Registry, allowedTools);
             EmitRequiredActionVerification();
             finish(code, iters);
@@ -365,6 +394,7 @@ public static class HeadlessAgentRunner
         }
 
         var output = result.Response ?? string.Empty;
+        EmitModelHistory();
 
         // #219: a plausible model response is not evidence that a required action
         // happened. Verify actual terminal tool outcomes before format validation

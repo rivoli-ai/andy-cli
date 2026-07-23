@@ -83,6 +83,62 @@ public class HeadlessAgentRunnerStabilityTests
     }
 
     [Fact]
+    public async Task ConfiguredTranscript_CapturesFinalModelResponseAndTerminalEvent()
+    {
+        using var ws = new TempDir();
+        var transcriptDirectory = Path.Combine(ws.Path, "transcripts");
+        var config = NewConfig(ws) with
+        {
+            Transcript = new HeadlessTranscript { Directory = transcriptDirectory }
+        };
+        var provider = new FakeLlmProvider(FakeLlmProvider.TextResponse("durable response"));
+
+        var (events, code) = await RunAsync(config, provider);
+
+        Assert.Equal(HeadlessExitCode.Success, code);
+        Assert.Contains(events, item =>
+            item.Kind == "llm_chunk"
+            && item.Data.GetProperty("text").GetString() == "durable response");
+        var transcript = Assert.Single(Directory.GetFiles(transcriptDirectory, "*.ndjson"));
+        var persisted = File.ReadAllLines(transcript)
+            .Select(ParseEvent)
+            .ToList();
+        Assert.Contains(persisted, item =>
+            item.Kind == "llm_chunk"
+            && item.Data.GetProperty("text").GetString() == "durable response");
+        Assert.Equal("finished", persisted.Last().Kind);
+        Assert.Equal(0, persisted.Last().Data.GetProperty("exit_code").GetInt32());
+        Assert.Empty(Directory.GetFiles(transcriptDirectory, "*.tmp"));
+    }
+
+    [Fact]
+    public async Task TranscriptInitializationFailure_IsNonFatalAndPrimaryContractCompletes()
+    {
+        using var ws = new TempDir();
+        var blocker = Path.Combine(ws.Path, "blocker");
+        File.WriteAllText(blocker, "x");
+        var config = NewConfig(ws) with
+        {
+            Transcript = new HeadlessTranscript
+            {
+                Directory = Path.Combine(blocker, "transcripts")
+            }
+        };
+        var provider = new FakeLlmProvider(FakeLlmProvider.TextResponse("still succeeds"));
+
+        var (events, code) = await RunAsync(config, provider);
+
+        Assert.Equal(HeadlessExitCode.Success, code);
+        Assert.True(File.Exists(config.Output.File));
+        var warning = Assert.Single(events, item =>
+            item.Kind == "error"
+            && !item.Data.GetProperty("fatal").GetBoolean());
+        Assert.Contains("Transcript initialization failed", warning.Data.GetProperty("message").GetString());
+        Assert.Equal("finished", events.Last().Kind);
+        Assert.Equal(0, events.Last().Data.GetProperty("exit_code").GetInt32());
+    }
+
+    [Fact]
     public async Task ToolCallThenFinalResponse_EmitsPairedToolCallEvents()
     {
         using var ws = new TempDir();

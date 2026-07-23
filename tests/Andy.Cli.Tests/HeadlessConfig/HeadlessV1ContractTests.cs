@@ -260,6 +260,54 @@ public class HeadlessV1ContractTests
         Assert.Contains("only valid", error);
     }
 
+    [Fact]
+    public async Task Loader_TranscriptConfiguration_AcceptedAndDefaultsApplied()
+    {
+        var json = BaseConfig.Replace(
+            "\"tools\": [],",
+            "\"tools\": [], \"transcript\": { \"directory\": \"/tmp/transcripts\", "
+                + "\"redact_env_vars\": [\"CUSTOM_SECRET\"] },");
+
+        var result = await LoadJsonAsync(json);
+
+        Assert.True(result.IsSuccess, result.Error);
+        Assert.Equal("/tmp/transcripts", result.Config!.Transcript!.Directory);
+        Assert.Equal(65_536, result.Config.Transcript.MaxRecordBytes);
+        Assert.Equal(4_194_304, result.Config.Transcript.MaxRunBytes);
+        Assert.Equal(["CUSTOM_SECRET"], result.Config.Transcript.RedactEnvVars);
+    }
+
+    [Fact]
+    public void Validator_TranscriptDirectoryMustBeAbsolute()
+    {
+        var config = new HeadlessRunConfig
+        {
+            Transcript = new HeadlessTranscript { Directory = "relative/transcripts" }
+        };
+
+        var error = HeadlessConfigValidator.Validate(config);
+
+        Assert.Contains("absolute path", error);
+    }
+
+    [Fact]
+    public void Validator_TranscriptLimitsReserveTerminalRecord()
+    {
+        var config = new HeadlessRunConfig
+        {
+            Transcript = new HeadlessTranscript
+            {
+                MaxRecordBytes = 4096,
+                MaxRunBytes = 4097,
+                MaxTotalBytes = 8192
+            }
+        };
+
+        var error = HeadlessConfigValidator.Validate(config);
+
+        Assert.Contains("at least twice", error);
+    }
+
     [Theory]
     [InlineData(" dotnet test")]
     [InlineData("dotnet test ")]

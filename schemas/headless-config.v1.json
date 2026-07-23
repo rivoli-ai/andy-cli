@@ -173,6 +173,63 @@
         }
       }
     },
+    "transcript": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional durable diagnostic transcript. Presence enables an atomic, uniquely named NDJSON file keyed by run_id. Records are redacted and bounded before persistence; retention cleanup is deterministic.",
+      "properties": {
+        "directory": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Absolute transcript directory. Defaults to <workspace.root>/.andy/transcripts."
+        },
+        "max_record_bytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 1048576,
+          "default": 65536,
+          "description": "Maximum UTF-8 bytes retained for one record. Larger records become a redacted preview plus digest."
+        },
+        "max_run_bytes": {
+          "type": "integer",
+          "minimum": 4096,
+          "maximum": 268435456,
+          "default": 4194304,
+          "description": "Maximum UTF-8 bytes for one transcript, including its terminal record."
+        },
+        "max_age_days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3650,
+          "default": 14,
+          "description": "Delete completed transcripts older than this many days."
+        },
+        "max_files": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000,
+          "default": 200,
+          "description": "Maximum completed transcript files retained in the directory."
+        },
+        "max_total_bytes": {
+          "type": "integer",
+          "minimum": 4096,
+          "maximum": 1073741824,
+          "default": 268435456,
+          "description": "Maximum total bytes retained across completed transcripts."
+        },
+        "redact_env_vars": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "description": "Additional environment variable names whose resolved values must be removed from persisted records. model.api_key_ref and ANDY_TOKEN are always included."
+        }
+      }
+    },
     "permissions": {
       "type": "object",
       "additionalProperties": false,

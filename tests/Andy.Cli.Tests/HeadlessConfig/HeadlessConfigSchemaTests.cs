@@ -354,6 +354,56 @@ public class HeadlessConfigSchemaTests
     }
 
     [Fact]
+    public void Transcript_BoundedConfigurationValidates()
+    {
+        var schema = LoadSchema();
+        var config = MinimalValidConfig();
+        config["transcript"] = new JsonObject
+        {
+            ["directory"] = "/workspace/.andy/transcripts",
+            ["max_record_bytes"] = 4096,
+            ["max_run_bytes"] = 65536,
+            ["max_age_days"] = 30,
+            ["max_files"] = 100,
+            ["max_total_bytes"] = 1048576,
+            ["redact_env_vars"] = JsonArrayOf("CUSTOM_TOKEN", "DATABASE_PASSWORD")
+        };
+
+        var result = schema.Evaluate(ToElement(config));
+
+        Assert.True(result.IsValid, FormatErrors(result));
+    }
+
+    [Fact]
+    public void Transcript_AbsentRemainsBackwardCompatible()
+    {
+        var result = LoadSchema().Evaluate(ToElement(MinimalValidConfig()));
+
+        Assert.True(result.IsValid, FormatErrors(result));
+    }
+
+    [Fact]
+    public void Transcript_RejectsUnboundedRecordAndSecretList()
+    {
+        var schema = LoadSchema();
+        var config = MinimalValidConfig();
+        var secrets = new JsonArray();
+        for (var index = 0; index < 65; index++)
+        {
+            secrets.Add($"SECRET_{index}");
+        }
+        config["transcript"] = new JsonObject
+        {
+            ["max_record_bytes"] = 1048577,
+            ["redact_env_vars"] = secrets
+        };
+
+        var result = schema.Evaluate(ToElement(config));
+
+        Assert.False(result.IsValid, "transcript records and secret names must be bounded");
+    }
+
+    [Fact]
     public void Limits_MaxIterationsZero_Rejected()
     {
         var schema = LoadSchema();

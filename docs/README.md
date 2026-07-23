@@ -1,6 +1,6 @@
 # Andy CLI documentation
 
-Updated: 2026-07-21
+Updated: 2026-07-23
 
 Use this index to find the maintained operational and architecture documents.
 Historical decisions remain in `adr/`; current behavior belongs in the guides
@@ -19,7 +19,7 @@ linked below.
 ## Headless runtime
 
 - [Headless runtime](headless-runtime.md) - Versioned config, provider/tool wiring,
-  permissions, limits, output, and exit codes.
+  permissions, durable redacted transcripts, limits, output, and exit codes.
 - [Event stream](event-stream.md) - NDJSON event contract.
 - [ADR 0001](adr/0001-headless-agent-runtime.md) - Why one binary hosts interactive
   and headless execution.

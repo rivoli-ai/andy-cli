@@ -1,6 +1,6 @@
 # Headless runtime
 
-Updated: 2026-07-21
+Updated: 2026-07-23
 
 ## Concept: andy-cli's dual role
 
@@ -71,6 +71,7 @@ strongly-typed view is `HeadlessRunConfig` in
 | `env_vars` | No | object (string to string) | Extra env vars set into the agent process environment. Reserved names (below) must not be shadowed; a config that shadows one is rejected (exit 2). |
 | `output` | Yes | object | Where the final output file goes and where the event stream goes. |
 | `event_sink` | No | object | NATS subject and/or FIFO path. Required (with `path`) when `output.stream` is `fifo`. |
+| `transcript` | No | object | Enables one atomic, redacted, bounded NDJSON transcript per invocation. Defaults to `<workspace.root>/.andy/transcripts`. |
 | `permissions` | No | object | Per-run permission allow-list; see [Built-in tools and permission gating](#built-in-tools-and-permission-gating). The only enforceable per-run tool control in v1. |
 | `required_actions` | No | array | Up to 32 observed tool-success assertions that must pass before output publication. Empty or absent preserves the previous behavior. |
 | `limits` | Yes | object | Iteration and wall-clock caps. |
@@ -195,6 +196,63 @@ calls ended as `failed`, `denied`, `timed_out`, or `cancelled`, the run exits
 with `AgentFailure` (1) and does not write `output.file`. Event evidence includes
 the observed call IDs and outcomes, but only a digest of `command_equals`.
 
+### Durable transcripts
+
+The optional `transcript` object enables a durable diagnostic record without
+changing the live stream destination or final output contract. Presence enables
+the sink; omission preserves the previous behavior.
+
+```json
+"transcript": {
+  "directory": "/workspace/.andy/transcripts",
+  "max_record_bytes": 65536,
+  "max_run_bytes": 4194304,
+  "max_age_days": 14,
+  "max_files": 200,
+  "max_total_bytes": 268435456,
+  "redact_env_vars": ["DATABASE_PASSWORD"]
+}
+```
+
+| Field | Default | Notes |
+| --- | ---: | --- |
+| `directory` | `<workspace.root>/.andy/transcripts` | Absolute directory for completed and temporary records. |
+| `max_record_bytes` | 65,536 | Oversized records become a redacted preview plus SHA-256 digest. |
+| `max_run_bytes` | 4,194,304 | Hard per-run limit. Space is reserved for the terminal `finished` record. Must be at least twice the record limit. |
+| `max_age_days` | 14 | Completed files older than this are removed. |
+| `max_files` | 200 | Maximum completed files after cleanup. |
+| `max_total_bytes` | 268,435,456 | Maximum combined completed-file size; must be at least the per-run limit. |
+| `redact_env_vars` | empty | Additional secret environment names. `model.api_key_ref` and `ANDY_TOKEN` are always redacted. |
+
+Filenames have the form
+`<run_id>.<UTC-start>.<process-id>.<process-sequence>.ndjson`. The run ID makes
+lookup predictable while the timestamp, process ID, and sequence prevent
+collisions between concurrent or repeated invocations. Events stay in emission
+order, including model output, paired tool calls, permission outcomes, errors,
+audits, output publication, and the terminal result.
+
+The sink writes a uniquely named hidden temp file, appends the terminal event,
+flushes it to disk, and renames without overwrite. A process crash therefore
+cannot replace an older transcript. Temp files older than one hour are treated
+as abandoned and cleaned when the next transcript starts. Completed retention
+is deterministic: age first, then oldest filename/time until count and total
+size are within limits.
+
+Before persistence, the runtime recursively redacts sensitive JSON properties,
+the resolved values named by `redact_env_vars`, the model API-key reference,
+`ANDY_TOKEN`, bearer credentials, and common inline key/token/password forms.
+Tool arguments and results remain SHA-256 digests from the live event contract.
+Raw sensitive tool payloads are not persisted by default.
+
+Transcript initialization, write, or finalization failures do not overwrite or
+invalidate the primary output. They are surfaced on stderr and/or as a nonfatal
+`error` event before `finished`; the run keeps its ordinary exit status.
+
+For incident review, locate files by run ID, verify the last record is
+`finished`, correlate tool records by `call_id`, and inspect `outcome` rather
+than free-form error text. A missing file plus a nonfatal transcript error means
+diagnostic persistence failed while the primary run continued.
+
 ## Worked example: OpenRouter + Mimo
 
 A complete, valid v1 config using OpenRouter with the Mimo model. OpenRouter
@@ -251,6 +309,14 @@ OPENROUTER_API_KEY=sk-or-... andy-cli run --headless --config /workspace/.andy/r
 
 See [`schemas/samples/`](../schemas/samples) for additional ready-to-read
 example configs (coding, planning, triage).
+
+## Completion summary (2026-07-23)
+
+- Added optional atomic per-run transcripts keyed by `run_id`.
+- Added default secret redaction and bounded record/run storage.
+- Added deterministic age, count, total-size, and abandoned-temp cleanup.
+- Added concurrency, terminal outcome, permission denial, redaction, limit,
+  retention, and primary-contract failure coverage.
 
 ## Exit codes
 
@@ -362,6 +428,7 @@ provide.
 | `env_vars` | Set into the process environment. | Shadowing a reserved name rejected (exit 2). |
 | `workspace.branch` | Verified against the workspace's git HEAD. | Mismatch/unverifiable fails fast (exit 1). |
 | `output.stream: fifo` + `event_sink.path` | Event stream redirected to the FIFO. | Missing path rejected (schema + validator, exit 2). |
+| `transcript` | Atomically persists the redacted canonical event sequence with enforced record/run/retention limits. | Persistence failure emits a nonfatal diagnostic while preserving the primary run contract. |
 | `permissions.allowed_tools` | Relaxes named tools from fail-closed default. | Unlisted tools stay denied. |
 | `required_actions` | Verified from actual terminal tool outcomes before output publication. | Any missing or non-success requirement exits 1 and writes no output file. |
 | `agent.revision`, `event_sink.nats_subject` | Informational metadata; carried but not acted on by the agent (the container runtime consumes them). | n/a |

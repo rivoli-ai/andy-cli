@@ -243,6 +243,8 @@ and internal error. It supports:
 - A per-run `permissions.allowed_tools` allowlist for mutating operations.
 - Bounded `required_actions` assertions that verify actual successful tool
   outcomes and prevent false-success output publication.
+- Optional atomic per-run transcripts with secret redaction, record/run bounds,
+  deterministic retention, and terminal outcome evidence.
 
 ### Built-in Andy Tools catalog
 
@@ -326,7 +328,7 @@ credential mechanism rather than committing them to `acp.json`.
 | Provider choice | Seven remote/local provider paths with automatic detection and per-session ACP selection | Stronger choice than single-vendor agents; the picker currently exposes the configured/default model for each available provider rather than a live model catalog |
 | Built-in structured data | 28 dataframe and 6 PDF tools | Unusually strong for repository-plus-data workflows |
 | .NET architecture | Engine, LLM, Tools, Permissions, MCP, ACP, and TUI are separate packages | Good for reuse and embedding in .NET systems |
-| Headless contract | Versioned schema, limits, permission allowlist, event stream, atomic output, structured exit codes | Strong automation foundation and clearer failure semantics than an ad-hoc prompt flag |
+| Headless contract | Versioned schema, limits, permission allowlist, event stream, atomic output, required-action verification, and bounded redacted transcripts | Strong automation foundation and clearer failure/diagnostic semantics than an ad-hoc prompt flag |
 | Tool safety | Interactive permission manager; headless mutating tools fail closed | Good architecture, but the repository explicitly warns that permissions are alpha and not fully tested |
 | Repository work | File/text/git/shell/code-index tools | Covers the core loop, though no dedicated LSP/refactoring engine is exposed as a tool |
 | Web capability | Raw `http_request`; no first-class web search or browser automation | Behind Codex, Gemini, Cline, Factory, DeepAgents, and similar agents for web/UI validation |

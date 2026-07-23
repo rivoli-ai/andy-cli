@@ -71,6 +71,27 @@ public static class HeadlessConfigValidator
                 + "streaming requires an absolute FIFO path in event_sink.path.";
         }
 
+        if (config.Transcript is { } transcript)
+        {
+            if (!string.IsNullOrWhiteSpace(transcript.Directory)
+                && !Path.IsPathFullyQualified(transcript.Directory))
+            {
+                return "transcript.directory must be an absolute path when set.";
+            }
+
+            if (transcript.MaxRunBytes < (long)transcript.MaxRecordBytes * 2)
+            {
+                return "transcript.max_run_bytes must be at least twice "
+                    + "transcript.max_record_bytes so the terminal record always fits.";
+            }
+
+            if (transcript.MaxTotalBytes < transcript.MaxRunBytes)
+            {
+                return "transcript.max_total_bytes must be greater than or equal to "
+                    + "transcript.max_run_bytes.";
+            }
+        }
+
         for (var index = 0; index < config.RequiredActions.Count; index++)
         {
             var requirement = config.RequiredActions[index];
