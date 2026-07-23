@@ -68,6 +68,9 @@ test-results-*/
 # Benchmarks (removed from repo)
 benchmarks/Andy.Tui.Benchmarks/
 
+# Harbor benchmark run output
+jobs/
+
 # Container build artifacts
 container/bin-safe/
 container/bin-isolated/

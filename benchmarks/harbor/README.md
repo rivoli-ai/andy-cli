@@ -20,7 +20,9 @@ As of 2026-07-22, the adapter is validated against Harbor 0.20.0. Both bundled
 reference solutions pass Harbor's Docker verifier with a reward of 1.0. A
 trimmed, self-contained Andy archive has also been installed and invoked through
 the adapter, including structured `started`, `error`, `tool_usage_audit`, and
-`finished` event collection.
+`finished` event collection. On 2026-07-23, a live OpenRouter run with
+`moonshotai/kimi-k3` passed `retry-policy` with a reward of 1.0; the
+`slug-normalizer` trial was interrupted by an upstream rate-limit response.
 
 ## Prerequisites
 
@@ -29,6 +31,12 @@ the adapter, including structured `started`, `error`, `tool_usage_audit`, and
 - Python 3.12 or newer and `uv`
 - Harbor 0.20 or newer: `uv tool install harbor`
 - An API key supported by the selected Andy provider
+
+Set `HARBOR_BIN` when Harbor is available at a non-global path:
+
+```bash
+export HARBOR_BIN="/path/to/harbor"
+```
 
 ## Run the smoke dataset
 

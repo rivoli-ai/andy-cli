@@ -6,14 +6,15 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/../.." && pwd)"
 model_name="${1:-}"
 archive="$repo_root/artifacts/harbor/andy-cli-linux-x64.tar.gz"
+harbor_bin="${HARBOR_BIN:-harbor}"
 
 if [ -z "$model_name" ] || [[ "$model_name" != */* ]]; then
     echo "Usage: $0 <provider/model>" >&2
     exit 2
 fi
 
-if ! command -v harbor >/dev/null 2>&1; then
-    echo "Harbor is not installed. Run: uv tool install harbor" >&2
+if ! command -v "$harbor_bin" >/dev/null 2>&1; then
+    echo "Harbor is not available at '$harbor_bin'. Run: uv tool install harbor" >&2
     exit 2
 fi
 
@@ -47,7 +48,7 @@ if [ -n "$key_name" ]; then
 fi
 
 PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}" \
-harbor run \
+"$harbor_bin" run \
     --path "$repo_root/benchmarks/harbor/tasks" \
     --agent benchmarks.harbor.andy_agent:AndyCli \
     --model "$model_name" \
