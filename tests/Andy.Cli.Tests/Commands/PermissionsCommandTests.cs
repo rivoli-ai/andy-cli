@@ -104,6 +104,84 @@ public class PermissionsCommandTests
             Assert.False((await cmd.ExecuteAsync(new[] { "allow", "write_file", "--scope", "galaxy" })).Success);
     }
 
+    [Fact]
+    public async Task Reset_DeletesRuleFiles_AndTakesEffectInRunningStore()
+    {
+        var (cmd, userFile, sp) = Build();
+        using (sp)
+        {
+            var projectFile = Path.Combine(Path.GetTempPath(), "andy-perm-proj-" + Guid.NewGuid().ToString("N") + ".json");
+            var localFile = Path.Combine(Path.GetTempPath(), "andy-perm-local-" + Guid.NewGuid().ToString("N") + ".json");
+            try
+            {
+                var write = await cmd.ExecuteAsync(new[] { "allow", "execute_command(*)", "--scope", "user" });
+                Assert.True(write.Success, write.Message);
+                Assert.True(File.Exists(userFile));
+
+                var before = await cmd.ExecuteAsync(new[] { "list" });
+                Assert.Contains("[User]", before.Message);
+
+                var reset = cmd.ResetRulesAt(userFile, projectFile, localFile);
+                Assert.True(reset.Success, reset.Message);
+                Assert.Contains("deleted", reset.Message);
+                Assert.False(File.Exists(userFile), "user rule file should have been deleted");
+
+                // The running store must reflect the reset immediately (reload happened).
+                var after = await cmd.ExecuteAsync(new[] { "list" });
+                Assert.DoesNotContain("[User]", after.Message);
+                Assert.Contains("[Builtin]", after.Message);
+            }
+            finally
+            {
+                foreach (var f in new[] { userFile, projectFile, localFile })
+                    if (File.Exists(f)) File.Delete(f);
+            }
+        }
+    }
+
+    [Fact]
+    public void Reset_WithNoRuleFiles_ReportsNothingToDelete()
+    {
+        var (cmd, _, sp) = Build();
+        using (sp)
+        {
+            var missing = Path.Combine(Path.GetTempPath(), "andy-perm-none-" + Guid.NewGuid().ToString("N") + ".json");
+            var r = cmd.ResetRulesAt(missing, missing, missing);
+            Assert.True(r.Success, r.Message);
+            Assert.Contains("no rule file", r.Message);
+            Assert.Contains("reset to defaults", r.Message);
+        }
+    }
+
+    [Fact]
+    public async Task Revoke_IsAcceptedAsRemoveAlias()
+    {
+        var (cmd, _, sp) = Build();
+        using (sp)
+        {
+            // No such rule exists; the alias must still be routed to the remove handler
+            // (which reports the miss as a success message, not an unknown subcommand).
+            var r = await cmd.ExecuteAsync(new[] { "revoke", "nonexistent_tool(*)", "--scope", "local" });
+            Assert.True(r.Success, r.Message);
+            Assert.Contains("No rule", r.Message);
+        }
+    }
+
+    [Fact]
+    public async Task Help_DocumentsResetRevoke_AndSessionLimitation()
+    {
+        var (cmd, _, sp) = Build();
+        using (sp)
+        {
+            var r = await cmd.ExecuteAsync(new[] { "help" });
+            Assert.True(r.Success);
+            Assert.Contains("permissions reset", r.Message);
+            Assert.Contains("permissions revoke", r.Message);
+            // Honest about what the underlying model does not support:
+            Assert.Contains("Session grants", r.Message);
+        }
+    }
+
     [Theory]
     [InlineData("execute_command(*)", "execute_command", "*")]
     [InlineData("write_file", "write_file", "*")]

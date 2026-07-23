@@ -394,6 +394,7 @@ class Program
             var mcpCommand = new McpCommand(mcpToolHost);
             var permissionsCommand = new PermissionsCommand(serviceProvider);
             var permissionsManager = new Andy.Cli.Widgets.PermissionsManager(Directory.GetCurrentDirectory());
+            var skillsCommand = new Andy.Cli.Commands.SkillsCommand(serviceProvider);
             var themeCommand = new ThemeCommand(themeMemory);
             var commandPalette = new CommandPalette();
 
@@ -410,6 +411,26 @@ class Program
             var currentModel = modelCommand.GetCurrentModel();
             var currentProvider = modelCommand.GetCurrentProvider();
             var systemPrompt = BuildSystemPrompt(availableTools, currentModel, currentProvider);
+
+            // Agent Skills summary for the system prompt: names and descriptions only (lazy
+            // disclosure); the agent loads a skill's full instructions on demand through the
+            // `skill` tool. Empty when no skills are discovered. Recomputed lazily so /restart
+            // and model switches pick up skills enabled/disabled or added mid-session.
+            string ComposeSkillsPromptSection()
+            {
+                try
+                {
+                    var skillCatalog = serviceProvider.GetService<Andy.Skills.Tools.ISkillCatalog>();
+                    if (skillCatalog == null) return string.Empty;
+                    var skills = skillCatalog.GetSkillsAsync().GetAwaiter().GetResult();
+                    return Andy.Skills.SkillPromptComposer.Compose(skills);
+                }
+                catch
+                {
+                    // Skills are optional; a discovery failure must never block startup.
+                    return string.Empty;
+                }
+            }
 
             // Conversation will be managed internally by AssistantService
 
@@ -469,7 +490,8 @@ class Program
                     currentProvider,
                     tokenCounter,
                     loggerFactory,
-                    extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, currentProvider));
+                    extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, currentProvider),
+                    systemPromptSuffix: ComposeSkillsPromptSection());
 
                 var providerUrl = ProviderUrlResolver.Resolve(currentProvider);
 
@@ -677,7 +699,8 @@ class Program
                         provider,
                         tokenCounter,
                         loggerFactory,
-                        extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, provider));
+                        extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, provider),
+                        systemPromptSuffix: ComposeSkillsPromptSection());
                 }
                 else
                 {
@@ -777,7 +800,8 @@ class Program
                                         newProvider,
                                         tokenCounter,
                                         loggerFactory,
-                                        extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, newProvider));
+                                        extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, newProvider),
+                                        systemPromptSuffix: ComposeSkillsPromptSection());
                                 }
 
                                 feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
@@ -854,6 +878,29 @@ class Program
                             var result = await toolsCommand.ExecuteAsync(new[] { "info" }.Concat(args).ToArray());
                             feed.AddMarkdownRich(result.Message);
                         }
+                    }
+                },
+                new CommandPalette.CommandItem
+                {
+                    Name = "List Skills",
+                    Description = "Show discovered agent skills and their enabled state",
+                    Category = "Tools",
+                    Aliases = new[] { "skills", "skill list" },
+                    AsyncAction = async args =>
+                    {
+                        var result = await skillsCommand.ExecuteAsync(args.Length == 0 ? Array.Empty<string>() : args);
+                        feed.AddMarkdownRich("```\n" + result.Message + "\n```");
+                    }
+                },
+                new CommandPalette.CommandItem
+                {
+                    Name = "Manage Permissions",
+                    Description = "Open the interactive permission rules manager",
+                    Category = "Tools",
+                    Aliases = new[] { "permissions", "perms" },
+                    Action = args =>
+                    {
+                        permissionsManager.Open();
                     }
                 },
                 new CommandPalette.CommandItem
@@ -971,55 +1018,8 @@ class Program
                     Aliases = new[] { "?", "help" },
                     Action = args =>
                     {
-                        feed.AddMarkdownRich("# Andy CLI Help\n\n" +
-                            "## Keyboard Shortcuts:\n" +
-                            "- **Ctrl+P** (Cmd+P on Mac): Open command palette\n" +
-                            "- **Ctrl+]**: Toggle scroll mode (Feed ↔ Prompt History)\n" +
-                            "- **Ctrl+D**: Quit application\n" +
-                            "- **F2**: Toggle HUD (performance overlay)\n" +
-                            "- **F3**: Toggle mouse capture (ON by default = mouse-wheel scroll; Option+drag to select text, Cmd+C to copy. F3 OFF = plain-drag native selection)\n" +
-                            "- **Click while scrolled up**: releases mouse capture so plain click-drag selects text; capture is restored when back at the bottom\n" +
-                            "- **Ctrl+O**: Expand/collapse tool output detail (view-only; does not affect a running turn)\n" +
-                            "- **ESC**: Quit application\n" +
-                            "- **Page Up/Down**: Scroll chat history\n" +
-                            "- **↑/↓**: Navigate multi-line text or prompt history (when in History mode)\n" +
-                            "- **Ctrl+A/E**: Jump to start/end of current line\n" +
-                            "- **Home/End**: Start/end of line (Ctrl: whole text)\n" +
-                            "- **Ctrl+K**: Delete from cursor to end of line\n" +
-                            "- **Ctrl+U**: Delete from start of line to cursor\n\n" +
-                            "## Scroll Modes:\n" +
-                            "- **Feed Mode** (default): Blue indicator on left. PageUp/PageDown scrolls conversation.\n" +
-                            "- **Prompt History Mode**: Orange indicator on left. ↑/↓ navigates previous messages. Shows message counter (e.g., 5/12).\n\n" +
-                            "## Commands:\n" +
-                            "### General Commands:\n" +
-                            "- **/exit**, **/bye**, **/quit**: Exit the application\n" +
-                            "- **exit**, **bye**, **quit**: Exit the application (without slash)\n" +
-                            "- **/clear**: Clear conversation history\n" +
-                            "- **/restart**: Restart the session (fresh conversation context, counters, and prompt history)\n" +
-                            "- **/sessions**: List saved sessions that can be resumed\n" +
-                            "- **/resume [session-id]**: Resume a saved session (most recent when no id is given)\n" +
-                            "- **/help**: Show this help message\n\n" +
-                            "### Model Commands:\n" +
-                            "- **/model list**: Show available models\n" +
-                            "- **/model switch <provider>**: Change provider\n" +
-                            "- **/model info**: Show current model details\n" +
-                            "- **/model test [prompt]**: Test current model\n\n" +
-                            "### Theme Commands:\n" +
-                            "- **/theme**: List available themes and the current one\n" +
-                            "- **/theme <name>**: Switch the UI theme (e.g. dark, dracula, nord)\n" +
-                            "- **/theme transparent on|off**: Toggle the transparent background\n\n" +
-                            "### Tool Commands:\n" +
-                            "- **/tools list [category]**: List available tools\n" +
-                            "- **/tools info <tool_name>**: Show tool details\n" +
-                            "- **/tools execute <tool_name> [params]**: Run a tool\n\n" +
-                            "### Permission Commands:\n" +
-                            "- **/permissions**: List effective permission rules by layer\n" +
-                            "- **/permissions allow|ask|deny <tool[(spec)]> [--scope user|project|local]**: Persist a rule\n" +
-                            "- **/permissions path**: Show the rule file locations\n\n" +
-                            "## Providers:\n" +
-                            "- **cerebras**: Fast Llama models\n" +
-                            "- **openai**: GPT-4 models\n" +
-                            "- **anthropic**: Claude models");
+                        // Single help source shared with the /help slash handler; see HelpText.
+                        feed.AddMarkdownRich(Andy.Cli.Commands.HelpText.InteractiveHelpMarkdown());
                     }
                 }
             });
@@ -1457,7 +1457,8 @@ class Program
                                                     newProvider,
                                                     tokenCounter,
                                                     loggerFactory,
-                                                    extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, newProvider));
+                                                    extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, newProvider),
+                                                    systemPromptSuffix: ComposeSkillsPromptSection());
                                             }
 
                                             feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
@@ -1503,65 +1504,19 @@ class Program
                                     feed.AddMarkdownRich("```\n" + result.Message + "\n```");
                                     return;
                                 }
+                                else if (commandName == "skills" || commandName == "skill")
+                                {
+                                    feed.AddUserMessage(cmd);
+                                    var result = await skillsCommand.ExecuteAsync(args);
+                                    // Fence the output so the aligned skill list stays monospace.
+                                    feed.AddMarkdownRich("```\n" + result.Message + "\n```");
+                                    return;
+                                }
                                 else if (commandName == "help" || commandName == "?")
                                 {
                                     feed.AddUserMessage(cmd);
-                                    feed.AddMarkdownRich("# Andy CLI Help\n\n" +
-                                        "## Keyboard Shortcuts:\n" +
-                                        "- **Ctrl+P** (Cmd+P on Mac): Open command palette\n" +
-                                        "- **Ctrl+]**: Toggle scroll mode (Feed ↔ Prompt History)\n" +
-                                        "- **Ctrl+D**: Quit application\n" +
-                                        "- **F2**: Toggle HUD (performance overlay)\n" +
-                            "- **F3**: Toggle mouse capture (ON by default = mouse-wheel scroll; Option+drag to select text, Cmd+C to copy. F3 OFF = plain-drag native selection)\n" +
-                            "- **Click while scrolled up**: releases mouse capture so plain click-drag selects text; capture is restored when back at the bottom\n" +
-                                        "- **Ctrl+O**: Expand/collapse tool output detail (view-only; does not affect a running turn)\n" +
-                                        "- **ESC**: Quit application\n" +
-                                        "- **Page Up/Down**: Scroll chat history\n" +
-                                        "- **↑/↓**: Navigate multi-line text or prompt history (when in History mode)\n" +
-                                        "- **Ctrl+A/E**: Jump to start/end of current line\n" +
-                                        "- **Home/End**: Start/end of line (Ctrl: whole text)\n" +
-                                        "- **Ctrl+K**: Delete from cursor to end of line\n" +
-                                        "- **Ctrl+U**: Delete from start of line to cursor\n\n" +
-                                        "## Scroll Modes:\n" +
-                                        "- **Feed Mode** (default): Blue indicator on left. PageUp/PageDown scrolls conversation.\n" +
-                                        "- **Prompt History Mode**: Orange indicator on left. ↑/↓ navigates previous messages. Shows message counter (e.g., 5/12).\n\n" +
-                                        "## Commands:\n" +
-                                        "### General Commands:\n" +
-                                        "- **/exit**, **/bye**, **/quit**: Exit the application\n" +
-                                        "- **exit**, **bye**, **quit**: Exit the application (without slash)\n" +
-                                        "- **/clear**: Clear conversation history\n" +
-                                        "- **/restart**: Restart the session (fresh conversation context, counters, and prompt history)\n" +
-                                        "- **/sessions**: List saved sessions that can be resumed\n" +
-                                        "- **/resume [session-id]**: Resume a saved session (most recent when no id is given)\n" +
-                                        "- **/help**: Show this help message\n\n" +
-                                        "### Model Commands:\n" +
-                                        "- **/model list**: Show available models\n" +
-                                        "- **/model switch <provider>**: Change provider\n" +
-                                        "- **/model info**: Show current model details\n" +
-                                        "- **/model test [prompt]**: Test current model\n\n" +
-                                        "### Theme Commands:\n" +
-                                        "- **/theme**: List available themes and the current one\n" +
-                                        "- **/theme <name>**: Switch the UI theme (e.g. dark, dracula, nord)\n" +
-                                        "- **/theme transparent on|off**: Toggle the transparent background\n\n" +
-                                        "### Tool Commands:\n" +
-                                        "- **/tools list [category]**: List available tools\n" +
-                                        "- **/tools info <tool_name>**: Show tool details\n" +
-                                        "- **/tools execute <tool_name> [params]**: Run a tool\n" +
-                                        "- **/mcp list**: List configured MCP servers\n" +
-                                        "- **/mcp status**: Show MCP connection state and registered tools\n\n" +
-                                        "### Permission Commands:\n" +
-                                        "- **/permissions**: List effective permission rules by layer\n" +
-                                        "- **/permissions allow|ask|deny <tool[(spec)]> [--scope user|project|local]**: Persist a rule\n" +
-                                        "- **/permissions path**: Show the rule file locations\n\n" +
-                                        "## Providers:\n" +
-                                        "- **cerebras**: Fast Llama models\n" +
-                                        "- **openai**: GPT-4 models\n" +
-                                        "- **anthropic**: Claude models\n\n" +
-                                        "## Tool Categories:\n" +
-                                        "- **FileSystem**: File operations\n" +
-                                        "- **TextProcessing**: Text manipulation\n" +
-                                        "- **System**: System information\n" +
-                                        "- **Web**: HTTP and JSON tools");
+                                    // Single help source shared with the palette's Help entry; see HelpText.
+                                    feed.AddMarkdownRich(Andy.Cli.Commands.HelpText.InteractiveHelpMarkdown());
                                     return;
                                 }
                                 else if (commandName == "theme" || commandName == "themes")
@@ -2446,6 +2401,10 @@ class Program
             case "perm":
                 command = new PermissionsCommand(serviceProvider);
                 break;
+            case "skills":
+            case "skill":
+                command = new Andy.Cli.Commands.SkillsCommand(serviceProvider);
+                break;
             case "sessions":
                 // List interactive sessions saved under ~/.andy/sessions that can be
                 // resumed with --resume <id> / --continue (issue #231).
@@ -2453,22 +2412,7 @@ class Program
                 break;
             case "help":
             case "?":
-                Console.WriteLine("Andy CLI - AI Assistant Command Line Interface");
-                Console.WriteLine();
-                Console.WriteLine("Usage: andy-cli [command] [arguments]");
-                Console.WriteLine();
-                Console.WriteLine("Commands:");
-                Console.WriteLine("  model, m       - Manage AI models");
-                Console.WriteLine("  tools, t       - Manage and list available tools");
-                Console.WriteLine("  permissions    - View and modify tool permission rules");
-                Console.WriteLine("  sessions       - List saved sessions that can be resumed");
-                Console.WriteLine("  help, ?        - Show this help message");
-                Console.WriteLine();
-                Console.WriteLine("Interactive session flags:");
-                Console.WriteLine("  --resume <session-id>  - Resume a saved session with its full context");
-                Console.WriteLine("  --continue             - Resume the most recently updated session");
-                Console.WriteLine();
-                Console.WriteLine("Run without arguments to start the interactive TUI mode.");
+                Console.WriteLine(Andy.Cli.Commands.HelpText.CommandLineHelp());
                 return;
             default:
                 Console.WriteLine($"Unknown command: {commandName}");

@@ -34,6 +34,7 @@
     <PackageReference Include="Andy.MCP" Version="2026.5.16-rc.31" />
     <PackageReference Include="Andy.Model" Version="2026.7.21-rc.13" />
     <PackageReference Include="Andy.Permissions" Version="2026.7.21-rc.14" />
+    <PackageReference Include="Andy.Skills.Tools" Version="2026.7.21-rc.17" />
     <PackageReference Include="Andy.Tools" Version="2026.7.21-rc.86" />
     <PackageReference Include="Andy.Tools.Data" Version="2026.7.21-rc.86" />
     <PackageReference Include="Andy.Tools.Pdf" Version="2026.7.21-rc.86" />
@@ -94,6 +95,8 @@
          System.Text.Json; trimming their members breaks ACP mode at the first
          initialize message. -->
     <TrimmerRootAssembly Include="Andy.Acp.Core" />
+    <TrimmerRootAssembly Include="Andy.Skills" />
+    <TrimmerRootAssembly Include="Andy.Skills.Tools" />
     <TrimmerRootAssembly Include="Andy.Tools" />
     <TrimmerRootAssembly Include="Andy.Tools.Data" />
     <TrimmerRootAssembly Include="Andy.Tools.Pdf" />
