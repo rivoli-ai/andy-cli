@@ -38,9 +38,9 @@
       },
       "Andy.Engine": {
         "type": "Direct",
-        "requested": "[2026.7.21-rc.78, )",
-        "resolved": "2026.7.21-rc.78",
-        "contentHash": "Dg61lbIPijF00dP+nUzcPK+w7JJRoCU5u42Tqgdcb/E2/g9B6AwEoCUsc5/ZYSTzHtEItRetxwmnXfunwX8rfw==",
+        "requested": "[2026.7.23-rc.88, )",
+        "resolved": "2026.7.23-rc.88",
+        "contentHash": "fM69g05KWku/PLi4rQTQ+yNJHYzA1vDKI9q723esJCEnLWiogijO0XPb0lko3heWAHwSSRuSkQao6PAItvEKug==",
         "dependencies": {
           "Andy.Configuration": "2026.5.16-rc.8",
           "Andy.Context": "2026.5.16-rc.6",

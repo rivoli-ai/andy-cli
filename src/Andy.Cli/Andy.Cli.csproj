@@ -29,7 +29,7 @@
   <ItemGroup>
     <PackageReference Include="Andy.Acp.Core" Version="2026.7.21.1" />
     <PackageReference Include="Andy.CodeIndex.Infrastructure" Version="2026.7.21-rc.11" />
-    <PackageReference Include="Andy.Engine" Version="2026.7.21-rc.78" />
+    <PackageReference Include="Andy.Engine" Version="2026.7.23-rc.88" />
     <PackageReference Include="Andy.Llm" Version="2026.7.21-rc.76" />
     <PackageReference Include="Andy.MCP" Version="2026.5.16-rc.31" />
     <PackageReference Include="Andy.Model" Version="2026.7.21-rc.13" />
