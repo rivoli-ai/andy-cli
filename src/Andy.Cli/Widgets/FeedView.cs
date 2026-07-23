@@ -1684,8 +1684,9 @@ namespace Andy.Cli.Widgets
             }
         }
 
-        // Status marker: a filled dot, colored green/red at draw time by success/failure.
-        private string StatusMarker => "●";
+        // Status marker: a small asterisk, colored green/red at draw time by success/failure.
+        // Kept deliberately small (plain ASCII) so tool call lines stay compact.
+        private string StatusMarker => "*";
 
         private void EnsurePlan(int width)
         {
@@ -1734,15 +1735,17 @@ namespace Andy.Cli.Widgets
                     foreach (var rl in resultLines)
                     {
                         if (emitted >= ExpandedResultPreviewLines) break;
-                        foreach (var w in TextWrap.Wrap("  " + rl, Math.Max(1, width)))
+                        // Exactly one leading space before output content (#225). The indent is
+                        // applied after wrapping because TextWrap.Wrap drops leading spaces.
+                        foreach (var w in TextWrap.Wrap(rl, Math.Max(1, width - 1)))
                         {
-                            plan.Add((w, Role.ResultBody));
+                            plan.Add((" " + w, Role.ResultBody));
                             if (++emitted >= ExpandedResultPreviewLines) break;
                         }
                     }
                     int totalResultLines = resultLines.Length;
                     if (totalResultLines > emitted)
-                        plan.Add(($"  ... (+{totalResultLines - emitted} more lines)", Role.Dim));
+                        plan.Add(($" ... (+{totalResultLines - emitted} more lines)", Role.Dim));
                 }
             }
 
@@ -1810,11 +1813,11 @@ namespace Andy.Cli.Widgets
                 switch (role)
                 {
                     case Role.Header:
-                        // Leading status dot in green/red; the tool id in the tool-name color.
-                        if (t.StartsWith("● ", StringComparison.Ordinal))
+                        // Leading status marker in green/red; the tool id in the tool-name color.
+                        if (t.StartsWith("* ", StringComparison.Ordinal))
                         {
                             var dotColor = _isSuccess ? new DL.Rgb24(0, 200, 0) : new DL.Rgb24(200, 0, 0);
-                            b.DrawText(new DL.TextRun(x, row, "●", dotColor, null, DL.CellAttrFlags.Bold));
+                            b.DrawText(new DL.TextRun(x, row, "*", dotColor, null, DL.CellAttrFlags.Bold));
                             b.DrawText(new DL.TextRun(x + 1, row, t.Substring(1), cyan, null, DL.CellAttrFlags.Bold));
                         }
                         else
@@ -2263,10 +2266,10 @@ namespace Andy.Cli.Widgets
                     for (int li = 0; li < lines.Count && emitted < cap; li++)
                     {
                         // First line carries the "L" marker (and the error prefix on failure);
-                        // continuation lines align under it.
+                        // continuation lines align under it. Exactly one leading space (#225).
                         string prefix = emitted == 0
-                            ? "  L  " + (!_isSuccess ? "Error: " : "")
-                            : "     ";
+                            ? " L " + (!_isSuccess ? "Error: " : "")
+                            : "   ";
                         foreach (var w in WrapDetail(prefix + lines[li], width, expanded))
                         {
                             plan.Add((w, emitted == 0 ? LineKind.Result : LineKind.Detail));
@@ -2274,7 +2277,7 @@ namespace Andy.Cli.Widgets
                         }
                     }
                     if (lines.Count > emitted)
-                        plan.Add(($"     ... (+{lines.Count - emitted} more lines)", LineKind.Dim));
+                        plan.Add(($"   ... (+{lines.Count - emitted} more lines)", LineKind.Dim));
                 }
                 else
                 {
@@ -2284,33 +2287,35 @@ namespace Andy.Cli.Widgets
                     // "skips a line".
                     string summary = BuildResultSummary();
                     string resultText = string.IsNullOrEmpty(summary)
-                        ? "  L  " + (_isSuccess ? "done" : "failed")
-                        : "  L  " + (!_isSuccess ? "Error: " : "") + summary;
+                        ? " L " + (_isSuccess ? "done" : "failed")
+                        : " L " + (!_isSuccess ? "Error: " : "") + summary;
                     foreach (var w in WrapDetail(resultText, width, expanded))
                         plan.Add((w, LineKind.Result));
 
                     // Additional details (skip first; it usually feeds the summary).
                     int detailCap = expanded ? int.MaxValue : 3;
                     for (int i = 1; i < _details.Count && (i <= detailCap); i++)
-                        foreach (var w in WrapDetail("    " + _details[i], width, expanded))
+                        foreach (var w in WrapDetail("   " + _details[i], width, expanded))
                             plan.Add((w, LineKind.Detail));
 
                     if (expanded && !string.IsNullOrWhiteSpace(_result))
                     {
-                        plan.Add(("  Output:", LineKind.Dim));
+                        plan.Add((" Output:", LineKind.Dim));
                         var lines = _result!.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
                         int emitted = 0;
                         foreach (var rl in lines)
                         {
                             if (emitted >= ExpandedResultPreviewLines) break;
-                            foreach (var w in TextWrap.Wrap("    " + rl, Math.Max(1, width)))
+                            // Exactly one leading space before output content (#225). The indent is
+                            // applied after wrapping because TextWrap.Wrap drops leading spaces.
+                            foreach (var w in TextWrap.Wrap(rl, Math.Max(1, width - 1)))
                             {
-                                plan.Add((w, LineKind.Detail));
+                                plan.Add((" " + w, LineKind.Detail));
                                 if (++emitted >= ExpandedResultPreviewLines) break;
                             }
                         }
                         if (lines.Length > emitted)
-                            plan.Add(($"    ... (+{lines.Length - emitted} more lines)", LineKind.Dim));
+                            plan.Add(($" ... (+{lines.Length - emitted} more lines)", LineKind.Dim));
                     }
                 }
             }
@@ -2319,10 +2324,20 @@ namespace Andy.Cli.Widgets
         }
 
         // In expanded mode wrap (never truncate); in collapsed mode keep the old
-        // single-line behavior (hard truncate the over-long line).
+        // single-line behavior (hard truncate the over-long line). Leading spaces are
+        // re-applied after wrapping (TextWrap.Wrap drops them) so gutter prefixes such
+        // as " L " keep their single leading space (#225).
         private static List<string> WrapDetail(string text, int width, bool expanded)
         {
-            if (expanded) return TextWrap.Wrap(text, Math.Max(1, width));
+            if (expanded)
+            {
+                int indent = 0;
+                while (indent < text.Length && text[indent] == ' ') indent++;
+                var pad = text.Substring(0, indent);
+                return TextWrap.Wrap(text.Substring(indent), Math.Max(1, width - indent))
+                    .Select(w => pad + w)
+                    .ToList();
+            }
             if (text.Length > width - 2 && width > 5)
                 text = text.Substring(0, width - 5) + "...";
             return new List<string> { text };
@@ -2414,15 +2429,16 @@ namespace Andy.Cli.Widgets
                     }
                     else
                     {
-                        // Completion marker: a filled dot colored green (success) / red (failure),
-                        // orange for a successful-with-warning result.
+                        // Completion marker: a small asterisk colored green (success) / red (failure),
+                        // orange for a successful-with-warning result. Plain ASCII, kept small so
+                        // tool call lines stay compact.
                         var symbolColor = _isSuccess ? green : red;
                         if (_isSuccess && !string.IsNullOrEmpty(_result) &&
                             (_result.Contains("warning", StringComparison.OrdinalIgnoreCase) ||
                              _result.Contains("partial", StringComparison.OrdinalIgnoreCase)))
                             symbolColor = orange;
 
-                        const string marker = "●"; // green/red status dot
+                        const string marker = "*"; // green/red status marker
                         b.DrawText(new DL.TextRun(x, row, marker, symbolColor, null, DL.CellAttrFlags.None));
 
                         var paramDisplay = GetParameterDisplay();
@@ -2439,7 +2455,7 @@ namespace Andy.Cli.Widgets
                 if (!_isComplete && i == 1)
                 {
                     var elapsed = DateTime.UtcNow - _startTime;
-                    var statusText = $"  L  Running... [{FormatDuration(elapsed)}]";
+                    var statusText = $" L Running... [{FormatDuration(elapsed)}]";
                     if (statusText.Length > width) statusText = statusText.Substring(0, Math.Max(0, width - 1));
                     b.DrawText(new DL.TextRun(x, row, statusText, dimmer, null, DL.CellAttrFlags.None));
                     drawn++;
@@ -2606,8 +2622,8 @@ namespace Andy.Cli.Widgets
             // Fill the available feed width rather than a narrow hard-coded cap so wide
             // command output is not needlessly clipped to ~1/3 of the terminal. The final
             // render also clips to the exact width; this keeps the content budget aligned
-            // with the available space. Reserve a few columns for the "  L  " gutter/prefix.
-            int budget = Math.Max(40, _availableWidth - 6);
+            // with the available space. Reserve a few columns for the " L " gutter/prefix.
+            int budget = Math.Max(40, _availableWidth - 4);
             if (line.Length > budget) line = line.Substring(0, Math.Max(0, budget - 3)) + "...";
             return line.Trim();
         }
