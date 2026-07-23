@@ -22,7 +22,10 @@ trimmed, self-contained Andy archive has also been installed and invoked through
 the adapter, including structured `started`, `error`, `tool_usage_audit`, and
 `finished` event collection. On 2026-07-23, a live OpenRouter run with
 `moonshotai/kimi-k3` passed `retry-policy` with a reward of 1.0; the
-`slug-normalizer` trial was interrupted by an upstream rate-limit response.
+`slug-normalizer` trial was interrupted by an upstream rate-limit response. A
+second live run with the current `xiaomi/mimo-v2.5` model passed both tasks with
+a mean reward of 1.0 and no exceptions in 2 minutes 31 seconds. The older
+`xiaomi/mimo-v2-flash` endpoint is deprecated by OpenRouter.
 
 ## Prerequisites
 
