@@ -41,6 +41,10 @@ ScaffoldingReadMe.txt
 *~
 CodeCoverage/
 
+# Python test and adapter caches
+__pycache__/
+*.py[cod]
+
 # Test coverage and results
 coverage/
 coveragereport/

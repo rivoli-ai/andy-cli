@@ -357,6 +357,13 @@ dotnet test --collect:"XPlat Code Coverage"
 reportgenerator -reports:"./TestResults/*/coverage.cobertura.xml" -targetdir:"./TestResults/CoverageReport" -reporttypes:Html
 ```
 
+### Coding-agent benchmarks
+
+The repository includes a Harbor adapter and a deterministic .NET smoke dataset
+for exercising the published CLI in isolated containers. See
+[`benchmarks/harbor/README.md`](benchmarks/harbor/README.md) for setup, local
+archive publishing, retained run artifacts, and larger Terminal-Bench runs.
+
 ### Building
 
 ```bash

@@ -1,0 +1,6 @@
+FROM mcr.microsoft.com/dotnet/sdk:8.0
+
+WORKDIR /workspace
+COPY starter/ ./
+
+RUN dotnet build --configuration Release

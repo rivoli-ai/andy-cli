@@ -79,8 +79,9 @@ public class HeadlessEventEmitterTests
     [Fact]
     public void ComputeDigest_IsDeterministic_AndHandlesNull()
     {
-        var d1 = HeadlessEventEmitter.ComputeDigest(new { a = 1, b = "x" });
-        var d2 = HeadlessEventEmitter.ComputeDigest(new { a = 1, b = "x" });
+        var payload = new Dictionary<string, object?> { ["a"] = 1, ["b"] = "x" };
+        var d1 = HeadlessEventEmitter.ComputeDigest(payload);
+        var d2 = HeadlessEventEmitter.ComputeDigest(payload);
         Assert.Equal(d1, d2);
         Assert.StartsWith("sha256:", d1);
 

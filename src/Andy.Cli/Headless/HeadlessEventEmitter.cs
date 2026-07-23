@@ -1,5 +1,4 @@
 using System.IO;
-using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -50,20 +49,32 @@ public sealed class HeadlessEventEmitter : IDisposable
     }
 
     public void EmitStarted(Guid runId, string agentSlug, string modelProvider, string modelId, int toolCount)
-        => Write(HeadlessEventKind.Started, new
+        => Write(HeadlessEventKind.Started, new JsonObject
         {
-            run_id = runId,
-            agent_slug = agentSlug,
-            model_provider = modelProvider,
-            model_id = modelId,
-            tool_count = toolCount
+            ["run_id"] = runId.ToString(),
+            ["agent_slug"] = agentSlug,
+            ["model_provider"] = modelProvider,
+            ["model_id"] = modelId,
+            ["tool_count"] = toolCount
         });
 
     public void EmitLlmChunk(string text, int? turn = null)
-        => Write(HeadlessEventKind.LlmChunk, new { text, turn });
+    {
+        var data = new JsonObject { ["text"] = text };
+        if (turn.HasValue) data["turn"] = turn.Value;
+        Write(HeadlessEventKind.LlmChunk, data);
+    }
 
     public void EmitToolCallStarted(string callId, string toolName, string? argsDigest = null)
-        => Write(HeadlessEventKind.ToolCallStarted, new { call_id = callId, tool_name = toolName, args_digest = argsDigest });
+    {
+        var data = new JsonObject
+        {
+            ["call_id"] = callId,
+            ["tool_name"] = toolName
+        };
+        if (argsDigest is not null) data["args_digest"] = argsDigest;
+        Write(HeadlessEventKind.ToolCallStarted, data);
+    }
 
     // #179: `outcome` distinguishes the terminal state of the ACTUAL execution
     // (success / failed / denied / cancelled / timed_out). `ok` stays as the
@@ -79,16 +90,19 @@ public sealed class HeadlessEventEmitter : IDisposable
         string? resultDigest = null,
         string? error = null,
         string? outcome = null)
-        => Write(HeadlessEventKind.ToolCallFinished, new
+    {
+        var data = new JsonObject
         {
-            call_id = callId,
-            tool_name = toolName,
-            ok,
-            outcome,
-            duration_ms = durationMs,
-            result_digest = resultDigest,
-            error
-        });
+            ["call_id"] = callId,
+            ["tool_name"] = toolName,
+            ["ok"] = ok,
+            ["duration_ms"] = durationMs
+        };
+        if (outcome is not null) data["outcome"] = outcome;
+        if (resultDigest is not null) data["result_digest"] = resultDigest;
+        if (error is not null) data["error"] = error;
+        Write(HeadlessEventKind.ToolCallFinished, data);
+    }
 
     // AX.4 (rivoli-ai/conductor#2091): end-of-run tool-usage audit. One event listing
     // the injected allow-list and, per distinct tool the agent invoked, the invocation
@@ -97,16 +111,27 @@ public sealed class HeadlessEventEmitter : IDisposable
     public void EmitToolUsageAudit(
         IReadOnlyList<string> allowedTools,
         IReadOnlyList<ToolUsageAuditEntry> tools)
-        => Write(HeadlessEventKind.ToolUsageAudit, new
+    {
+        var allowed = new JsonArray();
+        foreach (var tool in allowedTools) allowed.Add(JsonValue.Create(tool));
+
+        var entries = new JsonArray();
+        foreach (var tool in tools)
         {
-            allowed_tools = allowedTools,
-            tools = tools.Select(t => new
+            entries.Add((JsonNode)new JsonObject
             {
-                tool_name = t.ToolName,
-                invocations = t.Invocations,
-                permitted = t.Permitted
-            })
+                ["tool_name"] = tool.ToolName,
+                ["invocations"] = tool.Invocations,
+                ["permitted"] = tool.Permitted
+            });
+        }
+
+        Write(HeadlessEventKind.ToolUsageAudit, new JsonObject
+        {
+            ["allowed_tools"] = allowed,
+            ["tools"] = entries
         });
+    }
 
     public void EmitRequiredActionVerification(RequiredActionVerificationResult result)
         => Write(HeadlessEventKind.RequiredActionVerification, new
@@ -132,10 +157,10 @@ public sealed class HeadlessEventEmitter : IDisposable
         });
 
     public void EmitOutputWritten(string path, long bytes)
-        => Write(HeadlessEventKind.OutputWritten, new { path, bytes });
+        => Write(HeadlessEventKind.OutputWritten, new JsonObject { ["path"] = path, ["bytes"] = bytes });
 
     public void EmitError(string message, bool fatal)
-        => Write(HeadlessEventKind.Error, new { message, fatal });
+        => Write(HeadlessEventKind.Error, new JsonObject { ["message"] = message, ["fatal"] = fatal });
 
     public void EmitFinished(int exitCode, long durationMs, int iterations)
     {

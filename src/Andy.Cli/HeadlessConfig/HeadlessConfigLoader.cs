@@ -21,12 +21,6 @@ public static class HeadlessConfigLoader
 
     private static readonly Lazy<JsonSchema> s_schema = new(LoadEmbeddedSchema);
 
-    private static readonly JsonSerializerOptions s_jsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-        PropertyNameCaseInsensitive = false,
-    };
-
     public static async Task<HeadlessConfigLoadResult> TryLoadAsync(
         string path,
         CancellationToken ct = default)
@@ -109,9 +103,11 @@ public static class HeadlessConfigLoader
         HeadlessRunConfig? config;
         try
         {
-            config = JsonSerializer.Deserialize<HeadlessRunConfig>(text, s_jsonOptions);
+            config = JsonSerializer.Deserialize(
+                text,
+                HeadlessConfigJsonContext.Default.HeadlessRunConfig);
         }
-        catch (JsonException ex)
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
         {
             // The schema should have caught structural problems already; a failure
             // here typically means a type-level mismatch (e.g. unparseable Guid) that

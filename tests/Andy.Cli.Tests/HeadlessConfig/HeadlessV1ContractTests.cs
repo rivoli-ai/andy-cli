@@ -4,6 +4,7 @@
 // boundary: schema (contract library), the loader, and the semantic validator.
 
 using System.IO;
+using System.Text.Json;
 using Andy.Cli.Headless.Contract;
 using Andy.Cli.HeadlessConfig;
 using Xunit;
@@ -25,6 +26,21 @@ public class HeadlessV1ContractTests
       "limits": { "max_iterations": 50, "timeout_seconds": 300 }
     }
     """;
+
+    [Fact]
+    public void GeneratedJsonMetadata_CoversHeadlessConfigGraph()
+    {
+        var config = JsonSerializer.Deserialize(
+            BaseConfig,
+            HeadlessConfigJsonContext.Default.HeadlessRunConfig);
+
+        Assert.NotNull(config);
+        Assert.Equal(1, config.SchemaVersion);
+        Assert.Equal("triage-agent", config.Agent.Slug);
+        Assert.Equal("anthropic", config.Model.Provider);
+        Assert.Equal("/workspace", config.Workspace.Root);
+        Assert.Equal(50, config.Limits.MaxIterations);
+    }
 
     // ---- policy_id / boundaries: removed, must be rejected --------------------
 
