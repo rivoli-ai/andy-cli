@@ -848,52 +848,8 @@ class Program
                     Aliases = new[] { "?", "help" },
                     Action = args =>
                     {
-                        feed.AddMarkdownRich("# Andy CLI Help\n\n" +
-                            "## Keyboard Shortcuts:\n" +
-                            "- **Ctrl+P** (Cmd+P on Mac): Open command palette\n" +
-                            "- **Ctrl+]**: Toggle scroll mode (Feed ↔ Prompt History)\n" +
-                            "- **Ctrl+D**: Quit application\n" +
-                            "- **F2**: Toggle HUD (performance overlay)\n" +
-                            "- **F3**: Toggle mouse capture (ON by default = mouse-wheel scroll; Option+drag to select text, Cmd+C to copy. F3 OFF = plain-drag native selection)\n" +
-                            "- **Ctrl+O**: Expand/collapse tool output detail (view-only; does not affect a running turn)\n" +
-                            "- **ESC**: Quit application\n" +
-                            "- **Page Up/Down**: Scroll chat history\n" +
-                            "- **↑/↓**: Navigate multi-line text or prompt history (when in History mode)\n" +
-                            "- **Ctrl+A/E**: Jump to start/end of current line\n" +
-                            "- **Home/End**: Start/end of line (Ctrl: whole text)\n" +
-                            "- **Ctrl+K**: Delete from cursor to end of line\n" +
-                            "- **Ctrl+U**: Delete from start of line to cursor\n\n" +
-                            "## Scroll Modes:\n" +
-                            "- **Feed Mode** (default): Blue indicator on left. PageUp/PageDown scrolls conversation.\n" +
-                            "- **Prompt History Mode**: Orange indicator on left. ↑/↓ navigates previous messages. Shows message counter (e.g., 5/12).\n\n" +
-                            "## Commands:\n" +
-                            "### General Commands:\n" +
-                            "- **/exit**, **/bye**, **/quit**: Exit the application\n" +
-                            "- **exit**, **bye**, **quit**: Exit the application (without slash)\n" +
-                            "- **/clear**: Clear conversation history\n" +
-                            "- **/restart**: Restart the session (fresh conversation context, counters, and prompt history)\n" +
-                            "- **/help**: Show this help message\n\n" +
-                            "### Model Commands:\n" +
-                            "- **/model list**: Show available models\n" +
-                            "- **/model switch <provider>**: Change provider\n" +
-                            "- **/model info**: Show current model details\n" +
-                            "- **/model test [prompt]**: Test current model\n\n" +
-                            "### Theme Commands:\n" +
-                            "- **/theme**: List available themes and the current one\n" +
-                            "- **/theme <name>**: Switch the UI theme (e.g. dark, dracula, nord)\n" +
-                            "- **/theme transparent on|off**: Toggle the transparent background\n\n" +
-                            "### Tool Commands:\n" +
-                            "- **/tools list [category]**: List available tools\n" +
-                            "- **/tools info <tool_name>**: Show tool details\n" +
-                            "- **/tools execute <tool_name> [params]**: Run a tool\n\n" +
-                            "### Permission Commands:\n" +
-                            "- **/permissions**: List effective permission rules by layer\n" +
-                            "- **/permissions allow|ask|deny <tool[(spec)]> [--scope user|project|local]**: Persist a rule\n" +
-                            "- **/permissions path**: Show the rule file locations\n\n" +
-                            "## Providers:\n" +
-                            "- **cerebras**: Fast Llama models\n" +
-                            "- **openai**: GPT-4 models\n" +
-                            "- **anthropic**: Claude models");
+                        // Single help source shared with the /help slash handler; see HelpText.
+                        feed.AddMarkdownRich(Andy.Cli.Commands.HelpText.InteractiveHelpMarkdown());
                     }
                 }
             });
@@ -1457,59 +1413,8 @@ class Program
                                 else if (commandName == "help" || commandName == "?")
                                 {
                                     feed.AddUserMessage(cmd);
-                                    feed.AddMarkdownRich("# Andy CLI Help\n\n" +
-                                        "## Keyboard Shortcuts:\n" +
-                                        "- **Ctrl+P** (Cmd+P on Mac): Open command palette\n" +
-                                        "- **Ctrl+]**: Toggle scroll mode (Feed ↔ Prompt History)\n" +
-                                        "- **Ctrl+D**: Quit application\n" +
-                                        "- **F2**: Toggle HUD (performance overlay)\n" +
-                            "- **F3**: Toggle mouse capture (ON by default = mouse-wheel scroll; Option+drag to select text, Cmd+C to copy. F3 OFF = plain-drag native selection)\n" +
-                                        "- **Ctrl+O**: Expand/collapse tool output detail (view-only; does not affect a running turn)\n" +
-                                        "- **ESC**: Quit application\n" +
-                                        "- **Page Up/Down**: Scroll chat history\n" +
-                                        "- **↑/↓**: Navigate multi-line text or prompt history (when in History mode)\n" +
-                                        "- **Ctrl+A/E**: Jump to start/end of current line\n" +
-                                        "- **Home/End**: Start/end of line (Ctrl: whole text)\n" +
-                                        "- **Ctrl+K**: Delete from cursor to end of line\n" +
-                                        "- **Ctrl+U**: Delete from start of line to cursor\n\n" +
-                                        "## Scroll Modes:\n" +
-                                        "- **Feed Mode** (default): Blue indicator on left. PageUp/PageDown scrolls conversation.\n" +
-                                        "- **Prompt History Mode**: Orange indicator on left. ↑/↓ navigates previous messages. Shows message counter (e.g., 5/12).\n\n" +
-                                        "## Commands:\n" +
-                                        "### General Commands:\n" +
-                                        "- **/exit**, **/bye**, **/quit**: Exit the application\n" +
-                                        "- **exit**, **bye**, **quit**: Exit the application (without slash)\n" +
-                                        "- **/clear**: Clear conversation history\n" +
-                                        "- **/restart**: Restart the session (fresh conversation context, counters, and prompt history)\n" +
-                                        "- **/help**: Show this help message\n\n" +
-                                        "### Model Commands:\n" +
-                                        "- **/model list**: Show available models\n" +
-                                        "- **/model switch <provider>**: Change provider\n" +
-                                        "- **/model info**: Show current model details\n" +
-                                        "- **/model test [prompt]**: Test current model\n\n" +
-                                        "### Theme Commands:\n" +
-                                        "- **/theme**: List available themes and the current one\n" +
-                                        "- **/theme <name>**: Switch the UI theme (e.g. dark, dracula, nord)\n" +
-                                        "- **/theme transparent on|off**: Toggle the transparent background\n\n" +
-                                        "### Tool Commands:\n" +
-                                        "- **/tools list [category]**: List available tools\n" +
-                                        "- **/tools info <tool_name>**: Show tool details\n" +
-                                        "- **/tools execute <tool_name> [params]**: Run a tool\n" +
-                                        "- **/mcp list**: List configured MCP servers\n" +
-                                        "- **/mcp status**: Show MCP connection state and registered tools\n\n" +
-                                        "### Permission Commands:\n" +
-                                        "- **/permissions**: List effective permission rules by layer\n" +
-                                        "- **/permissions allow|ask|deny <tool[(spec)]> [--scope user|project|local]**: Persist a rule\n" +
-                                        "- **/permissions path**: Show the rule file locations\n\n" +
-                                        "## Providers:\n" +
-                                        "- **cerebras**: Fast Llama models\n" +
-                                        "- **openai**: GPT-4 models\n" +
-                                        "- **anthropic**: Claude models\n\n" +
-                                        "## Tool Categories:\n" +
-                                        "- **FileSystem**: File operations\n" +
-                                        "- **TextProcessing**: Text manipulation\n" +
-                                        "- **System**: System information\n" +
-                                        "- **Web**: HTTP and JSON tools");
+                                    // Single help source shared with the palette's Help entry; see HelpText.
+                                    feed.AddMarkdownRich(Andy.Cli.Commands.HelpText.InteractiveHelpMarkdown());
                                     return;
                                 }
                                 else if (commandName == "theme" || commandName == "themes")
@@ -2317,17 +2222,7 @@ class Program
                 break;
             case "help":
             case "?":
-                Console.WriteLine("Andy CLI - AI Assistant Command Line Interface");
-                Console.WriteLine();
-                Console.WriteLine("Usage: andy-cli [command] [arguments]");
-                Console.WriteLine();
-                Console.WriteLine("Commands:");
-                Console.WriteLine("  model, m       - Manage AI models");
-                Console.WriteLine("  tools, t       - Manage and list available tools");
-                Console.WriteLine("  permissions    - View and modify tool permission rules");
-                Console.WriteLine("  help, ?        - Show this help message");
-                Console.WriteLine();
-                Console.WriteLine("Run without arguments to start the interactive TUI mode.");
+                Console.WriteLine(Andy.Cli.Commands.HelpText.CommandLineHelp());
                 return;
             default:
                 Console.WriteLine($"Unknown command: {commandName}");
