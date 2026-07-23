@@ -274,16 +274,7 @@ class Program
 
             // Initialize inline command help for slash commands
             var inlineCommandHelp = new InlineCommandHelp();
-            inlineCommandHelp.SetCommands(new[]
-            {
-                new InlineCommandHelp.CommandInfo { Name = "model", Description = "Manage AI models (list, switch, info, test)", Aliases = new[] { "m" } },
-                new InlineCommandHelp.CommandInfo { Name = "tools", Description = "Manage and list available tools", Aliases = new[] { "tool", "t" } },
-                new InlineCommandHelp.CommandInfo { Name = "mcp", Description = "List MCP servers and connection status", Aliases = Array.Empty<string>() },
-                new InlineCommandHelp.CommandInfo { Name = "theme", Description = "List, switch, or toggle transparency of the UI theme", Aliases = new[] { "themes" } },
-                new InlineCommandHelp.CommandInfo { Name = "clear", Description = "Clear conversation history", Aliases = Array.Empty<string>() },
-                new InlineCommandHelp.CommandInfo { Name = "help", Description = "Show help information", Aliases = new[] { "?" } },
-                new InlineCommandHelp.CommandInfo { Name = "exit", Description = "Exit the application", Aliases = new[] { "quit", "bye" } }
-            });
+            inlineCommandHelp.SetCommands(Andy.Cli.Commands.SlashCommandCatalog.CreateInlineHelpCommands());
 
             // Initialize the tool execution tracker with the feed view
             ToolExecutionTracker.Instance.SetFeedView(feed);
@@ -495,6 +486,46 @@ class Program
                     // Ignore secondary error
                 }
             }
+
+            // Full session reset for /restart: unlike /clear (which clears the
+            // conversation history in place on the existing agent), this replaces
+            // the assistant service with a fresh instance (new agent, empty history
+            // and internal state) and resets token counters and prompt history.
+            var restartCommand = new Andy.Cli.Commands.RestartCommand(_ =>
+            {
+                if (llmProvider != null)
+                {
+                    // Dispose old service before creating the replacement.
+                    aiService?.Dispose();
+
+                    var toolExecutor = serviceProvider.GetRequiredService<IToolExecutor>();
+                    var loggerFactory = serviceProvider.GetService<ILoggerFactory>();
+                    var model = modelCommand.GetCurrentModel();
+                    var provider = modelCommand.GetCurrentProvider();
+                    aiService = new SimpleAssistantService(
+                        llmProvider,
+                        toolRegistry,
+                        toolExecutor,
+                        feed,
+                        model,
+                        provider,
+                        tokenCounter,
+                        loggerFactory,
+                        extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, provider));
+                }
+                else
+                {
+                    // No provider available (startup fell back to a degraded mode);
+                    // still reset whatever context exists.
+                    aiService?.ClearContext();
+                }
+
+                tokenCounter.Reset();
+                promptHistory.Clear();
+                historyIndex = -1;
+                feed.Clear();
+                return Task.CompletedTask;
+            });
 
             // Setup command palette commands
             commandPalette.SetCommands(new[]
@@ -723,6 +754,20 @@ class Program
                 },
                 new CommandPalette.CommandItem
                 {
+                    Name = "Restart Session",
+                    Description = "Restart the session with a fresh conversation context",
+                    Category = "Chat",
+                    Aliases = new[] { "restart", "new session" },
+                    AsyncAction = async args =>
+                    {
+                        var result = await restartCommand.ExecuteAsync(Array.Empty<string>());
+                        feed.AddMarkdownRich(result.Success
+                            ? result.Message
+                            : ConsoleColors.WarningPrefix(result.Message));
+                    }
+                },
+                new CommandPalette.CommandItem
+                {
                     Name = "Toggle HUD",
                     Description = "Show/hide performance overlay",
                     Category = "UI",
@@ -779,6 +824,7 @@ class Program
                             "- **/exit**, **/bye**, **/quit**: Exit the application\n" +
                             "- **exit**, **bye**, **quit**: Exit the application (without slash)\n" +
                             "- **/clear**: Clear conversation history\n" +
+                            "- **/restart**: Restart the session (fresh conversation context, counters, and prompt history)\n" +
                             "- **/help**: Show this help message\n\n" +
                             "### Model Commands:\n" +
                             "- **/model list**: Show available models\n" +
@@ -1378,6 +1424,7 @@ class Program
                                         "- **/exit**, **/bye**, **/quit**: Exit the application\n" +
                                         "- **exit**, **bye**, **quit**: Exit the application (without slash)\n" +
                                         "- **/clear**: Clear conversation history\n" +
+                                        "- **/restart**: Restart the session (fresh conversation context, counters, and prompt history)\n" +
                                         "- **/help**: Show this help message\n\n" +
                                         "### Model Commands:\n" +
                                         "- **/model list**: Show available models\n" +
@@ -1426,6 +1473,21 @@ class Program
                                     tokenCounter.Reset();
                                     feed.Clear();
                                     feed.AddMarkdownRich("**Chat cleared!** Ready for a fresh conversation.");
+                                    return;
+                                }
+                                else if (commandName == "restart")
+                                {
+                                    // Full session reset (fresh agent and counters); see RestartCommand.
+                                    var result = await restartCommand.ExecuteAsync(args);
+                                    if (result.Success)
+                                    {
+                                        feed.AddMarkdownRich(result.Message);
+                                    }
+                                    else
+                                    {
+                                        feed.AddUserMessage(cmd);
+                                        feed.AddMarkdownRich(ConsoleColors.WarningPrefix(result.Message));
+                                    }
                                     return;
                                 }
                                 else if (commandName == "exit" || commandName == "bye" || commandName == "quit")
