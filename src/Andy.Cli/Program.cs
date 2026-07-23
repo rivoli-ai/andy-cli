@@ -222,8 +222,10 @@ class Program
         // null (and we fall back to Console.ReadKey) when input is redirected or
         // stty is unavailable. Mouse reporting uses TryStart's default (ON) so the
         // mouse wheel scrolls the feed out of the box. To select text while capture
-        // is on, hold Option (macOS) / Shift (xterm) and drag; or press F3 to turn
-        // capture off for plain click-drag native selection. The default is pinned by
+        // is on, hold Option (macOS) / Shift (xterm) and drag; press F3 to turn
+        // capture off for plain click-drag native selection; or simply click the
+        // transcript while scrolled up (ScrollSelectionGate auto-releases capture
+        // and restores it at the bottom). The default is pinned by
         // MouseDefaultRegressionTests.
         var rawInput = RawTerminalInput.TryStart();
 
@@ -271,6 +273,11 @@ class Program
             var feed = new FeedView();
             feed.SetFocused(false);
             feed.SetAnimationSpeed(8); // faster scroll-in
+
+            // Auto-releases mouse capture when the user clicks the transcript while
+            // scrolled up (so native click-drag text selection works without F3) and
+            // restores capture once the feed is back at the bottom.
+            var selectionGate = new Andy.Cli.Input.ScrollSelectionGate();
 
             // Initialize inline command help for slash commands
             var inlineCommandHelp = new InlineCommandHelp();
@@ -808,6 +815,7 @@ class Program
                             "- **Ctrl+D**: Quit application\n" +
                             "- **F2**: Toggle HUD (performance overlay)\n" +
                             "- **F3**: Toggle mouse capture (ON by default = mouse-wheel scroll; Option+drag to select text, Cmd+C to copy. F3 OFF = plain-drag native selection)\n" +
+                            "- **Click while scrolled up**: releases mouse capture so plain click-drag selects text; capture is restored when back at the bottom\n" +
                             "- **Ctrl+O**: Expand/collapse tool output detail (view-only; does not affect a running turn)\n" +
                             "- **ESC**: Quit application\n" +
                             "- **Page Up/Down**: Scroll chat history\n" +
@@ -1124,6 +1132,9 @@ class Program
                         }
                         else
                         {
+                            // Manual toggle wins over the scroll-selection auto-release,
+                            // so the gate must not re-enable capture behind the user.
+                            selectionGate.OnManualToggle();
                             bool on = rawInput.ToggleMouseReporting();
                             toast.Show(on
                                 ? "Mouse capture ON (wheel scrolls; Option+drag to select text, Cmd+C to copy)"
@@ -1408,6 +1419,7 @@ class Program
                                         "- **Ctrl+D**: Quit application\n" +
                                         "- **F2**: Toggle HUD (performance overlay)\n" +
                             "- **F3**: Toggle mouse capture (ON by default = mouse-wheel scroll; Option+drag to select text, Cmd+C to copy. F3 OFF = plain-drag native selection)\n" +
+                            "- **Click while scrolled up**: releases mouse capture so plain click-drag selects text; capture is restored when back at the bottom\n" +
                                         "- **Ctrl+O**: Expand/collapse tool output detail (view-only; does not affect a running turn)\n" +
                                         "- **ESC**: Quit application\n" +
                                         "- **Page Up/Down**: Scroll chat history\n" +
@@ -1599,11 +1611,32 @@ class Program
                             int page = Math.Max(1, viewport.Height - 5);
                             feed.ScrollLines(ev.WheelDelta * 3, page);
                         }
+                        else if (ev.Kind == TerminalInputKind.MouseDown)
+                        {
+                            // A click in the transcript while scrolled up: release
+                            // mouse capture so the user's next click-drag performs
+                            // native terminal text selection (issue #230). Capture
+                            // is restored below once the feed is back at the bottom.
+                            if (selectionGate.OnMouseDown(rawInput.MouseEnabled, feed.ScrollOffset > 0))
+                            {
+                                rawInput.SetMouseReporting(false);
+                                toast.Show("Text selection ON (drag to select, Cmd+C to copy; wheel scroll resumes at bottom)", 150);
+                            }
+                        }
                         else
                         {
                             await HandleKey(ev.Key);
                         }
                         if (!running) break;
+                    }
+
+                    // Restore auto-released mouse capture once the user is back at the
+                    // bottom (PageDown/End, typing snapping the view, or auto-scroll
+                    // resuming). A manual F3 press clears the gate and skips this.
+                    if (selectionGate.OnTick(feed.ScrollOffset == 0))
+                    {
+                        rawInput.SetMouseReporting(true);
+                        toast.Show("Mouse capture restored (wheel scrolls the feed)", 90);
                     }
                 }
                 else
