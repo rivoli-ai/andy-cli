@@ -220,12 +220,9 @@ class Program
 
         // Switch the terminal into raw byte mode for keyboard decoding. Returns
         // null (and we fall back to Console.ReadKey) when input is redirected or
-        // stty is unavailable. Mouse reporting uses TryStart's default (ON) so the
-        // mouse wheel scrolls the feed out of the box. To select text while capture
-        // is on, hold Option (macOS) / Shift (xterm) and drag; press F3 to turn
-        // capture off for plain click-drag native selection; or simply click the
-        // transcript while scrolled up (ScrollSelectionGate auto-releases capture
-        // and restores it at the bottom). The default is pinned by
+        // stty is unavailable. Mouse reporting defaults OFF so ordinary click-drag
+        // selection and the terminal's copy shortcut work immediately. F3 enables
+        // capture when mouse-wheel scrolling is preferred. The default is pinned by
         // MouseDefaultRegressionTests.
         var rawInput = RawTerminalInput.TryStart();
 
