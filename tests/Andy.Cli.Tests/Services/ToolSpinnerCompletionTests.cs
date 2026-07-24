@@ -124,6 +124,59 @@ namespace Andy.Cli.Tests.Services
             Assert.Equal(count, completed);
         }
 
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task Spinner_StopsImmediately_WhenExecutorThrowsOrCancels(bool cancelled)
+        {
+            var suffix = Guid.NewGuid().ToString("N")[..8];
+            var toolName = $"throwing_tool_{suffix}";
+            var uiToolId = $"{toolName}_1";
+            var feed = new FeedView();
+            ToolExecutionTracker.Instance.SetFeedView(feed);
+            feed.AddToolExecutionStart(uiToolId, toolName);
+            ToolExecutionTracker.Instance.EnqueuePendingTool(toolName, uiToolId);
+            Exception error = cancelled
+                ? new OperationCanceledException("cancelled")
+                : new InvalidOperationException("boom");
+            var executor = new UiUpdatingToolExecutor(
+                new ThrowingToolExecutor(error),
+                NullLogger<UiUpdatingToolExecutor>.Instance);
+
+            await Assert.ThrowsAnyAsync<Exception>(
+                () => executor.ExecuteAsync(toolName, new Dictionary<string, object?>(), null));
+
+            var item = FindTool(feed, uiToolId);
+            Assert.NotNull(item);
+            Assert.True(item!.Snapshot.IsComplete);
+        }
+
+        [Fact]
+        public async Task RequestOverload_UsesUiCompletionLifecycle()
+        {
+            var suffix = Guid.NewGuid().ToString("N")[..8];
+            var toolName = $"request_tool_{suffix}";
+            var uiToolId = $"{toolName}_1";
+            var feed = new FeedView();
+            ToolExecutionTracker.Instance.SetFeedView(feed);
+            feed.AddToolExecutionStart(uiToolId, toolName);
+            ToolExecutionTracker.Instance.EnqueuePendingTool(toolName, uiToolId);
+            var executor = new UiUpdatingToolExecutor(
+                new GatedToolExecutor(Task.CompletedTask, "done"),
+                NullLogger<UiUpdatingToolExecutor>.Instance);
+
+            await executor.ExecuteAsync(new ToolExecutionRequest
+            {
+                ToolId = toolName,
+                Parameters = new Dictionary<string, object?>(),
+                Context = new ToolExecutionContext(),
+            });
+
+            var item = FindTool(feed, uiToolId);
+            Assert.NotNull(item);
+            Assert.True(item!.Snapshot.IsComplete);
+        }
+
         /// <summary>Inner executor whose completion is gated on an external task.</summary>
         private sealed class GatedToolExecutor : IToolExecutor
         {
@@ -166,6 +219,43 @@ namespace Andy.Cli.Tests.Services
 
             public IReadOnlyList<RunningExecutionInfo> GetRunningExecutions() => new List<RunningExecutionInfo>();
 
+            public ToolExecutionStatistics GetStatistics() => new ToolExecutionStatistics();
+        }
+
+        private sealed class ThrowingToolExecutor : IToolExecutor
+        {
+            private readonly Exception _error;
+
+            public ThrowingToolExecutor(Exception error)
+            {
+                _error = error;
+            }
+
+#pragma warning disable CS0067
+            public event EventHandler<ToolExecutionStartedEventArgs>? ExecutionStarted;
+            public event EventHandler<ToolExecutionCompletedEventArgs>? ExecutionCompleted;
+            public event EventHandler<SecurityViolationEventArgs>? SecurityViolation;
+#pragma warning restore CS0067
+
+            public Task<ToolExecutionResult> ExecuteAsync(
+                string toolId,
+                Dictionary<string, object?> parameters,
+                ToolExecutionContext? context = null)
+                => Task.FromException<ToolExecutionResult>(_error);
+
+            public Task<ToolExecutionResult> ExecuteAsync(ToolExecutionRequest request)
+                => ExecuteAsync(request.ToolId, request.Parameters, request.Context);
+
+            public Task<IList<string>> ValidateExecutionRequestAsync(ToolExecutionRequest request)
+                => Task.FromResult<IList<string>>(new List<string>());
+
+            public Task<ToolResourceUsage?> EstimateResourceUsageAsync(
+                string toolId,
+                Dictionary<string, object?> parameters)
+                => Task.FromResult<ToolResourceUsage?>(null);
+
+            public Task<int> CancelExecutionsAsync(string correlationId) => Task.FromResult(0);
+            public IReadOnlyList<RunningExecutionInfo> GetRunningExecutions() => new List<RunningExecutionInfo>();
             public ToolExecutionStatistics GetStatistics() => new ToolExecutionStatistics();
         }
     }
