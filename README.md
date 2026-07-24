@@ -19,8 +19,8 @@ runtime, and an Agent Client Protocol (ACP) server for editor integrations.
 
 ## Features
 
-- **Interactive TUI** - Terminal chat, live agent/tool progress, diffs, themes,
-  prompt history, and expandable tool results
+- **Interactive TUI** - Terminal chat, live agent/tool progress, long-operation
+  recaps, diffs, themes, prompt history, and expandable tool results
 - **Multi-Provider Support** - Works with OpenRouter, OpenAI, Anthropic, Cerebras, Groq, Google Gemini, and Ollama
 - **Smart Provider Detection** - Automatically selects the best available LLM provider
 - **54 Built-in Tools** - File operations, code and text search, shell commands,
