@@ -276,18 +276,28 @@ namespace Andy.Cli.Widgets
             static int JoinedWidth(List<StatusSegment> segs) =>
                 segs.Sum(s => s.Text.Length) + Math.Max(0, segs.Count - 1) * Separator.Length;
 
-            while (fitted.Count > 1 && JoinedWidth(fitted) > maxWidth)
+            // The transient Status segment lives in the left-aligned zone and is truncated (with
+            // an ellipsis) by AlignSegments when it would overlap the right-aligned group. It must
+            // never be dropped here: dropping it would change WHICH segments exist and shift the
+            // right-anchored model/token/turn readouts, which is exactly the jitter we removed.
+            bool IsDropCandidate(StatusSegment s) => s.Kind != StatusSegmentKind.Status;
+
+            while (fitted.Count(IsDropCandidate) > 1 && JoinedWidth(fitted) > maxWidth)
             {
-                int dropIndex = 0;
-                for (int i = 1; i < fitted.Count; i++)
+                int dropIndex = -1;
+                for (int i = 0; i < fitted.Count; i++)
                 {
-                    if (fitted[i].DropPriority >= fitted[dropIndex].DropPriority)
+                    if (IsDropCandidate(fitted[i]) &&
+                        (dropIndex < 0 || fitted[i].DropPriority >= fitted[dropIndex].DropPriority))
                         dropIndex = i;
                 }
+                if (dropIndex < 0) break;
                 fitted.RemoveAt(dropIndex);
             }
 
-            if (fitted.Count == 1 && fitted[0].Text.Length > maxWidth)
+            // A single remaining non-status segment (no status present) is truncated to fit;
+            // the status segment is left to AlignSegments' ellipsis truncation.
+            if (fitted.Count == 1 && fitted[0].Kind != StatusSegmentKind.Status && fitted[0].Text.Length > maxWidth)
             {
                 if (maxWidth < 4)
                 {
@@ -301,6 +311,95 @@ namespace Andy.Cli.Widgets
             }
 
             return fitted;
+        }
+
+        /// <summary>
+        /// Partition fitted segments into the left-aligned group (transient status text) and the
+        /// right-aligned group (model, usage/live tokens, cost, turns). The right group is anchored
+        /// to the right edge of the bar so the model/token/turn readouts stay put while the status
+        /// text on the left changes length. The left group is truncated with an ASCII ellipsis if
+        /// it would overlap the right group (or the full width when no right group exists).
+        /// </summary>
+        internal static (List<StatusSegment> Left, List<StatusSegment> Right, int RightWidth, int LeftMaxWidth)
+            AlignSegments(List<StatusSegment> segments, int avail)
+        {
+            var left = segments.Where(s => s.Kind == StatusSegmentKind.Status).ToList();
+            var right = segments.Where(s => s.Kind != StatusSegmentKind.Status).ToList();
+
+            static int JoinedWidth(List<StatusSegment> segs) =>
+                segs.Sum(s => s.Text.Length) + Math.Max(0, segs.Count - 1) * Separator.Length;
+
+            // Give the transient status text only the space left over by the right-anchored
+            // group, truncating it with an ASCII ellipsis when it would overlap. Truncating the
+            // left zone FIRST keeps the right group's composition stable across frames, so the
+            // model/token/turn readouts do not move as the status text changes length.
+            int rightWidth = JoinedWidth(right);
+            int leftMax = right.Count > 0
+                ? Math.Max(0, avail - rightWidth - Separator.Length)
+                : avail;
+
+            int leftWidth = JoinedWidth(left);
+            if (leftWidth > leftMax && left.Count > 0)
+            {
+                if (leftMax < 4)
+                {
+                    left.Clear();
+                }
+                else
+                {
+                    var s = left[^1];
+                    left[^1] = s with { Text = s.Text.Substring(0, leftMax - 3) + "..." };
+                }
+                leftWidth = JoinedWidth(left);
+            }
+
+            // Only when the right group ALONE exceeds the bar do we start dropping its least
+            // important segments (highest drop priority first: turns, then cost, then usage,
+            // keeping the model longest). An oversized-but-fitting right group is NOT shrunk:
+            // the left zone already yielded its space (ellipsis truncation) for exactly that
+            // case, which is what keeps the right-anchored readouts stable. A lone oversized
+            // segment is ellipsis-truncated below.
+            while (right.Count > 1 && rightWidth > avail)
+            {
+                int dropIndex = 0;
+                for (int i = 1; i < right.Count; i++)
+                {
+                    if (right[i].DropPriority >= right[dropIndex].DropPriority)
+                        dropIndex = i;
+                }
+                right.RemoveAt(dropIndex);
+                rightWidth = JoinedWidth(right);
+
+                // Recompute the space the left zone gets with the shrunken right group.
+                leftMax = Math.Max(0, avail - rightWidth - (left.Count > 0 ? Separator.Length : 0));
+                if (left.Count > 0 && JoinedWidth(left) > leftMax)
+                {
+                    if (leftMax < 4) left.Clear();
+                    else
+                    {
+                        var s = left[^1];
+                        left[^1] = s with { Text = s.Text.Substring(0, leftMax - 3) + "..." };
+                    }
+                }
+                leftWidth = JoinedWidth(left);
+            }
+
+            if (right.Count == 1 && left.Count == 0 && rightWidth > avail)
+            {
+                if (avail < 4)
+                {
+                    right.Clear();
+                    rightWidth = 0;
+                }
+                else
+                {
+                    var s = right[0];
+                    right[0] = s with { Text = s.Text.Substring(0, avail - 3) + "..." };
+                    rightWidth = avail;
+                }
+            }
+
+            return (left, right, rightWidth, leftMax);
         }
 
         /// <summary>
@@ -320,18 +419,35 @@ namespace Andy.Cli.Widgets
             b.PushClip(new DL.ClipPush(0, y, width, 1));
             b.DrawRect(new DL.Rect(0, y, width, 1, bg));
 
-            int x = 1;
             int avail = Math.Max(0, width - 2);
-            var segments = FitSegments(BuildSegments(), avail);
+            var (left, right, rightWidth, _) = AlignSegments(BuildSegments(), avail);
 
-            for (int i = 0; i < segments.Count; i++)
+            // Left zone: transient status text, drawn from the left edge.
+            int x = 1;
+            for (int i = 0; i < left.Count; i++)
             {
                 if (i > 0)
                 {
                     b.DrawText(new DL.TextRun(x, y, Separator, _dimFg, bg, DL.CellAttrFlags.None));
                     x += Separator.Length;
                 }
-                x = DrawSegment(b, x, y, segments[i], bg);
+                x = DrawSegment(b, x, y, left[i], bg);
+            }
+
+            // Right zone: model / token usage / cost / turns, anchored to the right edge so
+            // they do not shift when the status text on the left changes length.
+            if (right.Count > 0)
+            {
+                x = width - 1 - rightWidth;
+                for (int i = 0; i < right.Count; i++)
+                {
+                    if (i > 0)
+                    {
+                        b.DrawText(new DL.TextRun(x, y, Separator, _dimFg, bg, DL.CellAttrFlags.None));
+                        x += Separator.Length;
+                    }
+                    x = DrawSegment(b, x, y, right[i], bg);
+                }
             }
 
             b.Pop();

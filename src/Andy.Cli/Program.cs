@@ -617,7 +617,7 @@ class Program
                     }
                 }
             }
-            feed.AddMarkdownRich(ConsoleColors.Dim($"[session] {sessionId} (resume after exit: andy-cli --resume {sessionId})"));
+            feed.AddDimText($"[session] {sessionId} (resume after exit: andy-cli --resume {sessionId})");
 
             // In-place session switch for /resume <id>: replaces the assistant service with a
             // fresh instance (the engine only restores into an EMPTY conversation), restores

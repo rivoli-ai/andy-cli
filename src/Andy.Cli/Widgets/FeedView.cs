@@ -180,6 +180,11 @@ namespace Andy.Cli.Widgets
                 }
             }
         }
+        /// <summary>Convenience: append plain text in the theme's dim color (session/status metadata).
+        /// Use this instead of wrapping text in raw ANSI escapes (ConsoleColors.Dim): the markdown
+        /// renderer treats Content as untrusted plain text and rewrites terminal control characters
+        /// to visible placeholders, so embedded ESC[90m shows up literally as "[90m" in the feed.</summary>
+        public void AddDimText(string text) => AddItem(new DimTextItem(text));
         /// <summary>Convenience: append code block item.</summary>
         public void AddCode(string code, string? language = null) => AddItem(new CodeBlockItem(code, language));
         /// <summary>Append a git-style diff for a file write/update operation.</summary>
@@ -1359,6 +1364,51 @@ namespace Andy.Cli.Widgets
             MarkdownLinkStyle.RenderWithoutUnderline(b, linkColor, temp =>
                 link.Render(new L.Rect(x, y, Math.Max(1, width), 1), baseDl, temp));
             return true;
+        }
+    }
+
+    /// <summary>
+    /// Plain text feed item drawn in the theme's dim foreground (<see cref="Themes.Theme.TextDim"/>),
+    /// for session/status metadata lines. Color is applied through the typed TextRun.Fg field, NOT by
+    /// embedding ANSI escapes in the text: the display-list contract treats Content as untrusted plain
+    /// text and rewrites control characters to visible placeholders (the ESC[90m ... ESC[0m literal bug).
+    /// Word-wraps to the feed width so measurement and rendering stay in agreement.
+    /// </summary>
+    public sealed class DimTextItem : IFeedItem
+    {
+        private readonly string _text;
+        private int _cachedWidth = -1;
+        private List<string> _wrapped = new();
+
+        public DimTextItem(string text)
+        {
+            _text = (text ?? string.Empty).TrimEnd();
+        }
+
+        private List<string> Wrapped(int width)
+        {
+            if (width != _cachedWidth)
+            {
+                _cachedWidth = width;
+                _wrapped = TextWrap.Wrap(_text, Math.Max(1, width));
+                if (_wrapped.Count == 0) _wrapped.Add(string.Empty);
+            }
+            return _wrapped;
+        }
+
+        public int MeasureLineCount(int width) => width <= 0 ? 1 : Wrapped(width).Count;
+
+        public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
+        {
+            if (width <= 0 || maxLines <= 0 || startLine < 0) return;
+            var lines = Wrapped(width);
+            var fg = Themes.Theme.Current.TextDim;
+            int printed = 0;
+            for (int i = startLine; i < lines.Count && printed < maxLines; i++)
+            {
+                b.DrawText(new DL.TextRun(x, y + printed, lines[i], fg, null, DL.CellAttrFlags.None));
+                printed++;
+            }
         }
     }
 
