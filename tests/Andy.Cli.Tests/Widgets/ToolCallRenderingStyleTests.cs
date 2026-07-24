@@ -143,6 +143,46 @@ namespace Andy.Cli.Tests.Widgets
             Assert.StartsWith(" L Running...", status!.Value.Content);
         }
 
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void RunningCommand_HeaderColorsCommandSeparately(bool complete)
+        {
+            ToolOutputView.Expanded = false;
+            var item = new RunningToolItem("execute_command_1", "execute_command");
+            item.SetParameters(new Dictionary<string, object?> { ["command"] = "dotnet test" });
+            if (complete)
+            {
+                item.SetComplete(true, "0.1s");
+                item.SetResult("passed");
+            }
+
+            var runs = RenderRuns(item);
+            var command = Find(runs, r => r.Content == "dotnet test");
+            var action = Find(runs, r => r.Content.Contains("Running:"));
+
+            Assert.NotNull(command);
+            Assert.Equal(Andy.Cli.Themes.Theme.Current.Info, command!.Value.Fg!.Value);
+            Assert.NotNull(action);
+            Assert.NotEqual(command.Value.Fg, action!.Value.Fg);
+        }
+
+        [Fact]
+        public void NonCommandHeader_RemainsSingleActionColor()
+        {
+            ToolOutputView.Expanded = false;
+            var item = new RunningToolItem("read_file_1", "read_file");
+            item.SetParameters(new Dictionary<string, object?> { ["file_path"] = "README.md" });
+
+            var runs = RenderRuns(item);
+
+            Assert.DoesNotContain(
+                runs,
+                r => r.Content.Contains("README.md") &&
+                     r.Fg.HasValue &&
+                     r.Fg.Value.Equals(Andy.Cli.Themes.Theme.Current.Info));
+        }
+
         [Fact]
         public void ToolExecutionItem_ExpandedResultLines_HaveSingleLeadingSpace()
         {
