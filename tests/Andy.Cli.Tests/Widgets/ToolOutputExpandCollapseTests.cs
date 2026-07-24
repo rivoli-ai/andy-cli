@@ -205,10 +205,17 @@ namespace Andy.Cli.Tests.Widgets
         public void AddToolExecutionStart_AppendsTrailingSpacer()
         {
             var feed = new FeedView();
-            feed.AddToolExecutionStart("t_1", "read_file");
+            // A tool without a dedicated presenter still takes the legacy item; the spacer
+            // behavior is the same on both paths.
+            feed.AddToolExecutionStart("t_1", "format_text");
             var items = feed.GetItemsForTesting();
             Assert.True(items.Count >= 2);
             Assert.IsType<RunningToolItem>(items[items.Count - 2]);
+            Assert.IsType<SpacerItem>(items[items.Count - 1]);
+
+            feed.AddToolExecutionStart("t_2", "read_file");
+            items = feed.GetItemsForTesting();
+            Assert.IsType<Andy.Cli.Widgets.Tools.ToolCallItem>(items[items.Count - 2]);
             Assert.IsType<SpacerItem>(items[items.Count - 1]);
         }
 

@@ -37,6 +37,10 @@ namespace Andy.Cli.Widgets.Tools
         public static ToolPresenterRegistry Default { get; } = new(new IToolPresenter[]
         {
             new ShellToolPresenter(),
+            new ReadFileToolPresenter(),
+            new SearchTextToolPresenter(),
+            new ListDirectoryToolPresenter(),
+            new FileMutationToolPresenter(),
         });
 
         /// <summary>Find the presenter for a tool id, never returning null.</summary>

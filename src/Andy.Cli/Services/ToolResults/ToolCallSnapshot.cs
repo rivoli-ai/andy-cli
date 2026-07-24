@@ -66,6 +66,41 @@ public sealed record ToolCallSnapshot
     /// <summary>A completed call that neither failed nor was cancelled or denied.</summary>
     public bool Succeeded => IsComplete && IsSuccessful && !WasCancelled && !WasDenied;
 
+    // Andy.Tools splits a result across two places and is not consistent about which: the
+    // ToolResults.TextSuccess helper merges the tool's metadata INTO Data, while ListSuccess
+    // leaves it on Metadata. Presenters should not have to know which helper a tool happened to
+    // use, so these accessors look in Data first and fall back to Metadata.
+
+    /// <summary>Read a string from the result payload.</summary>
+    public string? ResultString(params string[] keys)
+        => ToolData.GetString(Data, keys) ?? ToolData.GetString(Metadata, keys);
+
+    /// <summary>Read an integer from the result payload.</summary>
+    public int? ResultInt(params string[] keys)
+        => ToolData.GetInt(Data, keys) ?? ToolData.GetInt(Metadata, keys);
+
+    /// <summary>Read a long from the result payload.</summary>
+    public long? ResultLong(params string[] keys)
+        => ToolData.GetLong(Data, keys) ?? ToolData.GetLong(Metadata, keys);
+
+    /// <summary>Read a boolean from the result payload.</summary>
+    public bool? ResultBool(params string[] keys)
+        => ToolData.GetBool(Data, keys) ?? ToolData.GetBool(Metadata, keys);
+
+    /// <summary>Read a duration from the result payload.</summary>
+    public TimeSpan? ResultDuration(params string[] keys)
+        => ToolData.GetDuration(Data, keys) ?? ToolData.GetDuration(Metadata, keys);
+
+    /// <summary>Read a list from the result payload.</summary>
+    public IReadOnlyList<object?> ResultList(params string[] keys)
+    {
+        var items = ToolData.GetList(Data, keys);
+        return items.Count > 0 ? items : ToolData.GetList(Metadata, keys);
+    }
+
+    /// <summary>Read a string argument the tool was called with.</summary>
+    public string? Argument(params string[] keys) => ToolData.GetString(Parameters, keys);
+
     /// <summary>Terminal state used to pick the status glyph and color.</summary>
     public ToolCallStatus Status =>
         !IsComplete ? ToolCallStatus.Running

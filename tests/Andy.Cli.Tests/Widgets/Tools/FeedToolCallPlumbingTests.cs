@@ -36,8 +36,9 @@ public class FeedToolCallPlumbingTests
         // keep rendering exactly as it did.
         var feed = new FeedView();
 
-        feed.AddToolExecutionStart("read_file_1", "read_file",
-            new Dictionary<string, object?> { ["file_path"] = "a.cs" });
+        // todo_management has no presenter yet (#258), so it must render exactly as before.
+        feed.AddToolExecutionStart("todo_management_1", "todo_management",
+            new Dictionary<string, object?> { ["action"] = "list" });
 
         Assert.Empty(feed.GetItemsForTesting().OfType<ToolCallItem>());
         Assert.NotEmpty(feed.GetItemsForTesting().OfType<RunningToolItem>());
