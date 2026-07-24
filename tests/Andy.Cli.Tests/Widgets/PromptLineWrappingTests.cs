@@ -1,5 +1,7 @@
 using System;
 using Andy.Cli.Widgets;
+using DL = Andy.Tui.DisplayList;
+using L = Andy.Tui.Layout;
 using Xunit;
 
 namespace Andy.Cli.Tests.Widgets
@@ -181,6 +183,46 @@ namespace Andy.Cli.Tests.Widgets
             p.OnKey(Key(ConsoleKey.DownArrow)); // row1, clamp col to 3 => end of "bbb"
             p.OnKey(Char('X'));
             Assert.Equal(new string('a', 10) + "\n" + "bbbX", p.Text);
+        }
+
+        [Fact]
+        public void UpArrow_InPromptTallerThanViewport_KeepsCaretVisible()
+        {
+            var p = MakePrompt(10, new string('a', 100)); // 10 visual rows
+            Render(p, width: 15, height: 9); // 7 visible content rows, initially tail-following
+
+            for (int i = 0; i < 8; i++)
+            {
+                p.OnKey(Key(ConsoleKey.UpArrow));
+            }
+            Render(p, width: 15, height: 9);
+
+            Assert.True(p.TryGetTerminalCursor(out _, out int row));
+            Assert.InRange(row, 2, 8);
+        }
+
+        [Fact]
+        public void DownArrow_AfterScrollingUp_FollowsCaretBackToTail()
+        {
+            var p = MakePrompt(10, new string('a', 100));
+            Render(p, width: 15, height: 9);
+            for (int i = 0; i < 8; i++) p.OnKey(Key(ConsoleKey.UpArrow));
+            Render(p, width: 15, height: 9);
+
+            for (int i = 0; i < 8; i++) p.OnKey(Key(ConsoleKey.DownArrow));
+            Render(p, width: 15, height: 9);
+
+            Assert.True(p.TryGetTerminalCursor(out _, out int row));
+            Assert.Equal(8, row);
+        }
+
+        private static void Render(PromptLine prompt, int width, int height)
+        {
+            var builder = new DL.DisplayListBuilder();
+            prompt.Render(
+                new L.Rect(0, 0, width, height),
+                new DL.DisplayListBuilder().Build(),
+                builder);
         }
     }
 }
