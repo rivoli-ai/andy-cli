@@ -31,6 +31,22 @@ and no exceptions in 2 minutes 11 seconds. On the hard
 `terminal-bench/cancel-async-tasks` task, Andy completed normally and passed
 five of six verifier tests, but received a reward of 0.0.
 
+On 2026-07-24, Andy and `xiaomi/mimo-v2.5` completed all four tasks marked
+`easy` in Terminal-Bench 2:
+
+| Task | Reward | Result |
+| --- | ---: | --- |
+| `fix-git` | 1.0 | Passed both verifier tests |
+| `prove-plus-comm` | 1.0 | Passed all four verifier tests |
+| `cobol-modernization` | 0.0 | Reached the official 900-second timeout; the generated Python program failed one of three verifier tests |
+| `overfull-hbox` | 0.0 | Reached Andy's 100-turn limit with one overfull box remaining; passed three of four verifier tests |
+
+The aggregate easy-tier score is 2/4, with a mean reward of 0.5. An initial
+`overfull-hbox` attempt failed before model execution because its minimal image
+did not include trusted CA certificates. That infrastructure-only attempt is
+excluded from the score; the adapter now installs `ca-certificates`, and the
+replacement trial reached the model and official verifier successfully.
+
 ## Prerequisites
 
 - Docker running locally
@@ -64,7 +80,9 @@ run the builder explicitly:
 ```
 
 The benchmark archive uses .NET invariant globalization so the self-contained
-CLI also starts in minimal task images that do not include ICU.
+CLI also starts in minimal task images that do not include ICU. The adapter
+installs trusted CA certificates so HTTPS model providers also work in minimal
+task images that omit them.
 
 Harbor model names are translated as `provider/model-id`. Slashes after the
 provider are preserved, so an OpenRouter model can be run as:

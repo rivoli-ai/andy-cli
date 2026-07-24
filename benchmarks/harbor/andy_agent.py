@@ -67,7 +67,10 @@ class AndyCli(BaseInstalledAgent):
         if not archive.is_file():
             raise ValueError(f"Andy archive does not exist: {archive}")
 
-        await self.ensure_system_dependencies(environment, ("tar",))
+        await self.ensure_system_dependencies(
+            environment,
+            ("tar", "ca_certificates"),
+        )
         await environment.upload_file(archive, self._REMOTE_ARCHIVE)
         await self.exec_as_root(
             environment,
