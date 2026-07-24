@@ -560,6 +560,22 @@ namespace Andy.Cli.Services
                 _logger?.LogWarning("[UI_EXECUTOR] Tracking completion for {UiToolId} with result: '{Result}'",
                     uiToolId, resultMessage);
 
+                // Hand the feed the FULL structured result first (issue #249). Presenters read
+                // Data and Metadata directly, so nothing they show has to be recovered from the
+                // pre-rendered resultMessage below. When this returns true the call is already
+                // complete and the legacy string-based completion path is a no-op for it.
+                var feedViewForStructuredCompletion = ToolExecutionTracker.Instance.GetFeedView();
+                feedViewForStructuredCompletion?.CompleteToolCall(uiToolId, new ToolResults.ToolCallCompletion
+                {
+                    IsSuccessful = result.IsSuccessful,
+                    Data = result.Data,
+                    Metadata = result.Metadata,
+                    ErrorMessage = result.ErrorMessage,
+                    Message = result.Message,
+                    Duration = toolStopwatch.Elapsed,
+                    WasCancelled = result.WasCancelled
+                });
+
                 ToolExecutionTracker.Instance.TrackToolComplete(uiToolId, result.IsSuccessful, resultMessage, result.Data);
 
                 // Stop the spinner immediately now that the tool has returned data. Previously the

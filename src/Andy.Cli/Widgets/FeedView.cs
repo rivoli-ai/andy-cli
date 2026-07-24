@@ -220,6 +220,26 @@ namespace Andy.Cli.Widgets
         /// <summary>Add a tool execution start with animation.</summary>
         public void AddToolExecutionStart(string toolId, string toolName, Dictionary<string, object?>? parameters = null)
         {
+            // Tools that have a dedicated presenter (issue #249) render through ToolCallItem,
+            // which keeps the structured result all the way to the renderer. Everything else
+            // keeps the legacy RunningToolItem until its own presenter lands, so the migration
+            // does not regress the tools it has not reached yet.
+            var presenter = Tools.ToolPresenterRegistry.Default.TryResolve(toolName);
+            if (presenter != null)
+            {
+                var snapshot = new Services.ToolResults.ToolCallSnapshot
+                {
+                    ToolId = toolId,
+                    ToolName = Services.ToolCallSummarizer.NormalizeToolName(toolName),
+                    Parameters = parameters is null
+                        ? new Dictionary<string, object?>()
+                        : new Dictionary<string, object?>(parameters)
+                };
+                AddItem(new Tools.ToolCallItem(snapshot, presenter));
+                AddItem(new SpacerItem(1));
+                return;
+            }
+
             var item = new RunningToolItem(toolId, toolName);
             if (parameters != null)
             {
@@ -228,6 +248,56 @@ namespace Andy.Cli.Widgets
             AddItem(item);
             // Blank line after every tool so consecutive tools are visually separated.
             AddItem(new SpacerItem(1));
+        }
+
+        /// <summary>
+        /// Attach the tool's real arguments to a call already showing in the feed. Called as soon
+        /// as the executor knows them, which is after the item was created from the model's
+        /// streamed call.
+        /// </summary>
+        /// <returns>True when a <see cref="Tools.ToolCallItem"/> matched and was updated.</returns>
+        public bool UpdateToolCallParameters(string toolId, IReadOnlyDictionary<string, object?> parameters)
+        {
+            lock (_itemsLock)
+            {
+                for (int i = _items.Count - 1; i >= 0; i--)
+                {
+                    if (_items[i] is Tools.ToolCallItem call && call.ToolId == toolId)
+                    {
+                        call.Update(s => s with { Parameters = new Dictionary<string, object?>(parameters) });
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Complete a tool call with its FULL structured result - data, metadata, error, timing -
+        /// rather than a string the executor pre-rendered (issue #249).
+        /// </summary>
+        /// <returns>True when a <see cref="Tools.ToolCallItem"/> matched; false leaves the caller
+        /// to fall back to the legacy completion path.</returns>
+        public bool CompleteToolCall(string toolId, Services.ToolResults.ToolCallCompletion completion)
+        {
+            if (completion is null) throw new ArgumentNullException(nameof(completion));
+
+            lock (_itemsLock)
+            {
+                for (int i = _items.Count - 1; i >= 0; i--)
+                {
+                    if (_items[i] is Tools.ToolCallItem call && call.ToolId == toolId)
+                    {
+                        // Idempotent, like the legacy path: the executor completes a call the
+                        // instant the tool returns, and a later end-of-turn pass must not
+                        // overwrite that with whole-turn timing.
+                        if (call.Snapshot.IsComplete) return true;
+                        call.Update(completion.ApplyTo(call.Snapshot));
+                        return true;
+                    }
+                }
+            }
+            return false;
         }
 
         /// <summary>Add detail to a running tool execution.</summary>
@@ -317,6 +387,10 @@ namespace Andy.Cli.Widgets
         /// <summary>Update a tool by its exact ID - this is the most direct way to update a tool.</summary>
         public void UpdateToolByExactId(string exactToolId, Dictionary<string, object?> parameters)
         {
+            // Calls rendered through the new presenter path carry their id as a first-class field
+            // rather than smuggled in a "__toolId" parameter, so they match directly.
+            if (UpdateToolCallParameters(exactToolId, parameters)) return;
+
             lock (_itemsLock)
             {
                 // Look for any running tool item, starting from the most recent
