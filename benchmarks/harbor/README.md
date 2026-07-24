@@ -25,7 +25,11 @@ the adapter, including structured `started`, `error`, `tool_usage_audit`, and
 `slug-normalizer` trial was interrupted by an upstream rate-limit response. A
 second live run with the current `xiaomi/mimo-v2.5` model passed both tasks with
 a mean reward of 1.0 and no exceptions in 2 minutes 31 seconds. The older
-`xiaomi/mimo-v2-flash` endpoint is deprecated by OpenRouter.
+`xiaomi/mimo-v2-flash` endpoint is deprecated by OpenRouter. An official
+Terminal-Bench 2 run then passed `terminal-bench/fix-git` with a reward of 1.0
+and no exceptions in 2 minutes 11 seconds. On the hard
+`terminal-bench/cancel-async-tasks` task, Andy completed normally and passed
+five of six verifier tests, but received a reward of 0.0.
 
 ## Prerequisites
 
@@ -58,6 +62,9 @@ run the builder explicitly:
 ```bash
 ./scripts/harbor/build-agent-archive.sh
 ```
+
+The benchmark archive uses .NET invariant globalization so the self-contained
+CLI also starts in minimal task images that do not include ICU.
 
 Harbor model names are translated as `provider/model-id`. Slashes after the
 provider are preserved, so an OpenRouter model can be run as:
@@ -94,17 +101,44 @@ Set `ANDY_WORKSPACE_ROOT` with `--agent-env` only for task images whose Docker
 working directory is not the repository to modify. Otherwise the adapter uses
 the container's current working directory.
 
-## Larger benchmark suites
+## Run Terminal-Bench
+
+The Terminal-Bench wrapper defaults to the single `terminal-bench/fix-git`
+validation task:
+
+```bash
+export OPENROUTER_API_KEY="..."
+./scripts/harbor/run-terminal-bench.sh openrouter/xiaomi/mimo-v2.5
+```
+
+The wrapper grants broad tool permissions only inside Harbor's disposable
+container and sets the workspace root to `/`, because Terminal-Bench tasks may
+work outside the image's default working directory.
+
+Pass a task glob and limit to expand the run deliberately:
+
+```bash
+HARBOR_CONCURRENCY=2 ./scripts/harbor/run-terminal-bench.sh \
+  openrouter/xiaomi/mimo-v2.5 'terminal-bench/*' 4
+```
+
+Terminal-Bench 2 currently contains 89 tasks. Running the entire dataset can
+take substantial time and model spend.
+
+## Run Terminal-Bench directly
 
 Once the smoke tasks are stable, use the same custom agent with a Harbor dataset:
 
 ```bash
 PYTHONPATH="$PWD" harbor run \
-  --dataset terminal-bench@2.0 \
+  --dataset terminal-bench/terminal-bench-2 \
+  --include-task-name terminal-bench/fix-git \
   --agent benchmarks.harbor.andy_agent:AndyCli \
-  --model openai/gpt-5.4 \
+  --model openrouter/xiaomi/mimo-v2.5 \
   --agent-env "ANDY_CLI_ARCHIVE=$PWD/artifacts/harbor/andy-cli-linux-x64.tar.gz" \
-  --agent-env "OPENAI_API_KEY=$OPENAI_API_KEY"
+  --agent-env "OPENROUTER_API_KEY=$OPENROUTER_API_KEY" \
+  --agent-env "ANDY_PERMISSION_MODE=bypass" \
+  --agent-env "ANDY_WORKSPACE_ROOT=/"
 ```
 
 Start with one task and one concurrent trial while validating a new provider or

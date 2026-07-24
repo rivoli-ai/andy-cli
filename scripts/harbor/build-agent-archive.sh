@@ -23,10 +23,11 @@ dotnet publish "$repo_root/src/Andy.Cli/Andy.Cli.csproj" \
     --output "$publish_dir" \
     -p:PublishTrimmed=true \
     -p:PublishSingleFile=true \
+    -p:InvariantGlobalization=true \
     -p:NuGetLockFilePath="$lock_file" \
     -p:InformationalVersion="harbor-$(git -C "$repo_root" rev-parse --short=9 HEAD)"
 
 chmod +x "$publish_dir/andy-cli"
-tar -czf "$output_path" -C "$publish_dir" .
+COPYFILE_DISABLE=1 tar -czf "$output_path" -C "$publish_dir" .
 
 printf 'Andy Harbor archive: %s\n' "$output_path"
