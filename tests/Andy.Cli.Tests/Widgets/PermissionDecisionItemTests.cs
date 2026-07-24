@@ -155,4 +155,23 @@ public class PermissionDecisionItemTests
         Assert.True(rows.Count <= 2);
         Assert.All(rows, y => Assert.InRange(y, 50, 51));
     }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Feed_appends_exactly_one_spacer_after_decision(bool allowed)
+    {
+        var feed = new FeedView();
+        var item = new PermissionDecisionItem(
+            Request("Run a shell command", "git status"),
+            new PermissionDecision(allowed, PersistScope.Once));
+
+        feed.AddPermissionDecision(item);
+
+        var items = feed.GetItemsForTesting();
+        Assert.Collection(
+            items,
+            actual => Assert.Same(item, actual),
+            actual => Assert.IsType<SpacerItem>(actual));
+    }
 }

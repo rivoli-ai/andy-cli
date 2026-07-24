@@ -198,6 +198,12 @@ namespace Andy.Cli.Widgets
             // Add spacing after user messages to separate from response
             AddItem(new SpacerItem(1));
         }
+        /// <summary>Append a permission decision and one trailing blank row.</summary>
+        public void AddPermissionDecision(PermissionDecisionItem decision)
+        {
+            AddItem(decision);
+            AddItem(new SpacerItem(1));
+        }
         /// <summary>Append a response separator with token information.</summary>
         public void AddResponseSeparator(int inputTokens = 0, int outputTokens = 0, string pattern = "━━ ◆ ━━") => AddItem(new ResponseSeparatorItem(inputTokens, outputTokens, pattern));
 

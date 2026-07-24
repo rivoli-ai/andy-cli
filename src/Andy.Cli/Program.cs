@@ -1241,11 +1241,7 @@ class Program
                             activeApprovalRequest.Completion.TrySetResult(decided);
                             // Record the decision in the transcript so there is a visible, auditable
                             // trace of what was approved or denied (issue #224).
-                            feed.AddItem(new Andy.Cli.Widgets.PermissionDecisionItem(activeApprovalRequest.Request, decided));
-                            // Separate the decision from the tool row that follows it, the way
-                            // every other feed item is separated (issue #241). Without this the
-                            // approval and the command it approved run together as one block.
-                            feed.AddItem(new Andy.Cli.Widgets.SpacerItem(1));
+                            feed.AddPermissionDecision(new Andy.Cli.Widgets.PermissionDecisionItem(activeApprovalRequest.Request, decided));
                             activeApprovalRequest = null;
                         }
                         return;
