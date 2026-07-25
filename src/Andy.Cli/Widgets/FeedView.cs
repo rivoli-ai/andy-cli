@@ -235,6 +235,12 @@ namespace Andy.Cli.Widgets
                         ? new Dictionary<string, object?>()
                         : new Dictionary<string, object?>(parameters)
                 };
+                // A tool that redraws the same surface each time it runs - the plan (#258) - marks
+                // its earlier calls superseded so only the current one is drawn in full. The old
+                // items stay in the transcript and collapse to their header; removing them would
+                // shift everything the user has already scrolled past.
+                if (SupersedesEarlierCalls(snapshot.ToolName)) MarkEarlierCallsSuperseded(snapshot.ToolName);
+
                 AddItem(new Tools.ToolCallItem(snapshot, presenter));
                 AddItem(new SpacerItem(1));
                 return;
@@ -248,6 +254,28 @@ namespace Andy.Cli.Widgets
             AddItem(item);
             // Blank line after every tool so consecutive tools are visually separated.
             AddItem(new SpacerItem(1));
+        }
+
+        /// <summary>
+        /// Tools whose every call redraws the same surface, so only the latest is worth showing in
+        /// full. The plan is the case that matters: an agent revises it many times per session.
+        /// </summary>
+        private static bool SupersedesEarlierCalls(string toolName) => toolName is "todo_management";
+
+        private void MarkEarlierCallsSuperseded(string toolName)
+        {
+            lock (_itemsLock)
+            {
+                foreach (var item in _items)
+                {
+                    if (item is Tools.ToolCallItem call
+                        && call.Snapshot.ToolName == toolName
+                        && !call.Snapshot.IsSuperseded)
+                    {
+                        call.Update(s => s with { IsSuperseded = true });
+                    }
+                }
+            }
         }
 
         /// <summary>

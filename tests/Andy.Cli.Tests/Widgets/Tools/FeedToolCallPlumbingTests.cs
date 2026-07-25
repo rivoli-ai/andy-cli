@@ -36,8 +36,8 @@ public class FeedToolCallPlumbingTests
         // keep rendering exactly as it did.
         var feed = new FeedView();
 
-        // todo_management has no presenter yet (#258), so it must render exactly as before.
-        feed.AddToolExecutionStart("todo_management_1", "todo_management",
+        // A third-party tool nothing in the registry claims must render exactly as before.
+        feed.AddToolExecutionStart("vendor_widget_1", "vendor_widget",
             new Dictionary<string, object?> { ["action"] = "list" });
 
         Assert.Empty(feed.GetItemsForTesting().OfType<ToolCallItem>());

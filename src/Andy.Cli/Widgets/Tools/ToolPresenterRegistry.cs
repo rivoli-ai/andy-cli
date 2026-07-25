@@ -44,6 +44,10 @@ namespace Andy.Cli.Widgets.Tools
             new WriteFileToolPresenter(),
             new ReplaceTextToolPresenter(),
             new GitDiffToolPresenter(),
+            new TodoToolPresenter(),
+            new WebToolPresenter(),
+            new UtilityToolPresenter(),
+            new SkillToolPresenter(),
         });
 
         /// <summary>Find the presenter for a tool id, never returning null.</summary>

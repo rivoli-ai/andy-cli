@@ -207,7 +207,7 @@ namespace Andy.Cli.Tests.Widgets
             var feed = new FeedView();
             // A tool without a dedicated presenter still takes the legacy item; the spacer
             // behavior is the same on both paths.
-            feed.AddToolExecutionStart("t_1", "format_text");
+            feed.AddToolExecutionStart("t_1", "vendor_widget");
             var items = feed.GetItemsForTesting();
             Assert.True(items.Count >= 2);
             Assert.IsType<RunningToolItem>(items[items.Count - 2]);

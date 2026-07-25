@@ -69,6 +69,16 @@ public sealed record ToolCallSnapshot
     /// </summary>
     public FileMutationView? FileMutation { get; init; }
 
+    /// <summary>
+    /// A later call of the same kind has replaced what this one showed.
+    ///
+    /// Used for the plan (#258): every revision is kept in the transcript, but only the current
+    /// one is drawn in full, so a long session is not dominated by five copies of a todo list.
+    /// The superseded ones collapse to their header rather than being removed, because deleting
+    /// feed history would shift everything the user has already scrolled past.
+    /// </summary>
+    public bool IsSuperseded { get; init; }
+
     /// <summary>A completed call that neither failed nor was cancelled or denied.</summary>
     public bool Succeeded => IsComplete && IsSuccessful && !WasCancelled && !WasDenied;
 
