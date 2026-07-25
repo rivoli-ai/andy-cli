@@ -22,6 +22,7 @@ namespace Andy.Cli.Widgets
         private bool _showBorder = true;
         private bool _useTerminalCursor = true;
         private int _lastX, _lastY, _lastInnerW, _lastStart;
+        private int _viewportStart;
         // Wrap width (in columns) used for soft-wrapping the input across visual rows.
         // Set by the host before measuring/rendering so cursor math and height match the
         // actual render width. A non-positive value disables wrapping.
@@ -376,7 +377,23 @@ namespace Andy.Cli.Widgets
             int total = rows.Count;
             int maxContentLines = _showBorder ? Math.Max(1, h - 2) : h;
             int visible = Math.Min(maxContentLines, total);
-            int startLine = Math.Max(0, total - visible);
+            // Keep the caret's visual row in view. Previously an overflowing prompt always
+            // rendered its final rows, so UpArrow moved the logical cursor off-screen and
+            // appeared not to work. Preserve the current viewport until the caret crosses an
+            // edge, then scroll only enough to reveal it.
+            var (caretRow, _) = GetCaretRowCol();
+            int maxStart = Math.Max(0, total - visible);
+            int startLine = Math.Clamp(_viewportStart, 0, maxStart);
+            if (caretRow < startLine)
+            {
+                startLine = caretRow;
+            }
+            else if (caretRow >= startLine + visible)
+            {
+                startLine = caretRow - visible + 1;
+            }
+            _viewportStart = Math.Clamp(startLine, 0, maxStart);
+            startLine = _viewportStart;
             _lastStart = startLine; // reuse as start row for cursor calc
             int textStartY = _showBorder ? y + 1 : y; // Start after top border
             int textStartX = x + 1 + promptPrefixWidth; // Start after border + prompt prefix
