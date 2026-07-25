@@ -162,10 +162,15 @@ namespace Andy.Cli.Widgets.Tools
             // for thirty seconds kept reporting "16ms".
             if (snapshot.IsComplete) return;
 
-            var elapsed = "  " + ToolOutputFormatter.FormatDuration(DateTime.UtcNow - snapshot.StartedAtUtc);
-            int elapsedX = bodyX + headerRow.Width;
-            if (elapsedX + elapsed.Length <= x + width)
-                b.DrawText(new DL.TextRun(elapsedX, y, elapsed, theme.TextDim, null, DL.CellAttrFlags.None));
+            // A call blocked on consent says so instead of counting up as though it were working.
+            var trailing = snapshot.IsAwaitingApproval
+                ? "  waiting for approval"
+                : "  " + ToolOutputFormatter.FormatDuration(DateTime.UtcNow - snapshot.StartedAtUtc);
+            var trailingColor = snapshot.IsAwaitingApproval ? theme.Warning : theme.TextDim;
+
+            int trailingX = bodyX + headerRow.Width;
+            if (trailingX + trailing.Length <= x + width)
+                b.DrawText(new DL.TextRun(trailingX, y, trailing, trailingColor, null, DL.CellAttrFlags.None));
         }
 
         /// <summary>
@@ -176,6 +181,8 @@ namespace Andy.Cli.Widgets.Tools
             => snapshot.Status switch
             {
                 ToolCallStatus.Running => (SpinnerFrame(snapshot.StartedAtUtc), theme.ToolRunning),
+                // Not a spinner: nothing is happening, and an animation says otherwise.
+                ToolCallStatus.AwaitingApproval => ("?", theme.Warning),
                 ToolCallStatus.Success => ("*", theme.Success),
                 ToolCallStatus.Failed => ("x", theme.Error),
                 ToolCallStatus.Cancelled => ("-", theme.Warning),

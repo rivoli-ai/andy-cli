@@ -64,6 +64,15 @@ public sealed record ToolCallSnapshot
     public bool WasDenied { get; init; }
 
     /// <summary>
+    /// The call is blocked waiting for the user to answer a consent prompt; it has not started.
+    ///
+    /// Without this a waiting call is indistinguishable from a running one - same spinner, same
+    /// ticking clock - so two parallel tools where one is queued behind an approval look like two
+    /// commands running and neither finishing.
+    /// </summary>
+    public bool IsAwaitingApproval { get; init; }
+
+    /// <summary>
     /// The file change this call made, when it was a mutating tool. Computed by the executor
     /// because the tool itself returns neither the old nor the new content.
     /// </summary>
@@ -119,7 +128,7 @@ public sealed record ToolCallSnapshot
 
     /// <summary>Terminal state used to pick the status glyph and color.</summary>
     public ToolCallStatus Status =>
-        !IsComplete ? ToolCallStatus.Running
+        !IsComplete ? (IsAwaitingApproval ? ToolCallStatus.AwaitingApproval : ToolCallStatus.Running)
         : WasDenied ? ToolCallStatus.Denied
         : WasCancelled ? ToolCallStatus.Cancelled
         : IsSuccessful ? ToolCallStatus.Success
@@ -131,6 +140,9 @@ public enum ToolCallStatus
 {
     /// <summary>Still executing.</summary>
     Running,
+
+    /// <summary>Blocked on a consent prompt; the tool has not started.</summary>
+    AwaitingApproval,
 
     /// <summary>Completed successfully.</summary>
     Success,

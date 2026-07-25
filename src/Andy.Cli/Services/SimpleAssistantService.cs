@@ -26,18 +26,14 @@ public class SimpleAssistantService : IDisposable
     // removed from the end-of-turn completion loop. A plain Dictionary raced across these threads and
     // could corrupt internally, surfacing as a NullReferenceException that aborted the whole turn.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime startTime, Dictionary<string, object?>? parameters)> _runningTools = new();
-    // Max agent turns (LLM round-trips, each of which may issue tool calls) per user
-    // message. When this is hit the engine stops with StopReason "max_turns_exceeded"
-    // and returns a full conversation-history dump as its response (see the guard in
-    // ProcessMessageAsync). 10 was far too low for real coding tasks, which routinely
-    // need a dozen+ explore/edit round-trips.
     /// <summary>
-    /// Tool-call round-trips allowed in one request before the agent gives up.
+    /// Agent turns (LLM round-trips, each of which may issue tool calls) allowed per user message.
+    /// When this is hit the engine stops with StopReason "max_turns_exceeded" and returns a full
+    /// conversation-history dump, which the guard in ProcessMessageAsync suppresses.
     ///
-    /// 10 was far too low, then 50 - and a real refactoring session still hits 50, which reads as
-    /// the tool breaking rather than a safety valve doing its job. The default is now high enough
-    /// that only a genuinely runaway loop reaches it, and ANDY_MAX_TURNS overrides it for the
-    /// cases that need more still.
+    /// 10 was far too low, then 50 - and a real refactoring session still hits 50, where it reads
+    /// as the tool breaking rather than a safety valve doing its job. The default is now high
+    /// enough that only a genuinely runaway loop reaches it, and ANDY_MAX_TURNS overrides it.
     /// </summary>
     private static readonly int MaxAgentTurns = ResolveMaxAgentTurns();
 

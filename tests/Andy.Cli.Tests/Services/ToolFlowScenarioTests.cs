@@ -481,6 +481,77 @@ public class ToolFlowScenarioTests : IDisposable
         Assert.Contains("done", string.Join("\n", row.DebugRows(100)));
     }
 
+    [Fact]
+    public async Task ACallBlockedOnConsentSaysSoInsteadOfSpinning()
+    {
+        // Two tools running in parallel where one is queued behind an approval used to look like
+        // two commands running and neither finishing: a waiting call had the same spinner and the
+        // same ticking clock as a working one.
+        var gate = new SemaphoreSlim(0, 1);
+        var executor = Executor((_, _) => Ok(new Dictionary<string, object?> { ["exit_code"] = 0, ["stdout"] = "hi" }), gate);
+
+        var call = executor.ExecuteAsync("execute_command",
+            new Dictionary<string, object?> { ["command"] = "rm -rf build" }, new ToolExecutionContext());
+        await WaitUntil(() => Rows().Count == 1);
+        var row = Rows().Single();
+
+        // Running: a spinner frame and an elapsed clock.
+        Assert.Contains(row.DebugRows(100)[0][0], "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏");
+
+        // Blocked on consent: no spinner, and it says what it is waiting for.
+        Assert.True(_feed.MarkAwaitingApproval("execute_command", awaiting: true));
+        var waiting = RenderedRow(row);
+        Assert.StartsWith("?", waiting);
+        Assert.Contains("waiting for approval", waiting);
+        Assert.DoesNotContain(waiting[0], "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏");
+
+        // Released: back to the running presentation.
+        Assert.True(_feed.MarkAwaitingApproval("execute_command", awaiting: false));
+        Assert.Contains(row.DebugRows(100)[0][0], "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏");
+
+        gate.Release();
+        await call;
+        Assert.True(row.Snapshot.IsComplete);
+    }
+
+    [Fact]
+    public async Task OnlyTheWaitingCallIsMarkedWhenTwoRunInParallel()
+    {
+        var gate = new SemaphoreSlim(0, 2);
+        var executor = Executor((_, _) => Ok(new Dictionary<string, object?> { ["exit_code"] = 0 }), gate);
+
+        var first = executor.ExecuteAsync("read_file",
+            new Dictionary<string, object?> { ["file_path"] = "a.cs" }, new ToolExecutionContext());
+        await WaitUntil(() => Rows().Count == 1);
+        var second = executor.ExecuteAsync("execute_command",
+            new Dictionary<string, object?> { ["command"] = "ls" }, new ToolExecutionContext());
+        await WaitUntil(() => Rows().Count == 2);
+
+        _feed.MarkAwaitingApproval("execute_command", awaiting: true);
+
+        Assert.False(Rows()[0].Snapshot.IsAwaitingApproval);   // the read is genuinely working
+        Assert.True(Rows()[1].Snapshot.IsAwaitingApproval);    // the command is blocked on the user
+
+        gate.Release(2);
+        await Task.WhenAll(first, second);
+    }
+
+    [Fact]
+    public void MarkingAnUnknownToolChangesNothing()
+    {
+        Assert.False(_feed.MarkAwaitingApproval("no_such_tool", awaiting: true));
+    }
+
+    // Renders through the real display list, then flattens row 0.
+    private static string RenderedRow(ToolCallItem row)
+    {
+        var b = new Andy.Tui.DisplayList.DisplayListBuilder();
+        row.RenderSlice(0, 0, 100, 0, row.MeasureLineCount(100),
+            new Andy.Tui.DisplayList.DisplayListBuilder().Build(), b);
+        return string.Concat(b.Build().Ops.OfType<Andy.Tui.DisplayList.TextRun>()
+            .Where(t => t.Y == 0).OrderBy(t => t.X).Select(t => t.Content));
+    }
+
     private static async Task WaitUntil(Func<bool> condition, int timeoutMs = 2000)
     {
         var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);

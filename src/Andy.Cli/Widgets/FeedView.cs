@@ -318,6 +318,36 @@ namespace Andy.Cli.Widgets
         }
 
         /// <summary>
+        /// Mark the newest unfinished row for <paramref name="toolName"/> as blocked on (or
+        /// released from) a consent prompt.
+        ///
+        /// The permission gate runs inside the executor, after the row is opened, so by the time a
+        /// prompt is raised the row exists and can say what it is actually doing. Without this a
+        /// waiting call spins with a ticking clock exactly like a running one.
+        /// </summary>
+        /// <returns>True when a row matched.</returns>
+        public bool MarkAwaitingApproval(string toolName, bool awaiting)
+        {
+            if (string.IsNullOrEmpty(toolName)) return false;
+            var normalized = Services.ToolCallSummarizer.NormalizeToolName(toolName);
+
+            lock (_itemsLock)
+            {
+                for (int i = _items.Count - 1; i >= 0; i--)
+                {
+                    if (_items[i] is Tools.ToolCallItem call
+                        && !call.Snapshot.IsComplete
+                        && call.Snapshot.ToolName == normalized)
+                    {
+                        call.Update(s => s with { IsAwaitingApproval = awaiting });
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
         /// Whether the feed holds a tool row with this id that has not completed yet.
         ///
         /// The executor uses this to reject a stale id before adopting it: the tracker's

@@ -98,11 +98,22 @@ public sealed class CliPermissionPrompt : IPermissionPrompt
 
         var pending = new PendingPermissionRequest { Request = request };
         cancellationToken.Register(() => pending.Completion.TrySetResult(PermissionDecision.DenyOnce));
+
+        // Tell the feed this call is blocked on the user rather than working. The gate runs inside
+        // the executor, after the row was opened, so the row exists to be marked. Without it a
+        // queued approval looks exactly like a long-running command.
+        var feed = ToolExecutionTracker.Instance.GetFeedView();
+        feed?.MarkAwaitingApproval(request.ToolId, awaiting: true);
+
         _broker.Enqueue(pending);
 
         // After the UI resolves the decision, broaden a session Allow so similar commands are not re-prompted.
         return pending.Completion.Task.ContinueWith(t =>
         {
+            // Cleared on every resolution path - allowed, denied, or cancelled - so a row can
+            // never be left claiming it is waiting for an answer that already arrived.
+            feed?.MarkAwaitingApproval(request.ToolId, awaiting: false);
+
             var decision = t.Result;
             if (decision.Allowed && decision.Persist == PersistScope.Session)
             {
