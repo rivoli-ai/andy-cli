@@ -13,6 +13,7 @@ namespace Andy.Cli.Tests.Services
     /// Tests for the tool-call loop guard: repeated identical (tool, args) calls within a sliding
     /// window are short-circuited so the agent stops spinning and burning tokens.
     /// </summary>
+    [Collection(Andy.Cli.Tests.Services.ToolExecutionTrackerCollection.Name)]
     public class ToolCallLoopDetectionTests
     {
         [Fact]

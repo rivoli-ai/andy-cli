@@ -31,7 +31,7 @@ namespace Andy.Cli.Tests.Integration;
 /// syntax-highlighted, so "removed is red" is carried by the sign column and the row tint rather
 /// than by the color of the text itself - which is what these tests assert.
 /// </summary>
-[Collection("bash-tool-env")]
+[Collection(Andy.Cli.Tests.Services.ToolExecutionTrackerCollection.Name)]
 public sealed class FileDiffRenderingIntegrationTests
 {
     /// <summary>Builds the CLI's real permission-gated executor wiring with an auto-allowing broker.</summary>

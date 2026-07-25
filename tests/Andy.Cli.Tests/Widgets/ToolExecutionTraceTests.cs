@@ -7,19 +7,22 @@ namespace Andy.Cli.Tests.Widgets;
 
 public class ToolExecutionTraceTests
 {
-    // AddToolExecutionStart appends exactly one RunningToolItem followed by exactly one trailing
+    // AddToolExecutionStart appends exactly one tool row followed by exactly one trailing
     // SpacerItem (visual separation). The assertions below pin the EXACT feed-item sequence rather
     // than filtering, so any stray or duplicate item beyond the expected spacer fails the test and a
     // feed-bloat regression cannot slip through.
+    //
+    // Every tool now renders through ToolCallItem, including ones with no dedicated presenter;
+    // the sequence and the in-place update behavior are unchanged.
     private static IReadOnlyList<IFeedItem> Items(FeedView feed) => feed.GetItemsForTesting();
 
-    private static bool IsRunningTool(IFeedItem item) => item.GetType().Name == "RunningToolItem";
+    private static bool IsRunningTool(IFeedItem item) => item is Andy.Cli.Widgets.Tools.ToolCallItem;
 
-    private static List<IFeedItem> RunningTools(FeedView feed)
-        => feed.GetItemsForTesting().Where(IsRunningTool).ToList();
+    private static List<Andy.Cli.Widgets.Tools.ToolCallItem> RunningTools(FeedView feed)
+        => feed.GetItemsForTesting().OfType<Andy.Cli.Widgets.Tools.ToolCallItem>().ToList();
 
     [Fact]
-    public void AddToolExecutionStart_WithParameters_CreatesRunningToolItem()
+    public void AddToolExecutionStart_WithParameters_CreatesAToolRow()
     {
         // Arrange
         var feedView = new FeedView();
@@ -70,10 +73,7 @@ public class ToolExecutionTraceTests
             item => Assert.True(IsRunningTool(item)),
             item => Assert.IsType<SpacerItem>(item));
 
-        var runningTool = RunningTools(feedView)[0];
-        var isCompleteProperty = runningTool.GetType().GetProperty("IsComplete");
-        Assert.NotNull(isCompleteProperty);
-        Assert.True((bool)isCompleteProperty.GetValue(runningTool)!);
+        Assert.True(RunningTools(feedView)[0].Snapshot.IsComplete);
     }
 
     [Fact]
@@ -102,11 +102,6 @@ public class ToolExecutionTraceTests
             item => Assert.IsType<SpacerItem>(item));
 
         // Both should be complete
-        foreach (var item in RunningTools(feedView))
-        {
-            var isCompleteProperty = item.GetType().GetProperty("IsComplete");
-            Assert.NotNull(isCompleteProperty);
-            Assert.True((bool)isCompleteProperty.GetValue(item)!);
-        }
+        Assert.All(RunningTools(feedView), item => Assert.True(item.Snapshot.IsComplete));
     }
 }

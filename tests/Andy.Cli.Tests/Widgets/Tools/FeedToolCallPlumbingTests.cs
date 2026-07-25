@@ -30,18 +30,18 @@ public class FeedToolCallPlumbingTests
     }
 
     [Fact]
-    public void ToolsWithoutAPresenterKeepTheLegacyItem()
+    public void ToolsWithoutAPresenterAlsoUseTheNewItem()
     {
-        // The migration is incremental: a tool whose presenter has not been written yet must
-        // keep rendering exactly as it did.
+        // A third-party or MCP tool this build has never seen gets the generic presenter rather
+        // than the legacy item, so it too names its arguments and completes when the tool returns.
         var feed = new FeedView();
 
-        // A third-party tool nothing in the registry claims must render exactly as before.
         feed.AddToolExecutionStart("vendor_widget_1", "vendor_widget",
             new Dictionary<string, object?> { ["action"] = "list" });
 
-        Assert.Empty(feed.GetItemsForTesting().OfType<ToolCallItem>());
-        Assert.NotEmpty(feed.GetItemsForTesting().OfType<RunningToolItem>());
+        var row = Assert.Single(feed.GetItemsForTesting().OfType<ToolCallItem>());
+        Assert.Empty(feed.GetItemsForTesting().OfType<RunningToolItem>());
+        Assert.Contains("list", string.Join("\n", row.DebugRows(80)));
     }
 
     [Fact]

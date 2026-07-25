@@ -11,6 +11,7 @@ using Moq;
 
 namespace Andy.Cli.Tests.Services
 {
+    [Collection(Andy.Cli.Tests.Services.ToolExecutionTrackerCollection.Name)]
     public class ToolResultDisplayTest
     {
         [Fact]

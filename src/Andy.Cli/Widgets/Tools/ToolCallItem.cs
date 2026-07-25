@@ -141,7 +141,12 @@ namespace Andy.Cli.Widgets.Tools
             ToolCallSnapshot snapshot, Themes.Theme theme, StyledLine headerRow)
         {
             var (glyph, color) = StatusGlyph(snapshot, theme);
-            b.DrawText(new DL.TextRun(x, y, glyph, color, null,
+
+            // The glyph is padded to the full gutter width. Drawing only the glyph left the column
+            // beside it never painted, so whatever the terminal had there - including a parked
+            // cursor - stayed visible between the spinner and the header text.
+            var marker = glyph.Length >= GlyphWidth ? glyph : glyph.PadRight(GlyphWidth);
+            b.DrawText(new DL.TextRun(x, y, marker, color, null,
                 snapshot.IsComplete ? DL.CellAttrFlags.Bold : DL.CellAttrFlags.None));
 
             int bodyX = x + GlyphWidth;
@@ -149,6 +154,18 @@ namespace Andy.Cli.Widgets.Tools
             if (bodyWidth <= 0) return;
 
             headerRow.Render(b, bodyX, y, bodyWidth, theme.ToolName);
+
+            // A running call's elapsed clock is drawn HERE rather than baked into the cached row
+            // plan. The plan is only rebuilt when the width, the mode or the snapshot changes -
+            // none of which happen while a call is simply taking a long time - so an elapsed time
+            // stored in the plan froze at whatever it read on the first frame, and a call that ran
+            // for thirty seconds kept reporting "16ms".
+            if (snapshot.IsComplete) return;
+
+            var elapsed = "  " + ToolOutputFormatter.FormatDuration(DateTime.UtcNow - snapshot.StartedAtUtc);
+            int elapsedX = bodyX + headerRow.Width;
+            if (elapsedX + elapsed.Length <= x + width)
+                b.DrawText(new DL.TextRun(elapsedX, y, elapsed, theme.TextDim, null, DL.CellAttrFlags.None));
         }
 
         /// <summary>
@@ -192,9 +209,12 @@ namespace Andy.Cli.Widgets.Tools
 
             var plan = new List<(StyledLine, RowKind)>();
 
-            // Header, wrapped into the space left by the glyph column.
+            // Header, wrapped into the space left by the glyph column. A running call's trailing
+            // metric is NOT baked in: it is the elapsed clock, which has to be recomputed every
+            // frame (see DrawHeaderRow), and a cached copy of it would freeze.
             int headerWidth = Math.Max(1, width - GlyphWidth);
-            var headerRows = AppendTrailing(_presentation.Header, _presentation.Trailing, headerWidth, theme)
+            var trailing = _snapshot.IsComplete ? _presentation.Trailing : null;
+            var headerRows = AppendTrailing(_presentation.Header, trailing, headerWidth, theme)
                 .Wrap(headerWidth)
                 .ToList();
 

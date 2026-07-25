@@ -102,6 +102,19 @@ namespace Andy.Cli.Services
             // This executor is the only place that straddles the execution and already holds the
             // arguments, so it is the right place to open the row.
             var feedViewForStart = ToolExecutionTracker.Instance.GetFeedView();
+
+            // Reject a resolved id that does not point at a row still waiting to complete. The
+            // last two lookups above are name-keyed fallbacks over maps that are never cleared, so
+            // they cheerfully return a row from an EARLIER turn. Adopting it means completing an
+            // already-finished row (a no-op) while the real call gets no row of its own - which is
+            // how a bare "Running a command" with no arguments ended up spinning forever.
+            if (!string.IsNullOrEmpty(uiToolId) && feedViewForStart != null
+                && !feedViewForStart.HasIncompleteToolRow(uiToolId))
+            {
+                _logger?.LogWarning("[UI_EXECUTOR] Discarding stale UI id {UiId} for {ToolId}", uiToolId, toolId);
+                uiToolId = null;
+            }
+
             if (string.IsNullOrEmpty(uiToolId) && feedViewForStart != null)
             {
                 uiToolId = ToolExecutionTracker.Instance.CreateExecutorRowId(toolId);

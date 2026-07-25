@@ -26,6 +26,7 @@ namespace Andy.Cli.Tests.Services;
 ///
 /// These tests drive the executor in the engine's real order: nothing enqueued beforehand.
 /// </summary>
+[Collection(Andy.Cli.Tests.Services.ToolExecutionTrackerCollection.Name)]
 public class ToolRowLifecycleTests : IDisposable
 {
     private sealed class StubExecutor : IToolExecutor
