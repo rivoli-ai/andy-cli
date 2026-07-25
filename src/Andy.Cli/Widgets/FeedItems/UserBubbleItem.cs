@@ -4,36 +4,104 @@ using DL = Andy.Tui.DisplayList;
 
 namespace Andy.Cli.Widgets
 {
+    public enum UserMessageQueueState
+    {
+        Sent,
+        Queued,
+        Processing,
+    }
+
     /// <summary>User message bubble with rounded-ish border and colored label.</summary>
     public sealed class UserBubbleItem : IFeedItem
     {
-        private readonly string _text;
+        private string _text;
         private readonly int _messageNumber;
+        private UserMessageQueueState _queueState;
+        private readonly object _stateLock = new();
         // Wrapped body cached per width: the prompt submits the full (possibly multi-line or
         // long, soft-wrapped) message, so the bubble must WRAP it - truncating to the bubble
         // width previously dropped everything past the first visual row.
         private int _cachedWidth = -1;
         private List<string> _cachedBody = new();
 
-        public UserBubbleItem(string text, int messageNumber = 0)
+        public UserBubbleItem(
+            string text,
+            int messageNumber = 0,
+            UserMessageQueueState queueState = UserMessageQueueState.Sent)
         {
             _text = text ?? string.Empty;
             _messageNumber = messageNumber;
+            _queueState = queueState;
         }
 
-        private string Label => _messageNumber > 0 ? $"You (#{_messageNumber}): " : "You: ";
+        private string Label
+        {
+            get
+            {
+                var number = _messageNumber > 0 ? $"#{_messageNumber}" : string.Empty;
+                var state = _queueState switch
+                {
+                    UserMessageQueueState.Queued => "queued",
+                    UserMessageQueueState.Processing => "processing",
+                    _ => string.Empty,
+                };
+                var detail = string.Join(", ", new[] { number, state }.Where(s => s.Length > 0));
+                return detail.Length > 0 ? $"You ({detail}): " : "You: ";
+            }
+        }
+
+        public UserMessageQueueState QueueState
+        {
+            get
+            {
+                lock (_stateLock) return _queueState;
+            }
+        }
+
+        public string Text
+        {
+            get
+            {
+                lock (_stateLock) return _text;
+            }
+        }
+
+        public void UpdateQueuedText(string text)
+        {
+            lock (_stateLock)
+            {
+                if (_queueState != UserMessageQueueState.Queued)
+                    throw new InvalidOperationException("Only queued messages can be edited.");
+                _text = text ?? string.Empty;
+                _cachedWidth = -1;
+                _cachedBody = new List<string>();
+            }
+        }
+
+        public void SetQueueState(UserMessageQueueState state)
+        {
+            lock (_stateLock)
+            {
+                _queueState = state;
+                _cachedWidth = -1;
+                _cachedBody = new List<string>();
+            }
+        }
 
         private List<string> Body(int width)
         {
-            if (width == _cachedWidth) return _cachedBody;
-            int inner = Math.Max(1, width - 4);
-            // The label shares the first row with the start of the message, so the first wrapped
-            // row gets that much less room; the rest use the full inner width.
-            int firstWidth = Math.Max(1, inner - Label.Length);
-            _cachedBody = WrapInline(_text, firstWidth, inner);
-            if (_cachedBody.Count == 0) _cachedBody.Add(string.Empty);
-            _cachedWidth = width;
-            return _cachedBody;
+            lock (_stateLock)
+            {
+                if (width == _cachedWidth) return _cachedBody;
+                int inner = Math.Max(1, width - 4);
+                // The label shares the first row with the start of the message, so the first wrapped
+                // row gets that much less room; the rest use the full inner width.
+                int firstWidth = Math.Max(1, inner - Label.Length);
+                _cachedBody = WrapInline(_text, firstWidth, inner);
+                if (_cachedBody.Count == 0) _cachedBody.Add(string.Empty);
+                _cachedWidth = width;
+                return _cachedBody;
+            }
         }
 
         // top border + wrapped body rows (label shares the first one) + bottom border

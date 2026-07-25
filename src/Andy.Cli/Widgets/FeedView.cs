@@ -204,6 +204,15 @@ namespace Andy.Cli.Widgets
             AddItem(decision);
             AddItem(new SpacerItem(1));
         }
+        /// <summary>Append a queued user message and return its mutable feed item.</summary>
+        public UserBubbleItem AddQueuedUserMessage(string text, int messageNumber)
+        {
+            AddItem(new SpacerItem(1));
+            var item = new UserBubbleItem(text, messageNumber, UserMessageQueueState.Queued);
+            AddItem(item);
+            AddItem(new SpacerItem(1));
+            return item;
+        }
         /// <summary>Append a response separator with token information.</summary>
         public void AddResponseSeparator(int inputTokens = 0, int outputTokens = 0, string pattern = "━━ ◆ ━━") => AddItem(new ResponseSeparatorItem(inputTokens, outputTokens, pattern));
 

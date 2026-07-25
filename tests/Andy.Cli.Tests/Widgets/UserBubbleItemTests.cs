@@ -87,4 +87,30 @@ public class UserBubbleItemTests
         var maxRow = b.Build().Ops.OfType<DL.TextRun>().Select(r => r.Y).DefaultIfEmpty(-1).Max();
         Assert.Equal(measured - 1, maxRow); // last drawn row is the bottom border at measured-1
     }
+
+    [Fact]
+    public void QueuedMessageCanBeEditedUntilProcessingStarts()
+    {
+        var item = new UserBubbleItem("draft", 4, UserMessageQueueState.Queued);
+
+        item.UpdateQueuedText("revised message");
+
+        Assert.Equal("revised message", item.Text);
+        Assert.Contains("queued", Render(item, 60));
+        item.SetQueueState(UserMessageQueueState.Processing);
+        Assert.Throws<InvalidOperationException>(() => item.UpdateQueuedText("too late"));
+        Assert.Contains("processing", Render(item, 60));
+    }
+
+    [Fact]
+    public void SentQueuedMessageReturnsToNormalLabel()
+    {
+        var item = new UserBubbleItem("hello", 4, UserMessageQueueState.Queued);
+        item.SetQueueState(UserMessageQueueState.Sent);
+
+        var rendered = Render(item, 60);
+        Assert.Contains("You (#4)", rendered);
+        Assert.DoesNotContain("queued", rendered);
+        Assert.DoesNotContain("processing", rendered);
+    }
 }

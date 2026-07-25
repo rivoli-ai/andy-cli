@@ -277,6 +277,11 @@ class Program
             int lastReflowSig = int.MinValue; // forces a full clear+repaint on the first frame
             var promptHistory = new List<string>(); // Store user prompts for history navigation
             int historyIndex = -1; // -1 means not navigating history, showing current input
+            var pendingMessages = new Andy.Cli.Services.PendingMessageQueue();
+            var queuedDisplays = new System.Collections.Concurrent.ConcurrentDictionary<long, Andy.Cli.Widgets.UserBubbleItem>();
+            var pendingByHistoryIndex = new System.Collections.Concurrent.ConcurrentDictionary<int, long>();
+            var messagePumpLock = new object();
+            long? editingPendingMessageId = null;
 
             var toast = new Toast(); // Don't show initial toast as it interferes with prompt
             var tokenCounter = new TokenCounter();
@@ -1167,6 +1172,72 @@ class Program
                 return confirmExit;
             }
 
+            void StartMessagePump(string firstMessage)
+            {
+                _ = Task.Run(async () =>
+                {
+                    string currentMessage = firstMessage;
+                    long? currentQueuedId = null;
+
+                    while (true)
+                    {
+                        try
+                        {
+                            contextStatusBar.SetStatusText("Thinking", animated: true);
+                            var service = aiService;
+                            if (service == null) break;
+
+                            await service.ProcessMessageAsync(currentMessage, enableStreaming: false);
+
+                            // Persist the transcript after every completed turn so the
+                            // session survives an exit or crash and can be resumed later.
+                            SaveSession();
+                            contextStatusBar.SetStatusText("Ready", animated: false);
+                        }
+                        catch (Exception ex)
+                        {
+                            Andy.Cli.Services.CrashLog.Write("interactive.ProcessMessageAsync", ex);
+                            feed.AddMarkdownRich(ConsoleColors.ErrorPrefix(ex.Message));
+                            feed.AddMarkdownRich(ConsoleColors.ErrorPrefix(
+                                $"        (full trace: {Andy.Cli.Services.CrashLog.Path})"));
+                            contextStatusBar.SetStatusText("Error occurred", animated: false);
+                        }
+                        finally
+                        {
+                            if (currentQueuedId is long completedId &&
+                                queuedDisplays.TryGetValue(completedId, out var completedDisplay))
+                            {
+                                completedDisplay.SetQueueState(Andy.Cli.Widgets.UserMessageQueueState.Sent);
+                            }
+                        }
+
+                        Andy.Cli.Services.PendingUserMessage? next = null;
+                        lock (messagePumpLock)
+                        {
+                            if (pendingMessages.TryDequeue(out var dequeued))
+                            {
+                                next = dequeued;
+                            }
+                            else
+                            {
+                                isProcessingMessage = false;
+                            }
+                        }
+
+                        if (next == null) break;
+
+                        currentMessage = next.Text;
+                        currentQueuedId = next.Id;
+                        if (queuedDisplays.TryGetValue(next.Id, out var queuedDisplay))
+                        {
+                            queuedDisplay.SetQueueState(Andy.Cli.Widgets.UserMessageQueueState.Processing);
+                        }
+                    }
+
+                    prompt.SetShowCaret(true);
+                });
+            }
+
             while (running)
             {
                 // Check for terminal resize
@@ -1430,6 +1501,12 @@ class Program
                             if (historyIndex >= 0 && historyIndex < promptHistory.Count)
                             {
                                 prompt.SetText(promptHistory[historyIndex]);
+                                editingPendingMessageId = null;
+                                if (pendingByHistoryIndex.TryGetValue(historyIndex, out var pendingId) &&
+                                    pendingMessages.Contains(pendingId))
+                                {
+                                    editingPendingMessageId = pendingId;
+                                }
                             }
                             return;
                         }
@@ -1444,10 +1521,17 @@ class Program
                                     // Reached the end - clear prompt
                                     historyIndex = -1;
                                     prompt.SetText("");
+                                    editingPendingMessageId = null;
                                 }
                                 else
                                 {
                                     prompt.SetText(promptHistory[historyIndex]);
+                                    editingPendingMessageId = null;
+                                    if (pendingByHistoryIndex.TryGetValue(historyIndex, out var pendingId) &&
+                                        pendingMessages.Contains(pendingId))
+                                    {
+                                        editingPendingMessageId = pendingId;
+                                    }
                                 }
                             }
                             return;
@@ -1465,8 +1549,44 @@ class Program
                     {
                         feed.SnapToBottom();
                     }
-                    if (submitted is string cmd && !string.IsNullOrWhiteSpace(cmd) && !isProcessingMessage)
+                    if (submitted is string cmd && !string.IsNullOrWhiteSpace(cmd))
                     {
+                        bool processingNow;
+                        lock (messagePumpLock) processingNow = isProcessingMessage;
+                        if (processingNow)
+                        {
+                            if (editingPendingMessageId is long editId &&
+                                pendingMessages.TryUpdate(editId, cmd, out var revised))
+                            {
+                                int revisedHistoryIndex = revised.MessageNumber - 1;
+                                if (revisedHistoryIndex >= 0 && revisedHistoryIndex < promptHistory.Count)
+                                {
+                                    promptHistory[revisedHistoryIndex] = revised.Text;
+                                }
+                                if (queuedDisplays.TryGetValue(editId, out var revisedDisplay))
+                                {
+                                    revisedDisplay.UpdateQueuedText(revised.Text);
+                                }
+                                toast.Show($"Updated queued message #{revised.MessageNumber}", 90);
+                            }
+                            else
+                            {
+                                promptHistory.Add(cmd);
+                                int queuedMessageNumber = promptHistory.Count;
+                                var queued = pendingMessages.Enqueue(cmd, queuedMessageNumber);
+                                pendingByHistoryIndex[queuedMessageNumber - 1] = queued.Id;
+                                queuedDisplays[queued.Id] =
+                                    feed.AddQueuedUserMessage(cmd, queuedMessageNumber);
+                                toast.Show(
+                                    $"Queued message #{queuedMessageNumber} ({pendingMessages.Count} pending)",
+                                    90);
+                            }
+
+                            editingPendingMessageId = null;
+                            historyIndex = -1;
+                            return;
+                        }
+
                         // Check for slash commands
                         if (cmd.StartsWith("/"))
                         {
@@ -1718,40 +1838,13 @@ class Program
 
                         if (aiService != null)
                         {
-                            // Run the assistant processing on a background task so UI can update
-                            isProcessingMessage = true;
-                            prompt.SetShowCaret(false); // Hide cursor during processing
-                            _ = Task.Run(async () =>
+                            // Run the assistant on a background pump. Further submissions are
+                            // queued and remain editable until this pump dequeues them.
+                            lock (messagePumpLock)
                             {
-                                try
-                                {
-                                    contextStatusBar.SetStatusText("Thinking", animated: true);
-
-                                    // Process message with tool support (streaming disabled until properly implemented)
-                                    var response = await aiService.ProcessMessageAsync(cmd, enableStreaming: false);
-
-                                    // Persist the transcript after every completed turn so the
-                                    // session survives an exit or crash and can be resumed later
-                                    // with --resume/--continue (issue #231).
-                                    SaveSession();
-
-                                    // Token counter is now updated in real-time by SimpleAssistantService
-
-                                    contextStatusBar.SetStatusText("Ready", animated: false);
-                                }
-                                catch (Exception ex)
-                                {
-                                    Andy.Cli.Services.CrashLog.Write("interactive.ProcessMessageAsync", ex);
-                                    feed.AddMarkdownRich(ConsoleColors.ErrorPrefix(ex.Message));
-                                    feed.AddMarkdownRich(ConsoleColors.ErrorPrefix($"        (full trace: {Andy.Cli.Services.CrashLog.Path})"));
-                                    contextStatusBar.SetStatusText("Error occurred", animated: false);
-                                }
-                                finally
-                                {
-                                    isProcessingMessage = false;
-                                    prompt.SetShowCaret(true); // Show cursor again when done
-                                }
-                            });
+                                isProcessingMessage = true;
+                            }
+                            StartMessagePump(cmd);
                         }
                         // No fallback - if aiService is null, the user needs to configure API keys
                         // The initialization error message above already informed them
@@ -2100,13 +2193,14 @@ class Program
                     scheduler.SetMetricsSink(hud);
                 }
                 await scheduler.RenderOnceAsync(builder.Build(), viewport, caps, pty, CancellationToken.None);
-                // Position terminal cursor as a block inside the prompt (only when not processing)
+                // Position the terminal cursor inside the prompt. Input remains available while
+                // processing so additional messages can be queued and edited.
                 // NOTE: We're using direct Console.Write here instead of going through the TUI library (PTY).
                 // This works because cursor positioning happens after frame rendering and doesn't modify
                 // the display buffer. However, this creates mixed output paths which is not ideal
                 // architecturally. Consider refactoring to route cursor operations through the TUI
                 // library's PTY interface or checking if Andy.Tui has built-in cursor support.
-                if (!isProcessingMessage && !inlineApproval.IsActive && prompt.TryGetTerminalCursor(out int col1, out int row1))
+                if (!inlineApproval.IsActive && prompt.TryGetTerminalCursor(out int col1, out int row1))
                 {
                     if (!cursorStyledShown)
                     {
@@ -2116,9 +2210,9 @@ class Program
                     }
                     Console.Write($"\u001b[{row1};{col1}H");
                 }
-                else if (isProcessingMessage || inlineApproval.IsActive)
+                else if (inlineApproval.IsActive)
                 {
-                    // Hide cursor completely during processing and while an approval is pending
+                    // Hide cursor while an approval is pending and owns the input area.
                     if (cursorStyledShown)
                     {
                         Console.Write("\u001b[?25l"); // Hide cursor
