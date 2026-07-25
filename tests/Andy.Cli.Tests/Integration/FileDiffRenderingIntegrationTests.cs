@@ -21,13 +21,17 @@ namespace Andy.Cli.Tests.Integration;
 
 /// <summary>
 /// End-to-end verification for rivoli-ai/andy-cli#227: a file write/edit must render in the feed
-/// as a git-style diff (removed lines red, added lines green). These tests run the REAL tools
-/// (write_file, replace_text) through the real permission-gated executor and the real
-/// <see cref="UiUpdatingToolExecutor"/> wiring - before-snapshot capture, UnifiedDiff, and
-/// <see cref="FeedView.AddFileDiff"/> - then render the resulting <see cref="FileDiffItem"/> and
-/// assert on the actual colors, not a duplicated heuristic.
+/// as a git-style diff. These tests run the REAL tools (write_file, replace_text) through the
+/// real permission-gated executor and the real <see cref="UiUpdatingToolExecutor"/> wiring -
+/// before-snapshot capture, UnifiedDiff, and the completion that carries the change - then render
+/// the result and assert on the actual colors, not a duplicated heuristic.
+///
+/// Since #253/#254 the change is rendered INSIDE the tool call rather than as a separate item
+/// below it, so a diff stays attached to the call that made it. Diff content is now
+/// syntax-highlighted, so "removed is red" is carried by the sign column and the row tint rather
+/// than by the color of the text itself - which is what these tests assert.
 /// </summary>
-[Collection("bash-tool-env")]
+[Collection(Andy.Cli.Tests.Services.ToolExecutionTrackerCollection.Name)]
 public sealed class FileDiffRenderingIntegrationTests
 {
     /// <summary>Builds the CLI's real permission-gated executor wiring with an auto-allowing broker.</summary>
@@ -120,15 +124,29 @@ public sealed class FileDiffRenderingIntegrationTests
         return (feed, uiToolId);
     }
 
-    private static FileDiffItem SingleDiffItem(FeedView feed)
-        => Assert.Single(feed.GetItemsForTesting().OfType<FileDiffItem>().ToList());
+    private static Andy.Cli.Widgets.Tools.ToolCallItem SingleToolCall(FeedView feed)
+        => Assert.Single(feed.GetItemsForTesting().OfType<Andy.Cli.Widgets.Tools.ToolCallItem>().ToList());
 
     /// <summary>Renders the item full-height and returns its non-empty text runs.</summary>
-    private static List<DL.TextRun> Render(FileDiffItem item)
+    private static List<DL.TextRun> Render(IFeedItem item)
     {
         var b = new DL.DisplayListBuilder();
         item.RenderSlice(0, 0, 120, 0, item.MeasureLineCount(120), new DL.DisplayListBuilder().Build(), b);
         return b.Build().Ops.OfType<DL.TextRun>().Where(r => !string.IsNullOrEmpty(r.Content)).ToList();
+    }
+
+    /// <summary>True when some run on the same row carries the given background tint.</summary>
+    private static bool HasRowWith(List<DL.TextRun> runs, string content, DL.Rgb24 background)
+    {
+        var rows = runs.Where(r => r.Content.Contains(content)).Select(r => r.Y).Distinct();
+        return rows.Any(y => runs.Any(r => r.Y == y && r.Bg.HasValue && r.Bg.Value.Equals(background)));
+    }
+
+    /// <summary>True when a sign column of the given color sits on the same row as the content.</summary>
+    private static bool HasSign(List<DL.TextRun> runs, string content, string sign, DL.Rgb24 color)
+    {
+        var rows = runs.Where(r => r.Content.Contains(content)).Select(r => r.Y).Distinct();
+        return rows.Any(y => runs.Any(r => r.Y == y && r.Content.TrimEnd() == sign && r.Fg.Equals(color)));
     }
 
     [Fact]
@@ -158,16 +176,19 @@ public sealed class FileDiffRenderingIntegrationTests
 
             Assert.True(result.IsSuccessful, result.ErrorMessage);
 
-            var item = SingleDiffItem(feed);
+            var item = SingleToolCall(feed);
             var runs = Render(item);
             var theme = Andy.Cli.Themes.Theme.Current;
 
-            // Git-style header naming the operation and file.
-            Assert.Contains(runs, r => r.Content.Contains("Update(") && r.Content.Contains("sample.txt"));
-            // Removed line in the error (red) color, added lines in the success (green) color.
-            Assert.Contains(runs, r => r.Content.Contains("- bravo") && r.Fg.Equals(theme.Error));
-            Assert.Contains(runs, r => r.Content.Contains("+ BRAVO") && r.Fg.Equals(theme.Success));
-            Assert.Contains(runs, r => r.Content.Contains("+ delta") && r.Fg.Equals(theme.Success));
+            // The header names the operation and the file, and reports the change counts.
+            Assert.Contains(runs, r => r.Content.Contains("Wrote") || r.Content.Contains("sample.txt"));
+            Assert.Contains(runs, r => r.Content.Contains("+2") && r.Content.Contains("-1"));
+            // Removed row: red sign, removed tint. Added rows: green sign, added tint.
+            Assert.True(HasSign(runs, "bravo", "-", theme.Error), "removed line needs a red sign");
+            Assert.True(HasRowWith(runs, "bravo", theme.DiffRemovedBackground), "removed line needs the removed tint");
+            Assert.True(HasSign(runs, "BRAVO", "+", theme.Success), "added line needs a green sign");
+            Assert.True(HasRowWith(runs, "BRAVO", theme.DiffAddedBackground), "added line needs the added tint");
+            Assert.True(HasRowWith(runs, "delta", theme.DiffAddedBackground), "added line needs the added tint");
         }
         finally
         {
@@ -198,15 +219,20 @@ public sealed class FileDiffRenderingIntegrationTests
 
             Assert.True(result.IsSuccessful, result.ErrorMessage);
 
-            var item = SingleDiffItem(feed);
+            var item = SingleToolCall(feed);
             var runs = Render(item);
             var theme = Andy.Cli.Themes.Theme.Current;
 
-            Assert.Contains(runs, r => r.Content.Contains("Create(") && r.Content.Contains("fresh.txt"));
-            Assert.Contains(runs, r => r.Content.Contains("+ first") && r.Fg.Equals(theme.Success));
-            Assert.Contains(runs, r => r.Content.Contains("+ second") && r.Fg.Equals(theme.Success));
+            // A creation reads as a creation, and shows the new file as numbered content rather
+            // than as a diff in which every line happens to be an addition.
+            Assert.Contains(runs, r => r.Content.Contains("Created"));
+            Assert.Contains(runs, r => r.Content.Contains("fresh.txt"));
+            Assert.Contains(runs, r => r.Content.Contains("first"));
+            Assert.Contains(runs, r => r.Content.Contains("second"));
+            Assert.Contains(runs, r => r.Content.Trim() == "1");   // line-number gutter
+            Assert.Contains(runs, r => r.Content.Trim() == "2");
             // A brand-new file has no removed lines.
-            Assert.DoesNotContain(runs, r => r.Content.StartsWith("- "));
+            Assert.DoesNotContain(runs, r => r.Bg.HasValue && r.Bg.Value.Equals(theme.DiffRemovedBackground));
         }
         finally
         {
@@ -245,13 +271,14 @@ public sealed class FileDiffRenderingIntegrationTests
             Assert.True(result.IsSuccessful, result.ErrorMessage);
             Assert.Contains("TWO-EDITED", await File.ReadAllTextAsync(file));
 
-            var item = SingleDiffItem(feed);
+            var item = SingleToolCall(feed);
             var runs = Render(item);
             var theme = Andy.Cli.Themes.Theme.Current;
 
-            Assert.Contains(runs, r => r.Content.Contains("Update(") && r.Content.Contains("edit-me.txt"));
-            Assert.Contains(runs, r => r.Content.Contains("- two") && r.Fg.Equals(theme.Error));
-            Assert.Contains(runs, r => r.Content.Contains("+ TWO-EDITED") && r.Fg.Equals(theme.Success));
+            Assert.Contains(runs, r => r.Content.Contains("Edited"));
+            Assert.Contains(runs, r => r.Content.Contains("edit-me.txt"));
+            Assert.True(HasRowWith(runs, "two", theme.DiffRemovedBackground), "removed line needs the removed tint");
+            Assert.True(HasRowWith(runs, "TWO-EDITED", theme.DiffAddedBackground), "added line needs the added tint");
         }
         finally
         {
@@ -289,12 +316,12 @@ public sealed class FileDiffRenderingIntegrationTests
 
             Assert.True(result.IsSuccessful, result.ErrorMessage);
 
-            var item = SingleDiffItem(feed);
+            var item = SingleToolCall(feed);
             var runs = Render(item);
             var theme = Andy.Cli.Themes.Theme.Current;
 
-            Assert.Contains(runs, r => r.Content.Contains("- green") && r.Fg.Equals(theme.Error));
-            Assert.Contains(runs, r => r.Content.Contains("+ GREEN") && r.Fg.Equals(theme.Success));
+            Assert.True(HasRowWith(runs, "green", theme.DiffRemovedBackground), "removed line needs the removed tint");
+            Assert.True(HasRowWith(runs, "GREEN", theme.DiffAddedBackground), "added line needs the added tint");
         }
         finally
         {

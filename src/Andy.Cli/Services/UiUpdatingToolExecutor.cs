@@ -89,6 +89,46 @@ namespace Andy.Cli.Services
             _logger?.LogWarning("[UI_EXECUTOR] Found UI ID {UiId} for tool {ToolId} with correlation {CorrelationId}",
                 uiToolId, toolId, context.CorrelationId);
 
+            // No row to claim: create one HERE, before the tool runs (rivoli-ai/andy-cli#245).
+            //
+            // The lookups above assume the UI has already created a row, which is what
+            // ToolExecutionTracker.EnqueuePendingTool was written for. But the engine raises its
+            // ToolCalled event only AFTER a call finishes, so on the real ordering there is
+            // nothing to claim: the executor completed nothing, and the row appeared afterwards
+            // with no arguments and no one left to finish it - it spun until the end-of-turn
+            // backstop swept it up when the model's final answer arrived. Worse, the next call
+            // dequeued the PREVIOUS call's row, so every row lagged one call behind.
+            //
+            // This executor is the only place that straddles the execution and already holds the
+            // arguments, so it is the right place to open the row.
+            var feedViewForStart = ToolExecutionTracker.Instance.GetFeedView();
+
+            // Reject a resolved id that does not point at a row still waiting to complete. The
+            // last two lookups above are name-keyed fallbacks over maps that are never cleared, so
+            // they cheerfully return a row from an EARLIER turn. Adopting it means completing an
+            // already-finished row (a no-op) while the real call gets no row of its own - which is
+            // how a bare "Running a command" with no arguments ended up spinning forever.
+            if (!string.IsNullOrEmpty(uiToolId) && feedViewForStart != null
+                && !feedViewForStart.HasIncompleteToolRow(uiToolId))
+            {
+                _logger?.LogWarning("[UI_EXECUTOR] Discarding stale UI id {UiId} for {ToolId}", uiToolId, toolId);
+                uiToolId = null;
+            }
+
+            if (string.IsNullOrEmpty(uiToolId) && feedViewForStart != null)
+            {
+                uiToolId = ToolExecutionTracker.Instance.CreateExecutorRowId(toolId);
+                var startParameters = new Dictionary<string, object?>(parameters ?? new Dictionary<string, object?>())
+                {
+                    // Keep the legacy exact-id convention so RunningToolItem-based tools still match.
+                    ["__toolId"] = uiToolId,
+                    ["__baseName"] = toolId
+                };
+                feedViewForStart.AddToolExecutionStart(uiToolId, toolId, startParameters);
+                _logger?.LogWarning("[UI_EXECUTOR] Created UI row {UiId} for {ToolId} (no pending row to claim)",
+                    uiToolId, toolId);
+            }
+
             // CRITICAL: Track the tool start so we can track completion later
             if (!string.IsNullOrEmpty(uiToolId))
             {
@@ -560,6 +600,34 @@ namespace Andy.Cli.Services
                 _logger?.LogWarning("[UI_EXECUTOR] Tracking completion for {UiToolId} with result: '{Result}'",
                     uiToolId, resultMessage);
 
+                // Hand the feed the FULL structured result first (issue #249). Presenters read
+                // Data and Metadata directly, so nothing they show has to be recovered from the
+                // pre-rendered resultMessage below. When this returns true the call is already
+                // complete and the legacy string-based completion path is a no-op for it.
+                var feedViewForStructuredCompletion = ToolExecutionTracker.Instance.GetFeedView();
+
+                // A file change is the one piece of display data the tool cannot supply: it
+                // overwrites the file and returns neither side, so the diff only exists because
+                // the pre-call snapshot above captured "before". Attaching it to the completion
+                // keeps the change on the call that made it.
+                var fileMutation = result.IsSuccessful && diffCapture != null
+                    ? TryBuildFileMutationView(diffCapture)
+                    : null;
+
+                bool renderedStructurally = feedViewForStructuredCompletion?.CompleteToolCall(
+                    uiToolId, new ToolResults.ToolCallCompletion
+                    {
+                        IsSuccessful = result.IsSuccessful,
+                        Data = result.Data,
+                        Metadata = result.Metadata,
+                        ErrorMessage = result.ErrorMessage,
+                        Message = result.Message,
+                        Duration = toolStopwatch.Elapsed,
+                        WasCancelled = result.WasCancelled,
+                        WasDenied = IsPermissionDenial(result),
+                        FileMutation = fileMutation
+                    }) ?? false;
+
                 ToolExecutionTracker.Instance.TrackToolComplete(uiToolId, result.IsSuccessful, resultMessage, result.Data);
 
                 // Stop the spinner immediately now that the tool has returned data. Previously the
@@ -571,8 +639,11 @@ namespace Andy.Cli.Services
                 feedViewForCompletion?.AddToolExecutionComplete(
                     uiToolId, result.IsSuccessful, FormatToolDuration(toolStopwatch.Elapsed), resultMessage);
 
-                // Render a git-style diff for a successful file write/edit, right under the tool line.
-                if (result.IsSuccessful && diffCapture != null && feedViewForCompletion != null)
+                // Render a git-style diff for a successful file write/edit, right under the tool
+                // line. Only for tools still on the legacy path: a presenter-backed call already
+                // received the same change on its completion and renders it inside the call, so
+                // emitting a second item here would show the diff twice.
+                if (result.IsSuccessful && diffCapture != null && feedViewForCompletion != null && !renderedStructurally)
                 {
                     TryRenderFileDiff(diffCapture, feedViewForCompletion);
                 }
@@ -612,6 +683,24 @@ namespace Andy.Cli.Services
         /// Andy.Permissions gate decides actual consent per call; these flags only stop the lower-level
         /// capability checks from blocking a tool before the gate runs.
         /// </summary>
+        /// <summary>
+        /// Whether a failed result is the permission gate refusing the call rather than the tool
+        /// failing on its own terms (#264). The two look identical in the feed otherwise, and they
+        /// mean very different things: a denial is something the user can change their mind about.
+        ///
+        /// The gate short-circuits without running the tool, so a denial is a failure that carries
+        /// no data and names permission in its message. A tool's own "Access denied" - a path
+        /// outside the permitted roots, say - reaches here having actually run, and is left as an
+        /// ordinary failure.
+        /// </summary>
+        internal static bool IsPermissionDenial(ToolExecutionResult result)
+        {
+            if (result.IsSuccessful || result.Data is not null) return false;
+            var message = result.ErrorMessage;
+            return !string.IsNullOrEmpty(message)
+                && message.Contains("permission", StringComparison.OrdinalIgnoreCase);
+        }
+
         /// <summary>Format an elapsed tool duration the same way the feed status line does.</summary>
         private static string FormatToolDuration(TimeSpan elapsed)
         {
@@ -743,6 +832,39 @@ namespace Andy.Cli.Services
             catch (Exception ex)
             {
                 _logger?.LogWarning(ex, "[UI_EXECUTOR] Failed to capture pre-write content for {ToolId}", toolId);
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Read the file back after a successful mutation and compute the change, as structured
+        /// data for the presenter. Returns null when there is nothing meaningful to show - the
+        /// file is gone, too large, binary, or the write produced no visible change.
+        /// </summary>
+        private ToolResults.FileMutationView? TryBuildFileMutationView(FileMutationCapture capture)
+        {
+            try
+            {
+                if (!File.Exists(capture.ResolvedPath)) return null; // e.g. the tool deleted it
+                if (new FileInfo(capture.ResolvedPath).Length > MaxDiffFileBytes) return null;
+
+                var after = File.ReadAllText(capture.ResolvedPath);
+                if (after.Contains('\0')) return null; // binary
+
+                var diff = UnifiedDiff.Compute(capture.BeforeText, after);
+                if (diff.IsEmpty) return null; // identical write / no-op edit
+
+                var kind = capture.Existed ? FileChangeKind.Update : FileChangeKind.Create;
+                return new ToolResults.FileMutationView(
+                    capture.DisplayPath,
+                    kind,
+                    diff,
+                    // Only a creation needs the content: an update is better read as a diff.
+                    kind == FileChangeKind.Create ? after : null);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "[UI_EXECUTOR] Failed to compute file change for {Path}", capture.ResolvedPath);
                 return null;
             }
         }

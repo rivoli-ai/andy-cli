@@ -20,22 +20,23 @@ namespace Andy.Cli.Tests.Services
     /// So a tool that returned in 12ms appeared to hang for the rest of the turn.
     /// The fix moves UI completion into UiUpdatingToolExecutor, the instant the
     /// tool returns its data.
+    ///
+    /// Rows are ToolCallItem now, and completion carries the structured result rather
+    /// than a duration string; the property under test is unchanged - the row must be
+    /// complete as soon as the tool returns, with no end-of-turn pass involved.
     /// </summary>
+    [Collection(Andy.Cli.Tests.Services.ToolExecutionTrackerCollection.Name)]
     public class ToolSpinnerCompletionTests
     {
-        private static RunningToolItem? FindTool(FeedView feed, string toolId)
+        private static Andy.Cli.Widgets.Tools.ToolCallItem? FindTool(FeedView feed, string toolId)
         {
             return feed.GetItemsForTesting()
-                .OfType<RunningToolItem>()
+                .OfType<Andy.Cli.Widgets.Tools.ToolCallItem>()
                 .FirstOrDefault(t => t.ToolId == toolId);
         }
 
-        private static string? ReadDuration(RunningToolItem item)
-        {
-            var field = typeof(RunningToolItem).GetField("_duration",
-                BindingFlags.NonPublic | BindingFlags.Instance);
-            return field?.GetValue(item) as string;
-        }
+        private static TimeSpan? ReadDuration(Andy.Cli.Widgets.Tools.ToolCallItem item)
+            => item.Snapshot.Duration;
 
         [Fact]
         public async Task Spinner_StopsWhenToolReturns_WithoutEndOfTurnLoop()
@@ -64,7 +65,7 @@ namespace Andy.Cli.Tests.Services
             // While the tool runs, the spinner must still be spinning.
             var duringRun = FindTool(feed, uiToolId);
             Assert.NotNull(duringRun);
-            Assert.False(duringRun!.IsComplete);
+            Assert.False(duringRun!.Snapshot.IsComplete);
 
             // Let the tool return.
             gate.SetResult();
@@ -75,7 +76,7 @@ namespace Andy.Cli.Tests.Services
             Assert.True(result.IsSuccessful);
             var afterRun = FindTool(feed, uiToolId);
             Assert.NotNull(afterRun);
-            Assert.True(afterRun!.IsComplete);
+            Assert.True(afterRun!.Snapshot.IsComplete);
         }
 
         [Fact]
@@ -94,8 +95,8 @@ namespace Andy.Cli.Tests.Services
 
             var item = FindTool(feed, toolId);
             Assert.NotNull(item);
-            Assert.True(item!.IsComplete);
-            Assert.Equal("12ms", ReadDuration(item));
+            Assert.True(item!.Snapshot.IsComplete);
+            Assert.Equal(TimeSpan.FromMilliseconds(12), ReadDuration(item));
         }
 
         [Fact]
@@ -118,8 +119,8 @@ namespace Andy.Cli.Tests.Services
             await Task.WhenAll(tasks);
 
             var completed = feed.GetItemsForTesting()
-                .OfType<RunningToolItem>()
-                .Count(t => t.ToolId.StartsWith("race_") && t.IsComplete);
+                .OfType<Andy.Cli.Widgets.Tools.ToolCallItem>()
+                .Count(t => t.ToolId.StartsWith("race_") && t.Snapshot.IsComplete);
             Assert.Equal(count, completed);
         }
 
