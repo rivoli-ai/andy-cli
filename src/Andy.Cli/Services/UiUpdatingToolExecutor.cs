@@ -89,6 +89,33 @@ namespace Andy.Cli.Services
             _logger?.LogWarning("[UI_EXECUTOR] Found UI ID {UiId} for tool {ToolId} with correlation {CorrelationId}",
                 uiToolId, toolId, context.CorrelationId);
 
+            // No row to claim: create one HERE, before the tool runs (rivoli-ai/andy-cli#245).
+            //
+            // The lookups above assume the UI has already created a row, which is what
+            // ToolExecutionTracker.EnqueuePendingTool was written for. But the engine raises its
+            // ToolCalled event only AFTER a call finishes, so on the real ordering there is
+            // nothing to claim: the executor completed nothing, and the row appeared afterwards
+            // with no arguments and no one left to finish it - it spun until the end-of-turn
+            // backstop swept it up when the model's final answer arrived. Worse, the next call
+            // dequeued the PREVIOUS call's row, so every row lagged one call behind.
+            //
+            // This executor is the only place that straddles the execution and already holds the
+            // arguments, so it is the right place to open the row.
+            var feedViewForStart = ToolExecutionTracker.Instance.GetFeedView();
+            if (string.IsNullOrEmpty(uiToolId) && feedViewForStart != null)
+            {
+                uiToolId = ToolExecutionTracker.Instance.CreateExecutorRowId(toolId);
+                var startParameters = new Dictionary<string, object?>(parameters ?? new Dictionary<string, object?>())
+                {
+                    // Keep the legacy exact-id convention so RunningToolItem-based tools still match.
+                    ["__toolId"] = uiToolId,
+                    ["__baseName"] = toolId
+                };
+                feedViewForStart.AddToolExecutionStart(uiToolId, toolId, startParameters);
+                _logger?.LogWarning("[UI_EXECUTOR] Created UI row {UiId} for {ToolId} (no pending row to claim)",
+                    uiToolId, toolId);
+            }
+
             // CRITICAL: Track the tool start so we can track completion later
             if (!string.IsNullOrEmpty(uiToolId))
             {
