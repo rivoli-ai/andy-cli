@@ -378,7 +378,8 @@ public class SimpleAssistantService : IDisposable
 
             // Complete any running tools
             var toolsToComplete = _runningTools.ToList();
-            var toolsWereExecuted = toolsToComplete.Count > 0;
+            int succeededTools = 0;
+            int failedTools = 0;
             foreach (var tool in toolsToComplete)
             {
                 var elapsed = DateTime.UtcNow - tool.Value.startTime;
@@ -554,6 +555,8 @@ public class SimpleAssistantService : IDisposable
                 InstrumentationHub.Instance.Publish(toolCompleteEvent);
 
                 _feed.AddToolExecutionComplete(tool.Key, isSuccess, durationStr, resultSummary);
+                if (isSuccess) succeededTools++;
+                else failedTools++;
                 _runningTools.TryRemove(tool.Key, out _);
             }
 
@@ -610,6 +613,13 @@ public class SimpleAssistantService : IDisposable
             await pipeline.FinalizeAsync();
             await pipeline.DisposeAsync();
 
+            var recap = BuildOperationRecap(duration, succeededTools, failedTools);
+            if (recap != null)
+            {
+                _feed.AddDimText(recap);
+                _feed.AddItem(new SpacerItem(1));
+            }
+
             // Don't propagate the raw history dump as the return value either.
             if (IsMaxTurnsExceeded(result.StopReason))
             {
@@ -650,6 +660,27 @@ public class SimpleAssistantService : IDisposable
 
             return $"Error: {ex.Message}";
         }
+    }
+
+    /// <summary>
+    /// Build compact metadata for a long or operation-heavy turn. Short/simple turns stay
+    /// uncluttered; five operations or thirty seconds is enough to make a recap useful.
+    /// </summary>
+    internal static string? BuildOperationRecap(
+        TimeSpan elapsed,
+        int succeededOperations,
+        int failedOperations)
+    {
+        int total = Math.Max(0, succeededOperations) + Math.Max(0, failedOperations);
+        if (total == 0 || (total < 5 && elapsed < TimeSpan.FromSeconds(30)))
+            return null;
+
+        string duration = elapsed.TotalMinutes >= 1
+            ? $"{elapsed.TotalMinutes:F1}m"
+            : $"{elapsed.TotalSeconds:F1}s";
+        string operations = total == 1 ? "1 operation" : $"{total} operations";
+        return $"Recap: {operations} in {duration} " +
+            $"({Math.Max(0, succeededOperations)} succeeded, {Math.Max(0, failedOperations)} failed).";
     }
 
     /// <summary>
