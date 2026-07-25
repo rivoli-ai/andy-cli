@@ -143,8 +143,8 @@ failure, contract-test failure, machine-readable output, and cleanup.
 
 ## Current known-good snapshot
 
-Do not duplicate the full package list in prose. As of 2026-07-23 the manifest
-records Andy.Engine `2026.7.23-rc.88`, Andy.Tui `2026.7.21-rc.162`, and the exact
+Do not duplicate the full package list in prose. As of 2026-07-25 the manifest
+records Andy.Engine `2026.7.25-rc.92`, Andy.Tui `2026.7.21-rc.162`, and the exact
 versions of every other direct Andy package. `dependency-manifest.json`, the
 project files, and `packages.lock.json` are authoritative if those versions
 change.
