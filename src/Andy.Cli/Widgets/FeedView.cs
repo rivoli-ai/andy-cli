@@ -2684,9 +2684,9 @@ namespace Andy.Cli.Widgets
                     if (!_isComplete)
                     {
                         var spinner = _spinnerFrames[_animationFrame];
-                        var toolDisplay = $"{spinner} {HeaderBody()}";
-                        if (toolDisplay.Length > width) toolDisplay = toolDisplay.Substring(0, Math.Max(0, width - 1));
-                        b.DrawText(new DL.TextRun(x, row, toolDisplay, white, null, DL.CellAttrFlags.None));
+                        DrawHeader(
+                            b, x, row, width, $"{spinner} ", HeaderBody(),
+                            white, Themes.Theme.Current.Info);
                     }
                     else
                     {
@@ -2702,10 +2702,9 @@ namespace Andy.Cli.Widgets
                         const string marker = "*"; // green/red status marker
                         b.DrawText(new DL.TextRun(x, row, marker, symbolColor, null, DL.CellAttrFlags.None));
 
-                        var toolDisplay = $" {HeaderBody()}";
-                        int tx = x + marker.Length;
-                        if (toolDisplay.Length > width - marker.Length) toolDisplay = toolDisplay.Substring(0, Math.Max(0, width - marker.Length - 1));
-                        b.DrawText(new DL.TextRun(tx, row, toolDisplay, white, null, DL.CellAttrFlags.None));
+                        DrawHeader(
+                            b, x + marker.Length, row, width - marker.Length, " ", HeaderBody(),
+                            white, Themes.Theme.Current.Info);
                     }
                     drawn++;
                     continue;
@@ -2732,6 +2731,76 @@ namespace Andy.Cli.Widgets
                 };
                 b.DrawText(new DL.TextRun(x, row, t, color, null, DL.CellAttrFlags.None));
                 drawn++;
+            }
+        }
+
+        /// <summary>
+        /// Draw a tool header as typed display-list runs. Shell command text gets the theme's
+        /// information color while the spinner/status marker and action label retain their
+        /// existing color. Keeping this typed avoids embedding ANSI escapes in feed content.
+        /// </summary>
+        private void DrawHeader(
+            DL.DisplayListBuilder builder,
+            int x,
+            int row,
+            int width,
+            string prefix,
+            string body,
+            DL.Rgb24 textColor,
+            DL.Rgb24 commandColor)
+        {
+            if (width <= 0) return;
+
+            int commandStart = -1;
+            int commandLength = 0;
+            bool commandTool = _toolName.Contains("command", StringComparison.OrdinalIgnoreCase)
+                || _toolName.Contains("bash", StringComparison.OrdinalIgnoreCase);
+            if (commandTool)
+            {
+                const string friendlyPrefix = "Running: ";
+                int rawKey = body.IndexOf("command=", StringComparison.OrdinalIgnoreCase);
+                if (body.StartsWith(friendlyPrefix, StringComparison.Ordinal))
+                {
+                    commandStart = friendlyPrefix.Length;
+                    commandLength = body.Length - commandStart;
+                }
+                else if (rawKey >= 0)
+                {
+                    commandStart = rawKey + "command=".Length;
+                    int comma = body.IndexOf(',', commandStart);
+                    int close = body.IndexOf(')', commandStart);
+                    int end = comma >= 0 ? comma : close >= 0 ? close : body.Length;
+                    commandLength = Math.Max(0, end - commandStart);
+                }
+            }
+
+            var segments = new List<(string text, DL.Rgb24 color)>();
+            if (!string.IsNullOrEmpty(prefix))
+                segments.Add((prefix, textColor));
+            if (commandStart >= 0 && commandLength > 0)
+            {
+                if (commandStart > 0)
+                    segments.Add((body[..commandStart], textColor));
+                segments.Add((body.Substring(commandStart, commandLength), commandColor));
+                if (commandStart + commandLength < body.Length)
+                    segments.Add((body[(commandStart + commandLength)..], textColor));
+            }
+            else
+            {
+                segments.Add((body, textColor));
+            }
+
+            // Match the existing one-cell safety margin at the right edge.
+            int remaining = Math.Max(0, width - 1);
+            int cx = x;
+            foreach (var (text, color) in segments)
+            {
+                if (remaining == 0) break;
+                var visible = text.Length <= remaining ? text : text[..remaining];
+                if (visible.Length == 0) continue;
+                builder.DrawText(new DL.TextRun(cx, row, visible, color, null, DL.CellAttrFlags.None));
+                cx += visible.Length;
+                remaining -= visible.Length;
             }
         }
 
