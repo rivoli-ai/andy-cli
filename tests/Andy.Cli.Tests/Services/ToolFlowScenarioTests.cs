@@ -447,6 +447,40 @@ public class ToolFlowScenarioTests : IDisposable
         await call;
     }
 
+    [Fact]
+    public async Task ASlowCallShowsASpinnerWhileItRunsAndAMarkerWhenItIsDone()
+    {
+        // Directly checks what a user watching the screen sees: an animated spinner glyph in the
+        // status column for as long as the tool is working, replaced by the completion marker the
+        // moment it returns. A fast tool passes through the running state in milliseconds, which
+        // is why quick commands look instant - that is correct, not a missing spinner.
+        var gate = new SemaphoreSlim(0, 1);
+        var executor = Executor((_, _) => Ok(new Dictionary<string, object?> { ["exit_code"] = 0, ["stdout"] = "done" }), gate);
+
+        var call = executor.ExecuteAsync("execute_command",
+            new Dictionary<string, object?> { ["command"] = "sleep 3" }, new ToolExecutionContext());
+
+        await WaitUntil(() => Rows().Count == 1);
+        var row = Rows().Single();
+
+        // While running: a braille spinner frame, and the command is already named.
+        var running = row.DebugRows(100)[0];
+        Assert.Contains(running[0], "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏");
+        Assert.Contains("sleep 3", running);
+
+        // The frame advances over time rather than standing still.
+        var firstFrame = row.DebugRows(100)[0][0];
+        await WaitUntil(() => row.DebugRows(100)[0][0] != firstFrame, timeoutMs: 1500);
+
+        gate.Release();
+        await call;
+
+        // Done: the completion marker replaces the spinner, and the result is there.
+        var finished = row.DebugRows(100)[0];
+        Assert.StartsWith("*", finished);
+        Assert.Contains("done", string.Join("\n", row.DebugRows(100)));
+    }
+
     private static async Task WaitUntil(Func<bool> condition, int timeoutMs = 2000)
     {
         var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
