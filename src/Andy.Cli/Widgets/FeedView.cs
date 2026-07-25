@@ -49,6 +49,7 @@ namespace Andy.Cli.Widgets
     {
         private readonly List<IFeedItem> _items = new();
         private readonly object _itemsLock = new(); // Thread-safety for _items collection
+        private AgentPlanItem? _agentPlanItem;
         private int _scrollOffset; // lines from bottom; 0 = bottom
         private bool _followTail = true;
         private bool _focused;
@@ -185,6 +186,36 @@ namespace Andy.Cli.Widgets
         /// renderer treats Content as untrusted plain text and rewrites terminal control characters
         /// to visible placeholders, so embedded ESC[90m shows up literally as "[90m" in the feed.</summary>
         public void AddDimText(string text) => AddItem(new DimTextItem(text));
+        /// <summary>
+        /// Add or revise the single structured-plan item. Null and empty plans remove it.
+        /// </summary>
+        internal void UpdateAgentPlan(AgentPlanView? plan)
+        {
+            lock (_itemsLock)
+            {
+                if (plan == null || plan.Items.Count == 0)
+                {
+                    if (_agentPlanItem != null)
+                    {
+                        _items.Remove(_agentPlanItem);
+                        _agentPlanItem = null;
+                    }
+                    return;
+                }
+
+                if (_agentPlanItem == null)
+                {
+                    _agentPlanItem = new AgentPlanItem(plan);
+                    _items.Add(_agentPlanItem);
+                    OnContentAppended();
+                    return;
+                }
+
+                _agentPlanItem.Update(plan);
+                if (_scrollOffset > PinnedToBottomThresholdLines)
+                    _autoScrollHoldAnchor = true;
+            }
+        }
         /// <summary>Convenience: append code block item.</summary>
         public void AddCode(string code, string? language = null) => AddItem(new CodeBlockItem(code, language));
         /// <summary>Append a git-style diff for a file write/update operation.</summary>
@@ -694,15 +725,19 @@ namespace Andy.Cli.Widgets
         /// <summary>Clear all items from the feed.</summary>
         public void Clear()
         {
-            _items.Clear();
-            _scrollOffset = 0;
-            _followTail = true;
-            _prevTotalLines = 0;
-            _animRemaining = 0;
-            _totalLinesCache = 0;
-            _autoScrollHoldAnchor = false;
-            _lastScrollActivityUtc = DateTime.MinValue;
-            _newItemsBelow = 0;
+            lock (_itemsLock)
+            {
+                _items.Clear();
+                _agentPlanItem = null;
+                _scrollOffset = 0;
+                _followTail = true;
+                _prevTotalLines = 0;
+                _animRemaining = 0;
+                _totalLinesCache = 0;
+                _autoScrollHoldAnchor = false;
+                _lastScrollActivityUtc = DateTime.MinValue;
+                _newItemsBelow = 0;
+            }
         }
 
         /// <summary>Scroll the feed by delta lines (positive = up). Returns current offset.</summary>

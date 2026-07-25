@@ -15,6 +15,7 @@ namespace Andy.Cli.Services;
 public class SimpleAssistantService : IDisposable
 {
     private readonly SimpleAgent _agent;
+    private readonly EnginePlanConnection? _planConnection;
     private readonly FeedView _feed;
     private readonly TokenCounter? _tokenCounter;
     private readonly ILoggerFactory? _loggerFactory;
@@ -193,6 +194,10 @@ public class SimpleAssistantService : IDisposable
             // selected provider's config; flow through the engine to the LLM provider.
             extraBody: extraBody
         );
+
+        // Opt in to the engine's structured plan lifecycle before the first turn. The reflected
+        // bridge keeps this CLI compatible with engine packages released before planning existed.
+        _planConnection = EnginePlanBridge.TryConnect(_agent, _feed.UpdateAgentPlan);
 
         // Subscribe to agent events for UI updates
         _agent.ToolCalled += (sender, e) =>
@@ -695,8 +700,11 @@ public class SimpleAssistantService : IDisposable
     /// conversation (a freshly constructed service); the engine validates the snapshot and
     /// throws without mutating state when it is invalid or the conversation is non-empty.
     /// </summary>
-    public void RestoreTranscript(Andy.Engine.TranscriptSnapshot snapshot) =>
+    public void RestoreTranscript(Andy.Engine.TranscriptSnapshot snapshot)
+    {
         _agent.RestoreTranscript(snapshot);
+        _planConnection?.Refresh();
+    }
 
     /// <summary>
     /// Clear the conversation context
@@ -704,6 +712,7 @@ public class SimpleAssistantService : IDisposable
     public void ClearContext()
     {
         _agent.ClearHistory();
+        _planConnection?.Refresh();
         _lastInputTokens = 0;
         _lastOutputTokens = 0;
         _logger?.LogInformation("Conversation context cleared");
@@ -810,6 +819,7 @@ public class SimpleAssistantService : IDisposable
 
     public void Dispose()
     {
+        _planConnection?.Dispose();
         _agent?.Dispose();
     }
 }
