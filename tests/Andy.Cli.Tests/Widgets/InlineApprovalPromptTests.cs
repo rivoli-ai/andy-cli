@@ -118,9 +118,7 @@ public class InlineApprovalPromptTests
 
     [Theory]
     [InlineData(ConsoleKey.Escape, '\0')]
-    [InlineData(ConsoleKey.D, 'd')]
-    [InlineData(ConsoleKey.N, 'n')]
-    public void Escape_d_and_n_deny_immediately_regardless_of_selection(ConsoleKey key, char ch)
+    public void Escape_denies_immediately_regardless_of_selection(ConsoleKey key, char ch)
     {
         var widget = new InlineApprovalPrompt();
         widget.Begin(Request("Run a shell command", "git status"));
@@ -133,14 +131,34 @@ public class InlineApprovalPromptTests
         Assert.False(widget.IsActive);
     }
 
+    [Theory]
+    [InlineData(ConsoleKey.D, 'd')]
+    [InlineData(ConsoleKey.N, 'n')]
+    public void D_and_n_select_deny_but_do_not_decide(ConsoleKey key, char ch)
+    {
+        // They used to deny on the first press. The prompt appears asynchronously while the user
+        // is free to type, so a "d" or "n" inside an ordinary word answered a prompt the user had
+        // not seen. Selecting instead means every decision passes through Enter.
+        var widget = new InlineApprovalPrompt();
+        widget.Begin(Request("Run a shell command", "git status"));
+        widget.HandleKey(Key(ConsoleKey.RightArrow)); // highlight Allow once
+
+        Assert.Null(widget.HandleKey(Key(key, ch)));
+
+        Assert.True(widget.IsActive);
+        Assert.Equal(2, widget.SelectedIndex);
+    }
+
     [Fact]
     public void Typing_keys_are_swallowed_without_deciding()
     {
         var widget = new InlineApprovalPrompt();
         widget.Begin(Request("Run a shell command", "git status"));
 
-        Assert.Null(widget.HandleKey(Key(ConsoleKey.A, 'a')));
-        Assert.Null(widget.HandleKey(Key(ConsoleKey.Y, 'y')));
+        // a/y and d/n now MOVE the selection (without deciding); everything else is swallowed
+        // outright and leaves the preselected Deny alone.
+        Assert.Null(widget.HandleKey(Key(ConsoleKey.B, 'b')));
+        Assert.Null(widget.HandleKey(Key(ConsoleKey.Q, 'q')));
         Assert.Null(widget.HandleKey(Key(ConsoleKey.Backspace, '\b')));
         Assert.Null(widget.HandleKey(Key(ConsoleKey.F5)));
 

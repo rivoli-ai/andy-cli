@@ -15,7 +15,8 @@ namespace Andy.Cli.Widgets
     ///
     /// Keyboard semantics match the old dialog: Left/Right/Tab move between
     /// "Allow once" / "Allow (session)" / "Deny" (Deny preselected as the safe default),
-    /// Enter/Space confirm the highlighted choice, and Esc/D/N deny immediately. Up/Down scroll the
+    /// Enter/Space confirm the highlighted choice, A/Y and D/N select allow-once and deny without
+    /// confirming them, and Esc denies immediately. Up/Down scroll the
     /// request body when it overflows the capped panel height; PageUp/PageDown are intentionally
     /// NOT handled here so they keep scrolling the transcript.
     /// </summary>
@@ -124,7 +125,26 @@ namespace Andy.Cli.Widgets
                 return null;
             }
 
-            if (k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.D || k.Key == ConsoleKey.N)
+            // The letter shortcuts SELECT rather than resolve. They used to deny on the first
+            // press, with no confirmation, which made a single stray character irreversible - and
+            // the prompt appears asynchronously while the user is free to type, so "d" or "n"
+            // inside an ordinary word could answer a prompt that had only just appeared. Every
+            // decision now goes through the same select-then-Enter path.
+            if (k.Key == ConsoleKey.D || k.Key == ConsoleKey.N)
+            {
+                _selected = DenyIndex;
+                return null;
+            }
+
+            if (k.Key == ConsoleKey.A || k.Key == ConsoleKey.Y)
+            {
+                _selected = AllowOnceIndex;
+                return null;
+            }
+
+            // Escape stays a one-press deny: it is not a character anyone types by accident, and
+            // dismissing a modal with it is universal.
+            if (k.Key == ConsoleKey.Escape)
             {
                 return Resolve(DenyIndex);
             }
@@ -226,8 +246,8 @@ namespace Andy.Cli.Widgets
 
             // Key hints overlaid on the bottom border (ASCII only).
             string hints = _maxScroll > 0
-                ? " Left/Right select  Enter confirm  Esc deny  Up/Down scroll "
-                : " Left/Right select  Enter confirm  Esc deny ";
+                ? " Left/Right or A/D select  Enter confirm  Esc deny  Up/Down scroll "
+                : " Left/Right or A/D select  Enter confirm  Esc deny ";
             b.DrawText(new DL.TextRun(x + 2, y + h - 1, Fit(hints, w - 4), theme.TextDim, theme.PromptBackground, DL.CellAttrFlags.None));
 
             b.Pop();
