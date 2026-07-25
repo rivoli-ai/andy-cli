@@ -48,6 +48,9 @@ namespace Andy.Cli.Widgets.Tools
             new WebToolPresenter(),
             new UtilityToolPresenter(),
             new SkillToolPresenter(),
+            new CodeIndexToolPresenter(),
+            new DataFrameToolPresenter(),
+            new PdfToolPresenter(),
         });
 
         /// <summary>Find the presenter for a tool id, never returning null.</summary>
