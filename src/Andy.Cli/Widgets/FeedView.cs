@@ -220,14 +220,154 @@ namespace Andy.Cli.Widgets
         /// <summary>Add a tool execution start with animation.</summary>
         public void AddToolExecutionStart(string toolId, string toolName, Dictionary<string, object?>? parameters = null)
         {
-            var item = new RunningToolItem(toolId, toolName);
-            if (parameters != null)
+            // EVERY tool renders through ToolCallItem (issue #249), including ones this build has
+            // never seen, which get the generic presenter. The dual path was a migration device
+            // while presenters were being written; now that the whole catalog is covered, keeping
+            // it would preserve the legacy item's problems - no arguments on the row, an elapsed
+            // clock that freezes, and completion deferred to the end of the turn - for exactly
+            // the third-party and MCP tools least likely to be recognized.
+            var presenter = Tools.ToolPresenterRegistry.Default.Resolve(toolName);
+            var snapshot = new Services.ToolResults.ToolCallSnapshot
             {
-                item.SetParameters(parameters);
-            }
-            AddItem(item);
+                ToolId = toolId,
+                ToolName = Services.ToolCallSummarizer.NormalizeToolName(toolName),
+                Parameters = parameters is null
+                    ? new Dictionary<string, object?>()
+                    : new Dictionary<string, object?>(parameters)
+            };
+
+            // A tool that redraws the same surface each time it runs - the plan (#258) - marks
+            // its earlier calls superseded so only the current one is drawn in full. The old
+            // items stay in the transcript and collapse to their header; removing them would
+            // shift everything the user has already scrolled past.
+            if (SupersedesEarlierCalls(snapshot.ToolName)) MarkEarlierCallsSuperseded(snapshot.ToolName);
+
+            AddItem(new Tools.ToolCallItem(snapshot, presenter));
             // Blank line after every tool so consecutive tools are visually separated.
             AddItem(new SpacerItem(1));
+        }
+
+        /// <summary>
+        /// Parse the duration strings the legacy completion path passes ("1.5s", "450ms", "2.0m").
+        /// Returns null when it is not one of those, so a missing duration is simply not shown.
+        /// </summary>
+        private static TimeSpan? ParseDuration(string? duration)
+        {
+            if (string.IsNullOrWhiteSpace(duration)) return null;
+            var text = duration.Trim();
+            try
+            {
+                if (text.EndsWith("ms", StringComparison.OrdinalIgnoreCase))
+                    return TimeSpan.FromMilliseconds(double.Parse(text[..^2], System.Globalization.CultureInfo.InvariantCulture));
+                if (text.EndsWith("s", StringComparison.OrdinalIgnoreCase))
+                    return TimeSpan.FromSeconds(double.Parse(text[..^1], System.Globalization.CultureInfo.InvariantCulture));
+                if (text.EndsWith("m", StringComparison.OrdinalIgnoreCase))
+                    return TimeSpan.FromMinutes(double.Parse(text[..^1], System.Globalization.CultureInfo.InvariantCulture));
+            }
+            catch (FormatException)
+            {
+                // Not a duration we recognize; showing nothing beats showing a wrong number.
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Whether the feed holds a tool row with this id that has not completed yet.
+        ///
+        /// The executor uses this to reject a stale id before adopting it: the tracker's
+        /// name-to-id map is never cleared, so a lookup for "execute_command" happily returns the
+        /// row of a call from an earlier turn. Completing that row is a no-op, and the real call
+        /// ends up with no row of its own (rivoli-ai/andy-cli#245).
+        /// </summary>
+        public bool HasIncompleteToolRow(string toolId)
+        {
+            if (string.IsNullOrEmpty(toolId)) return false;
+            lock (_itemsLock)
+            {
+                for (int i = _items.Count - 1; i >= 0; i--)
+                {
+                    switch (_items[i])
+                    {
+                        case Tools.ToolCallItem call when call.ToolId == toolId:
+                            return !call.Snapshot.IsComplete;
+                        case RunningToolItem running when running.ToolId == toolId:
+                            return !running.IsComplete;
+                    }
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Tools whose every call redraws the same surface, so only the latest is worth showing in
+        /// full. The plan is the case that matters: an agent revises it many times per session.
+        /// </summary>
+        private static bool SupersedesEarlierCalls(string toolName) => toolName is "todo_management";
+
+        private void MarkEarlierCallsSuperseded(string toolName)
+        {
+            lock (_itemsLock)
+            {
+                foreach (var item in _items)
+                {
+                    if (item is Tools.ToolCallItem call
+                        && call.Snapshot.ToolName == toolName
+                        && !call.Snapshot.IsSuperseded)
+                    {
+                        call.Update(s => s with { IsSuperseded = true });
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Attach the tool's real arguments to a call already showing in the feed. Called as soon
+        /// as the executor knows them, which is after the item was created from the model's
+        /// streamed call.
+        /// </summary>
+        /// <returns>True when a <see cref="Tools.ToolCallItem"/> matched and was updated.</returns>
+        public bool UpdateToolCallParameters(string toolId, IReadOnlyDictionary<string, object?> parameters)
+        {
+            lock (_itemsLock)
+            {
+                for (int i = _items.Count - 1; i >= 0; i--)
+                {
+                    if (_items[i] is Tools.ToolCallItem call && call.ToolId == toolId)
+                    {
+                        call.Update(s => s with { Parameters = new Dictionary<string, object?>(parameters) });
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Complete a tool call with its FULL structured result - data, metadata, error, timing -
+        /// rather than a string the executor pre-rendered (issue #249).
+        /// </summary>
+        /// <returns>True when a <see cref="Tools.ToolCallItem"/> matched; false leaves the caller
+        /// to fall back to the legacy completion path.</returns>
+        public bool CompleteToolCall(string toolId, Services.ToolResults.ToolCallCompletion completion)
+        {
+            if (completion is null) throw new ArgumentNullException(nameof(completion));
+
+            lock (_itemsLock)
+            {
+                for (int i = _items.Count - 1; i >= 0; i--)
+                {
+                    if (_items[i] is Tools.ToolCallItem call && call.ToolId == toolId)
+                    {
+                        // Idempotent, like the legacy path: the executor completes a call the
+                        // instant the tool returns, and a later end-of-turn pass must not
+                        // overwrite that with whole-turn timing.
+                        if (call.Snapshot.IsComplete) return true;
+                        call.Update(completion.ApplyTo(call.Snapshot));
+                        return true;
+                    }
+                }
+            }
+            return false;
         }
 
         /// <summary>Add detail to a running tool execution.</summary>
@@ -317,6 +457,10 @@ namespace Andy.Cli.Widgets
         /// <summary>Update a tool by its exact ID - this is the most direct way to update a tool.</summary>
         public void UpdateToolByExactId(string exactToolId, Dictionary<string, object?> parameters)
         {
+            // Calls rendered through the new presenter path carry their id as a first-class field
+            // rather than smuggled in a "__toolId" parameter, so they match directly.
+            if (UpdateToolCallParameters(exactToolId, parameters)) return;
+
             lock (_itemsLock)
             {
                 // Look for any running tool item, starting from the most recent
@@ -469,6 +613,21 @@ namespace Andy.Cli.Widgets
         /// <summary>Update tool execution to complete state.</summary>
         public void AddToolExecutionComplete(string toolId, bool success, string duration, string? result = null)
         {
+            // This is the end-of-turn backstop. The executor normally completes a call the moment
+            // the tool returns, carrying the structured result; this closes anything it missed -
+            // an exception path, a cancelled turn - so no row can be left spinning forever.
+            // CompleteToolCall is idempotent, so a call already completed properly is untouched.
+            if (CompleteToolCall(toolId, new Services.ToolResults.ToolCallCompletion
+            {
+                IsSuccessful = success,
+                Message = result,
+                ErrorMessage = success ? null : result,
+                Duration = ParseDuration(duration)
+            }))
+            {
+                return;
+            }
+
             // Find and update the running tool item
             lock (_itemsLock)
             {

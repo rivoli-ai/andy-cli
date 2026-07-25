@@ -15,10 +15,12 @@ public class ToolExecutionTracker
     private readonly Dictionary<string, string> _toolNameToIdMap = new(); // Map tool names to their UI IDs
     private readonly Dictionary<string, string> _correlationIdToUiIdMap = new(); // Map correlation IDs to UI IDs
     private readonly Dictionary<string, Queue<string>> _pendingToolExecutions = new(); // Queue of UI IDs per tool name
+    private readonly Dictionary<string, Queue<string>> _executorCreatedRows = new(); // Rows the executor had to create itself
     private readonly object _pendingToolsLock = new();
     private FeedView? _feedView;
     private string? _lastActiveToolId; // Track the last tool started from UI
     private int _parameterUpdateCounter = 0;
+    private int _executorRowCounter = 0;
 
     public static ToolExecutionTracker Instance => _instance ??= new ToolExecutionTracker();
 
@@ -92,6 +94,67 @@ public class ToolExecutionTracker
             }
             return null;
         }
+    }
+
+    /// <summary>
+    /// Mint a UI id for a row the EXECUTOR has to create itself, and record it so the engine's
+    /// late ToolCalled event adopts that row instead of appending a duplicate.
+    ///
+    /// SimpleAgent raises ToolCalled only after a call has finished ("raised AFTER execution so
+    /// subscribers see the actual result"), while <see cref="EnqueuePendingTool"/> was written
+    /// for the opposite order. With the real order, the executor finds no row to claim, so it
+    /// creates one - otherwise the row is born after the call is over, with no arguments and
+    /// nobody left to complete it (rivoli-ai/andy-cli#245).
+    /// </summary>
+    public string CreateExecutorRowId(string toolName)
+    {
+        lock (_pendingToolsLock)
+        {
+            var baseName = toolName.ToLower().Replace(" ", "_").Replace("-", "_");
+            var uiToolId = $"{baseName}_x{++_executorRowCounter}";
+
+            var key = toolName.ToLower();
+            if (!_executorCreatedRows.TryGetValue(key, out var queue))
+            {
+                _executorCreatedRows[key] = queue = new Queue<string>();
+            }
+            queue.Enqueue(uiToolId);
+            return uiToolId;
+        }
+    }
+
+    /// <summary>
+    /// Claim the row the executor already created for this tool, if there is one. Called from the
+    /// late ToolCalled handler, which must adopt that row rather than creating a second.
+    /// </summary>
+    public string? DequeueExecutorCreatedRow(string toolName)
+    {
+        lock (_pendingToolsLock)
+        {
+            var key = toolName.ToLower();
+            if (_executorCreatedRows.TryGetValue(key, out var queue) && queue.Count > 0)
+            {
+                return queue.Dequeue();
+            }
+            return null;
+        }
+    }
+
+    /// <summary>Drop all tracking state. Used by tests, which share this singleton.</summary>
+    public void Reset()
+    {
+        lock (_pendingToolsLock)
+        {
+            _pendingToolExecutions.Clear();
+            _executorCreatedRows.Clear();
+            _executorRowCounter = 0;
+        }
+        _executions.Clear();
+        _pendingParameters.Clear();
+        _toolNameToIdMap.Clear();
+        _correlationIdToUiIdMap.Clear();
+        _feedView = null;
+        _lastActiveToolId = null;
     }
 
     public FeedView? GetFeedView()

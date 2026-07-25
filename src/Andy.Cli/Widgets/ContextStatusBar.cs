@@ -19,6 +19,7 @@ namespace Andy.Cli.Widgets
     internal enum StatusSegmentKind
     {
         Status,
+        AutoMode,
         Model,
         Usage,
         Live,
@@ -44,6 +45,9 @@ namespace Andy.Cli.Widgets
     {
         internal const string Separator = " | ";
 
+        /// <summary>The AUTO badge text (single source of truth so width math matches the render).</summary>
+        internal const string AutoBadgeText = " AUTO ";
+
         private int _inputTokens;
         private int _outputTokens;
         private int _maxTokens;
@@ -58,6 +62,12 @@ namespace Andy.Cli.Widgets
 
         // Live per-turn stats (set every frame from the render loop while a turn is active).
         private TurnStats? _liveStats;
+
+        // Auto-approve (session-scoped yolo) indicator: when true a highlighted AUTO segment is shown.
+        private bool _autoModeEnabled;
+
+        /// <summary>Toggle the highlighted AUTO-approve indicator shown in the left zone.</summary>
+        public void SetAutoMode(bool enabled) => _autoModeEnabled = enabled;
 
         // Foreground/accent colors. The row background always follows the active theme's
         // status-line background so the bar stays consistent across theme switches.
@@ -227,6 +237,12 @@ namespace Andy.Cli.Widgets
             if (!string.IsNullOrEmpty(statusStr))
                 segments.Add(new StatusSegment(StatusSegmentKind.Status, statusStr, 4));
 
+            // Auto-approve indicator rides in the left (status) zone so the right-anchored model/token
+            // readouts never shift when it appears or disappears. It must never be dropped while active:
+            // the user must always be able to see that auto-approve is on.
+            if (_autoModeEnabled)
+                segments.Add(new StatusSegment(StatusSegmentKind.AutoMode, AutoBadgeText, 0));
+
             if (!string.IsNullOrEmpty(_modelName))
                 segments.Add(new StatusSegment(StatusSegmentKind.Model, ModelSegmentText(), 1));
 
@@ -276,11 +292,14 @@ namespace Andy.Cli.Widgets
             static int JoinedWidth(List<StatusSegment> segs) =>
                 segs.Sum(s => s.Text.Length) + Math.Max(0, segs.Count - 1) * Separator.Length;
 
-            // The transient Status segment lives in the left-aligned zone and is truncated (with
-            // an ellipsis) by AlignSegments when it would overlap the right-aligned group. It must
-            // never be dropped here: dropping it would change WHICH segments exist and shift the
-            // right-anchored model/token/turn readouts, which is exactly the jitter we removed.
-            bool IsDropCandidate(StatusSegment s) => s.Kind != StatusSegmentKind.Status;
+            // The transient Status and AUTO segments live in the left-aligned zone and are truncated
+            // (with an ellipsis) by AlignSegments when they would overlap the right-aligned group. They
+            // must never be dropped here: dropping them would change WHICH segments exist and shift the
+            // right-anchored model/token/turn readouts, which is exactly the jitter we removed. The AUTO
+            // indicator in particular must always stay visible while auto-approve is active.
+            static bool IsLeftZone(StatusSegmentKind k) =>
+                k is StatusSegmentKind.Status or StatusSegmentKind.AutoMode;
+            bool IsDropCandidate(StatusSegment s) => !IsLeftZone(s.Kind);
 
             while (fitted.Count(IsDropCandidate) > 1 && JoinedWidth(fitted) > maxWidth)
             {
@@ -295,9 +314,9 @@ namespace Andy.Cli.Widgets
                 fitted.RemoveAt(dropIndex);
             }
 
-            // A single remaining non-status segment (no status present) is truncated to fit;
-            // the status segment is left to AlignSegments' ellipsis truncation.
-            if (fitted.Count == 1 && fitted[0].Kind != StatusSegmentKind.Status && fitted[0].Text.Length > maxWidth)
+            // A single remaining right-zone segment (no left-zone segment present) is truncated to fit;
+            // left-zone segments are left to AlignSegments' ellipsis truncation.
+            if (fitted.Count == 1 && !IsLeftZone(fitted[0].Kind) && fitted[0].Text.Length > maxWidth)
             {
                 if (maxWidth < 4)
                 {
@@ -323,8 +342,10 @@ namespace Andy.Cli.Widgets
         internal static (List<StatusSegment> Left, List<StatusSegment> Right, int RightWidth, int LeftMaxWidth)
             AlignSegments(List<StatusSegment> segments, int avail)
         {
-            var left = segments.Where(s => s.Kind == StatusSegmentKind.Status).ToList();
-            var right = segments.Where(s => s.Kind != StatusSegmentKind.Status).ToList();
+            static bool IsLeftZone(StatusSegmentKind k) =>
+                k is StatusSegmentKind.Status or StatusSegmentKind.AutoMode;
+            var left = segments.Where(s => IsLeftZone(s.Kind)).ToList();
+            var right = segments.Where(s => !IsLeftZone(s.Kind)).ToList();
 
             static int JoinedWidth(List<StatusSegment> segs) =>
                 segs.Sum(s => s.Text.Length) + Math.Max(0, segs.Count - 1) * Separator.Length;
@@ -493,6 +514,16 @@ namespace Andy.Cli.Widgets
                 case StatusSegmentKind.Live:
                     b.DrawText(new DL.TextRun(x, y, segment.Text, _accent, bg, DL.CellAttrFlags.Bold));
                     return x + segment.Text.Length;
+                case StatusSegmentKind.AutoMode:
+                    {
+                        // Highlighted AUTO indicator: bold warning-colored marker with a filled badge
+                        // background so it is unmistakable that auto-approve is active.
+                        var theme = Theme.Current;
+                        var badgeBg = theme.Warning;
+                        var badgeFg = new DL.Rgb24(20, 20, 20);
+                        b.DrawText(new DL.TextRun(x, y, segment.Text, badgeFg, badgeBg, DL.CellAttrFlags.Bold));
+                        return x + segment.Text.Length;
+                    }
                 case StatusSegmentKind.Status:
                     b.DrawText(new DL.TextRun(x, y, segment.Text, _statusFg, bg, DL.CellAttrFlags.None));
                     return x + segment.Text.Length;

@@ -109,3 +109,7 @@ SHA256SUMS.txt
 .env.*
 !.env.example
 *.local.json
+
+# Timestamped editor/agent backup copies (e.g. Program.cs.backup.20260725015844.4db2cd80).
+# The real file is the one under version control; these are throwaway snapshots.
+*.backup.*

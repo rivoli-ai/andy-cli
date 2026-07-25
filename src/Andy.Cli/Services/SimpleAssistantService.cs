@@ -186,6 +186,15 @@ public class SimpleAssistantService : IDisposable
             var baseToolId = e.ToolName.ToLower().Replace(" ", "_").Replace("-", "_");
             var toolId = $"{baseToolId}_{++_toolCallCounter}";
 
+            // The engine raises this event AFTER the call finished, so the executor has already
+            // opened - and completed - the row, with the arguments this event does not carry.
+            // Adopt it rather than appending a second, empty row (#245).
+            var adoptedToolId = ToolExecutionTracker.Instance.DequeueExecutorCreatedRow(e.ToolName);
+            if (adoptedToolId != null)
+            {
+                toolId = adoptedToolId;
+            }
+
             // Generate a unique correlation ID for this specific tool execution
             var correlationId = Guid.NewGuid().ToString("N")[..12]; // Longer ID for uniqueness
 
@@ -230,7 +239,11 @@ public class SimpleAssistantService : IDisposable
                 ["__toolId"] = toolId,
                 ["__baseName"] = baseToolId
             };
-            _feed.AddToolExecutionStart(toolId, e.ToolName, initialParams);
+            // Only open a row when the executor did not already open one for this call.
+            if (adoptedToolId == null)
+            {
+                _feed.AddToolExecutionStart(toolId, e.ToolName, initialParams);
+            }
 
             // The spinner is stopped by UiUpdatingToolExecutor the instant the tool returns, and the
             // end-of-turn loop below is the backstop for anything it missed. A previous 30s background

@@ -53,15 +53,49 @@ public sealed class CliPermissionPrompt : IPermissionPrompt
 {
     private readonly PermissionRequestBroker _broker;
     private readonly IPermissionStore? _store;
+    private readonly AutoApprovalMode? _autoMode;
+    private readonly SessionApprovalStore? _approvalStore;
+    private readonly bool _persistApprovals;
 
-    public CliPermissionPrompt(PermissionRequestBroker broker, IPermissionStore? store = null)
+    /// <summary>
+    /// The session this prompt's decisions are recorded against. Set once at startup (and after an
+    /// in-place /resume) by the interactive loop; defaults to a process-lifetime id so the prompt is
+    /// usable before the session is known.
+    /// </summary>
+    public string SessionId { get; set; } = Sessions.SessionStore.NewSessionId();
+
+    public CliPermissionPrompt(
+        PermissionRequestBroker broker,
+        IPermissionStore? store = null,
+        AutoApprovalMode? autoMode = null,
+        SessionApprovalStore? approvalStore = null,
+        bool persistApprovals = true)
     {
         _broker = broker;
         _store = store;
+        _autoMode = autoMode;
+        _approvalStore = approvalStore;
+        _persistApprovals = persistApprovals;
     }
 
     public Task<PermissionDecision> RequestAsync(PermissionRequest request, CancellationToken cancellationToken = default)
     {
+        // Auto-approve (session-scoped yolo): allow low-risk requests without surfacing a prompt, but
+        // never high-risk ones (deletes outside the project root, git-repo / database destruction,
+        // sensitive paths) - those always reach the interactive prompt below.
+        if (_autoMode is not null && _autoMode.Enabled)
+        {
+            var risk = _autoMode.RiskOf(request);
+            if (risk == ApprovalRisk.Normal)
+            {
+                var autoDecision = new PermissionDecision(true, PersistScope.Session);
+                GrantBroadenedSessionRules(request, _store);
+                Record(request, autoDecision, risk, source: "auto");
+                return Task.FromResult(autoDecision);
+            }
+            // High-risk: fall through to the interactive prompt.
+        }
+
         var pending = new PendingPermissionRequest { Request = request };
         cancellationToken.Register(() => pending.Completion.TrySetResult(PermissionDecision.DenyOnce));
         _broker.Enqueue(pending);
@@ -75,8 +109,32 @@ public sealed class CliPermissionPrompt : IPermissionPrompt
                 GrantBroadenedSessionRules(request, _store);
             }
 
+            var assessedRisk = _autoMode?.RiskOf(request) ?? ApprovalRisk.Normal;
+            Record(request, decision, assessedRisk, source: "user");
+
             return decision;
         }, CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default);
+    }
+
+    /// <summary>
+    /// Best-effort append of the decision to the session's approvals file. Skipped when no store is
+    /// wired or when running in an ephemeral (headless/container) environment. Never throws.
+    /// </summary>
+    private void Record(PermissionRequest request, PermissionDecision decision, ApprovalRisk risk, string source)
+    {
+        if (_approvalStore is null || !_persistApprovals)
+        {
+            return;
+        }
+
+        try
+        {
+            _approvalStore.RecordDecision(SessionId, request, decision, risk, source);
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("approvals.RecordDecision", ex);
+        }
     }
 
     /// <summary>
@@ -336,11 +394,26 @@ public static class CliPermissionServiceExtensions
         if (interactiveBroker is not null)
         {
             services.AddSingleton(interactiveBroker);
+
+            // Session-scoped auto-approve mode (off by default; enabled via --auto / /auto). Shared so the
+            // prompt can consult it and the interactive loop can toggle it and reflect it in the status bar.
+            services.AddSingleton(new AutoApprovalMode(Directory.GetCurrentDirectory()));
+
+            // Per-session approval recorder. Persistence is skipped in ephemeral (headless/container)
+            // environments so true yolo runs leave no on-disk grant trail; the in-memory session rules
+            // still apply for the process lifetime.
+            bool persistApprovals = !SessionApprovalStore.IsEphemeralEnvironment();
+            services.AddSingleton(new SessionApprovalStore());
+
             // Resolve the prompt lazily so it can capture the IPermissionStore that AddAndyPermissions
             // registers below. The store lets a session "Allow" install a broadened command-class rule that
             // prevents re-prompting for similar invocations.
-            services.AddSingleton<IPermissionPrompt>(sp =>
-                new CliPermissionPrompt(interactiveBroker, sp.GetService<IPermissionStore>()));
+            services.AddSingleton<IPermissionPrompt>(sp => new CliPermissionPrompt(
+                interactiveBroker,
+                sp.GetService<IPermissionStore>(),
+                sp.GetService<AutoApprovalMode>(),
+                sp.GetService<SessionApprovalStore>(),
+                persistApprovals));
         }
 
         // Teach the action resolver to extract create_directory's target as a Path resource. The
