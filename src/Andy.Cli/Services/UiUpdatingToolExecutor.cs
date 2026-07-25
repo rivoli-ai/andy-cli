@@ -159,6 +159,11 @@ namespace Andy.Cli.Services
                 }
             }
 
+            // Start timing before any executor exit path. The loop guard, exceptions and
+            // cancellations must all close the UI row immediately, not wait for the model's
+            // end-of-turn fallback.
+            var toolStopwatch = System.Diagnostics.Stopwatch.StartNew();
+
             // Loop guard: if the model keeps issuing the same call with identical arguments, it is
             // almost certainly stuck (and burning tokens). Short-circuit with guidance instead of
             // re-running the tool, so it stops repeating and changes approach.
@@ -175,6 +180,9 @@ namespace Andy.Cli.Services
                 if (!string.IsNullOrEmpty(uiToolId))
                 {
                     ToolExecutionTracker.Instance.TrackToolComplete(uiToolId, false, guidance, null);
+                    toolStopwatch.Stop();
+                    ToolExecutionTracker.Instance.GetFeedView()?.AddToolExecutionComplete(
+                        uiToolId, false, FormatToolDuration(toolStopwatch.Elapsed), guidance);
                 }
 
                 return new ToolExecutionResult
@@ -187,7 +195,6 @@ namespace Andy.Cli.Services
             // Execute the actual tool (parameters cannot be null here based on interface contract).
             // Time it so the UI can show the tool's real duration the moment it returns, rather
             // than the whole-turn elapsed measured later by SimpleAssistantService.
-            var toolStopwatch = System.Diagnostics.Stopwatch.StartNew();
             // Map parameter names via the curated per-tool alias table and coerce values to the
             // types the tool declares before dispatching. Models routinely (a) call a tool with
             // names from a different tool family (e.g. old_string/new_string for replace_text,
@@ -233,8 +240,24 @@ namespace Andy.Cli.Services
                     context.ResourceLimits.MaxExecutionTimeMs = (int)Math.Min(backstopMs, int.MaxValue);
             }
 
-            var result = await _innerExecutor.ExecuteAsync(toolId, dispatchParameters, context);
-            toolStopwatch.Stop();
+            ToolExecutionResult result;
+            try
+            {
+                result = await _innerExecutor.ExecuteAsync(toolId, dispatchParameters, context);
+                toolStopwatch.Stop();
+            }
+            catch (OperationCanceledException)
+            {
+                toolStopwatch.Stop();
+                CompleteExceptionalTool(uiToolId, "Cancelled", toolStopwatch.Elapsed);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                toolStopwatch.Stop();
+                CompleteExceptionalTool(uiToolId, ex.Message, toolStopwatch.Elapsed);
+                throw;
+            }
 
             // A successful standalone `cd` persists for the rest of the session: it moves the
             // tracked working directory, so subsequent tool calls (and the header) follow it.
@@ -675,7 +698,7 @@ namespace Andy.Cli.Services
                 GrantGatedCapabilities(request.Context);
             }
 
-            return _innerExecutor.ExecuteAsync(request);
+            return ExecuteAsync(request.ToolId, request.Parameters, request.Context);
         }
 
         /// <summary>
@@ -709,6 +732,16 @@ namespace Andy.Cli.Services
             if (elapsed.TotalSeconds < 60)
                 return $"{elapsed.TotalSeconds:F1}s";
             return $"{elapsed.TotalMinutes:F1}m";
+        }
+
+        private static void CompleteExceptionalTool(string? uiToolId, string message, TimeSpan elapsed)
+        {
+            if (string.IsNullOrEmpty(uiToolId)) return;
+
+            var result = string.IsNullOrWhiteSpace(message) ? "Operation failed" : message;
+            ToolExecutionTracker.Instance.TrackToolComplete(uiToolId, false, result, null);
+            ToolExecutionTracker.Instance.GetFeedView()?.AddToolExecutionComplete(
+                uiToolId, false, FormatToolDuration(elapsed), result);
         }
 
         private static void GrantGatedCapabilities(ToolExecutionContext context)
