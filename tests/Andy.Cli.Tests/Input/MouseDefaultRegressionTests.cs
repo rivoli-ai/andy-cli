@@ -6,24 +6,24 @@ using Xunit;
 namespace Andy.Cli.Tests.Input;
 
 /// <summary>
-/// Pins the mouse-capture default. Capture defaults to ON so the mouse wheel scrolls the feed out
-/// of the box; text selection while capture is on is done with Option+drag (macOS) / Shift+drag
-/// (xterm), and F3 toggles capture off for plain click-drag native selection. These tests pin the
+/// Pins the mouse-capture default. Capture defaults to OFF so plain click-drag selection and the
+/// terminal's copy shortcut work without a preparatory click or modifier. F3 toggles capture on
+/// when mouse-wheel scrolling is preferred. These tests pin the
 /// app-level default and the MouseReporting invariant that nothing is enabled until something
 /// explicitly opts in (the constructor itself never auto-enables).
 /// </summary>
 public class MouseDefaultRegressionTests
 {
     [Fact]
-    public void TryStart_DefaultsMouseCaptureOn()
+    public void TryStart_DefaultsMouseCaptureOff()
     {
         var method = typeof(RawTerminalInput).GetMethod(
             "TryStart", BindingFlags.Public | BindingFlags.Static);
         Assert.NotNull(method);
 
         var param = method!.GetParameters().Single(p => p.Name == "enableMouse");
-        Assert.True(param.HasDefaultValue, "enableMouse must have a default so the wheel works out of the box");
-        Assert.Equal(true, param.DefaultValue);
+        Assert.True(param.HasDefaultValue, "enableMouse must have an explicit selection-safe default");
+        Assert.Equal(false, param.DefaultValue);
     }
 
     [Fact]

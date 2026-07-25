@@ -18,7 +18,7 @@ public static class HelpText
         "- **Ctrl+]**: Toggle scroll mode (Feed / Prompt History)\n" +
         "- **Ctrl+D**: Quit application\n" +
         "- **F2**: Toggle HUD (performance overlay)\n" +
-        "- **F3**: Toggle mouse capture (ON by default = mouse-wheel scroll; Option+drag to select text, Cmd+C to copy. F3 OFF = plain-drag native selection)\n" +
+        "- **F3**: Toggle mouse capture (OFF by default = plain-drag native selection and copy; ON = mouse-wheel scroll)\n" +
         "- **Click while scrolled up**: releases mouse capture so plain click-drag selects text; capture is restored when back at the bottom\n" +
         "- **Ctrl+O**: Expand/collapse tool output detail (view-only; does not affect a running turn)\n" +
         "- **ESC**: Quit application (closes the command palette first if open)\n" +

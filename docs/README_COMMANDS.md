@@ -96,7 +96,7 @@ normally require consent unless a higher-precedence rule allows them.
 | `Ctrl+]` | Toggle Feed and Prompt History modes. |
 | `Ctrl+O` | Expand or collapse tool parameters and result previews; it does not affect execution. |
 | `F2` | Toggle the performance HUD. |
-| `F3` | Toggle mouse capture. Capture starts on when raw terminal input is available, enabling wheel scroll. |
+| `F3` | Toggle mouse capture. Capture starts off for native selection/copy; turn it on for wheel scroll. |
 | `Page Up` / `Page Down` | Scroll the feed by one page. |
 | `Up` / `Down` | Move within multi-line input or navigate history in Prompt History mode. |
 | `Ctrl+A` / `Ctrl+E` | Move to the start/end of the current line. |
@@ -105,8 +105,10 @@ normally require consent unless a higher-precedence rule allows them.
 | `Esc` | Close the active palette/permission manager, otherwise open exit confirmation. |
 | `Ctrl+D` | Open exit confirmation. |
 
-With mouse capture on, use Option+drag on macOS or the terminal's Shift-modified
-selection to select text. Press `F3` for ordinary native click-drag selection.
+Mouse capture starts off so ordinary click-drag selection and the terminal's
+copy shortcut work immediately. Press `F3` to enable capture for wheel scrolling;
+while capture is on, Option+drag on macOS or the terminal's Shift-modified
+selection can still bypass mouse reporting.
 
 ## Provider environment variables
 

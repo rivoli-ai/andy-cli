@@ -141,8 +141,8 @@ dotnet run --project src/Andy.Cli
 - `Ctrl+]` - Toggle scroll mode (Feed vs Prompt History)
 - `Ctrl+O` - Expand/collapse tool output detail
 - `F2` - Toggle performance HUD
-- `F3` - Toggle mouse capture (on by default for wheel scrolling; use
-  Option/Shift+drag to select, or turn capture off for native selection)
+- `F3` - Toggle mouse capture (off by default for native selection/copy; turn
+  capture on for mouse-wheel scrolling)
 - `Esc` or `Ctrl+D` - Open the exit confirmation (Esc first closes an open
   palette or permission manager)
 - `Up/Down` - Move within the prompt or navigate prompt history in history mode
