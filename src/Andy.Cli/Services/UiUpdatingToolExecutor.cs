@@ -584,6 +584,7 @@ namespace Andy.Cli.Services
                         Message = result.Message,
                         Duration = toolStopwatch.Elapsed,
                         WasCancelled = result.WasCancelled,
+                        WasDenied = IsPermissionDenial(result),
                         FileMutation = fileMutation
                     }) ?? false;
 
@@ -642,6 +643,24 @@ namespace Andy.Cli.Services
         /// Andy.Permissions gate decides actual consent per call; these flags only stop the lower-level
         /// capability checks from blocking a tool before the gate runs.
         /// </summary>
+        /// <summary>
+        /// Whether a failed result is the permission gate refusing the call rather than the tool
+        /// failing on its own terms (#264). The two look identical in the feed otherwise, and they
+        /// mean very different things: a denial is something the user can change their mind about.
+        ///
+        /// The gate short-circuits without running the tool, so a denial is a failure that carries
+        /// no data and names permission in its message. A tool's own "Access denied" - a path
+        /// outside the permitted roots, say - reaches here having actually run, and is left as an
+        /// ordinary failure.
+        /// </summary>
+        internal static bool IsPermissionDenial(ToolExecutionResult result)
+        {
+            if (result.IsSuccessful || result.Data is not null) return false;
+            var message = result.ErrorMessage;
+            return !string.IsNullOrEmpty(message)
+                && message.Contains("permission", StringComparison.OrdinalIgnoreCase);
+        }
+
         /// <summary>Format an elapsed tool duration the same way the feed status line does.</summary>
         private static string FormatToolDuration(TimeSpan elapsed)
         {
