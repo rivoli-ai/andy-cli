@@ -1,7 +1,7 @@
 {
   "$comment": "Known-good dependency graph for andy-cli. Records the exact SDK band and Andy ecosystem package versions the CLI is verified against. Update this file in the same commit that bumps global.json or any Andy.* PackageReference in src/Andy.Cli/Andy.Cli.csproj. See docs/SDK_AND_DEPENDENCIES.md and issue #172.",
   "schemaVersion": 1,
-  "updated": "2026-07-23",
+  "updated": "2026-07-25",
   "sdk": {
     "channel": "8.0",
     "minimumVersion": "8.0.0",
@@ -11,7 +11,7 @@
   },
   "targetFramework": "net8.0",
   "engine": {
-    "Andy.Engine": "2026.7.23-rc.88"
+    "Andy.Engine": "2026.7.25-rc.92"
   },
   "tui": {
     "Andy.Tui": "2026.7.21-rc.162"

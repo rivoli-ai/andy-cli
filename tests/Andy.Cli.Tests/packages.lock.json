@@ -242,8 +242,8 @@
       },
       "Andy.Engine": {
         "type": "Transitive",
-        "resolved": "2026.7.23-rc.88",
-        "contentHash": "fM69g05KWku/PLi4rQTQ+yNJHYzA1vDKI9q723esJCEnLWiogijO0XPb0lko3heWAHwSSRuSkQao6PAItvEKug==",
+        "resolved": "2026.7.25-rc.92",
+        "contentHash": "q0goKyt+B7cLo2NRirzAPrwMAT6FjsYQC7jQqkr0In1R5TZziSONvgvrTQgzpOWYXwwUPbQ1yJPjZIqBQ4iSmw==",
         "dependencies": {
           "Andy.Configuration": "2026.5.16-rc.8",
           "Andy.Context": "2026.5.16-rc.6",
@@ -2238,7 +2238,7 @@
         "dependencies": {
           "Andy.Acp.Core": "[2026.7.21.1, )",
           "Andy.CodeIndex.Infrastructure": "[2026.7.21-rc.11, )",
-          "Andy.Engine": "[2026.7.23-rc.88, )",
+          "Andy.Engine": "[2026.7.25-rc.92, )",
           "Andy.Llm": "[2026.7.21-rc.76, )",
           "Andy.MCP": "[2026.5.16-rc.31, )",
           "Andy.Model": "[2026.7.21-rc.13, )",
