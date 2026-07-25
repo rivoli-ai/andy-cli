@@ -619,6 +619,32 @@ class Program
             }
             feed.AddDimText($"[session] {sessionId} (resume after exit: andy-cli --resume {sessionId})");
 
+            // Wire the interactive permission prompt to this session and to auto-approve mode, and
+            // restore any session-scoped grants previously recorded for a resumed session id so the
+            // user's earlier approvals survive the restart (issue: approvals must not vanish on exit).
+            var autoApprovalMode = serviceProvider.GetService<Andy.Cli.Services.AutoApprovalMode>();
+            var sessionApprovalStore = serviceProvider.GetService<Andy.Cli.Services.SessionApprovalStore>();
+            if (serviceProvider.GetService<Andy.Permissions.Prompt.IPermissionPrompt>() is Andy.Cli.Services.CliPermissionPrompt cliPrompt)
+            {
+                cliPrompt.SessionId = sessionId;
+                if (sessionApprovalStore != null && serviceProvider.GetService<Andy.Permissions.Store.IPermissionStore>() is { } permStore)
+                {
+                    foreach (var rule in sessionApprovalStore.LoadGrantableRules(sessionId))
+                    {
+                        permStore.AddSessionRule(rule);
+                    }
+                }
+            }
+            // --auto / ANDY_AUTO_APPROVE=1: start the session with auto-approve already on.
+            if (autoApprovalMode != null &&
+                (args.Any(a => a == "--auto" || a == "--yolo") ||
+                 !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ANDY_AUTO_APPROVE"))))
+            {
+                autoApprovalMode.Enable();
+                contextStatusBar.SetAutoMode(true);
+                feed.AddMarkdownRich("[auto] Auto-approve ON for this session. Low-risk actions run without prompting; destructive actions still ask.");
+            }
+
             // In-place session switch for /resume <id>: replaces the assistant service with a
             // fresh instance (the engine only restores into an EMPTY conversation), restores
             // the saved transcript, and replays it into a cleared feed. Returns an error
@@ -664,6 +690,21 @@ class Program
                     extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, resumeProvider));
                 aiService.RestoreTranscript(record.Snapshot);
                 sessionId = targetId;
+
+                // Point the permission prompt at the resumed session and re-grant its recorded
+                // session-scoped approvals so they survive the switch.
+                if (serviceProvider.GetService<Andy.Permissions.Prompt.IPermissionPrompt>() is Andy.Cli.Services.CliPermissionPrompt resumePrompt)
+                {
+                    resumePrompt.SessionId = targetId;
+                    if (sessionApprovalStore != null &&
+                        serviceProvider.GetService<Andy.Permissions.Store.IPermissionStore>() is { } resumeStore)
+                    {
+                        foreach (var rule in sessionApprovalStore.LoadGrantableRules(targetId))
+                        {
+                            resumeStore.AddSessionRule(rule);
+                        }
+                    }
+                }
 
                 tokenCounter.Reset();
                 promptHistory.Clear();
@@ -1502,6 +1543,28 @@ class Program
                                     var result = await permissionsCommand.ExecuteAsync(args);
                                     // Fence the output so the layered rule list stays aligned (monospace).
                                     feed.AddMarkdownRich("```\n" + result.Message + "\n```");
+                                    return;
+                                }
+                                else if (commandName == "auto" || commandName == "yolo")
+                                {
+                                    // Toggle session-scoped auto-approve. Low-risk requests are auto-allowed;
+                                    // high-risk ones (deletes outside the project, git/DB destruction) still prompt.
+                                    feed.AddUserMessage(cmd);
+                                    var autoMode = serviceProvider.GetService<Andy.Cli.Services.AutoApprovalMode>();
+                                    if (autoMode == null)
+                                    {
+                                        feed.AddMarkdownRich(ConsoleColors.WarningPrefix("[auto] Auto-approve is not available in this mode."));
+                                        return;
+                                    }
+                                    bool on = args.Length > 0
+                                        ? (args[0].Equals("on", StringComparison.OrdinalIgnoreCase) ? autoMode.Enable()
+                                          : args[0].Equals("off", StringComparison.OrdinalIgnoreCase) ? autoMode.Disable()
+                                          : autoMode.Toggle())
+                                        : autoMode.Toggle();
+                                    contextStatusBar.SetAutoMode(on);
+                                    feed.AddMarkdownRich(on
+                                        ? "[auto] Auto-approve ON for this session. Low-risk actions run without prompting; destructive actions (outside-project deletes, git/DB destruction) still ask. Toggle off with /auto off."
+                                        : "[auto] Auto-approve OFF. Every action will prompt as usual.");
                                     return;
                                 }
                                 else if (commandName == "skills" || commandName == "skill")
