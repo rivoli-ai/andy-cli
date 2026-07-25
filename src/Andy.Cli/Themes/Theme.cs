@@ -105,6 +105,12 @@ namespace Andy.Cli.Themes
         public DL.Rgb24 ToolRunning { get; set; } = new DL.Rgb24(100, 150, 255);
         public DL.Rgb24 ToolResult { get; set; } = new DL.Rgb24(180, 180, 180);
 
+        // Diff row tints. Diff content is syntax-highlighted, so a leading +/- alone is too weak
+        // a signal for which side a line belongs to; a low-saturation row tint carries it instead.
+        // Kept dark enough that highlighted code stays legible on top.
+        public DL.Rgb24 DiffAddedBackground { get; set; } = new DL.Rgb24(18, 42, 24);
+        public DL.Rgb24 DiffRemovedBackground { get; set; } = new DL.Rgb24(52, 20, 22);
+
         /// <summary>
         /// True when all four main surfaces are transparent (terminal shows through).
         /// </summary>
@@ -199,6 +205,9 @@ namespace Andy.Cli.Themes
             ToolName = new DL.Rgb24(170, 110, 0),
             ToolRunning = new DL.Rgb24(40, 90, 180),
             ToolResult = new DL.Rgb24(90, 90, 90),
+
+            DiffAddedBackground = new DL.Rgb24(218, 241, 221),
+            DiffRemovedBackground = new DL.Rgb24(250, 220, 220),
         };
 
         // Map an Andy.Tui token-based theme onto this app's richer color model. The
@@ -273,7 +282,22 @@ namespace Andy.Cli.Themes
                 ToolName = C(TS.ThemeToken.Accent),
                 ToolRunning = C(TS.ThemeToken.Info),
                 ToolResult = C(TS.ThemeToken.Success),
+
+                // Imported palettes carry no diff tokens, so the tints are derived: the theme's
+                // own success/error hue blended a little way over its background. That keeps the
+                // tint recognizably "this palette's green" while staying subtle enough to read
+                // highlighted code on top, in dark and light palettes alike.
+                DiffAddedBackground = Blend(C(TS.ThemeToken.Background), C(TS.ThemeToken.Success), 0.16),
+                DiffRemovedBackground = Blend(C(TS.ThemeToken.Background), C(TS.ThemeToken.Error), 0.16),
             };
+        }
+
+        // Linear mix of two colors; `amount` is how much of `overlay` ends up in the result.
+        private static DL.Rgb24 Blend(DL.Rgb24 baseColor, DL.Rgb24 overlay, double amount)
+        {
+            amount = Math.Clamp(amount, 0, 1);
+            byte Mix(byte a, byte b) => (byte)Math.Round(a + (b - a) * amount);
+            return new DL.Rgb24(Mix(baseColor.R, overlay.R), Mix(baseColor.G, overlay.G), Mix(baseColor.B, overlay.B));
         }
 
         // Perceived luminance below the midpoint => treat as a dark background.

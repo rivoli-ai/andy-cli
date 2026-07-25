@@ -63,6 +63,12 @@ public sealed record ToolCallSnapshot
     /// <summary>The permission gate denied the call. Rendered distinctly from a failure (#264).</summary>
     public bool WasDenied { get; init; }
 
+    /// <summary>
+    /// The file change this call made, when it was a mutating tool. Computed by the executor
+    /// because the tool itself returns neither the old nor the new content.
+    /// </summary>
+    public FileMutationView? FileMutation { get; init; }
+
     /// <summary>A completed call that neither failed nor was cancelled or denied.</summary>
     public bool Succeeded => IsComplete && IsSuccessful && !WasCancelled && !WasDenied;
 

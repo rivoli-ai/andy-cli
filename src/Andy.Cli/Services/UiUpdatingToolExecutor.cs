@@ -565,16 +565,27 @@ namespace Andy.Cli.Services
                 // pre-rendered resultMessage below. When this returns true the call is already
                 // complete and the legacy string-based completion path is a no-op for it.
                 var feedViewForStructuredCompletion = ToolExecutionTracker.Instance.GetFeedView();
-                feedViewForStructuredCompletion?.CompleteToolCall(uiToolId, new ToolResults.ToolCallCompletion
-                {
-                    IsSuccessful = result.IsSuccessful,
-                    Data = result.Data,
-                    Metadata = result.Metadata,
-                    ErrorMessage = result.ErrorMessage,
-                    Message = result.Message,
-                    Duration = toolStopwatch.Elapsed,
-                    WasCancelled = result.WasCancelled
-                });
+
+                // A file change is the one piece of display data the tool cannot supply: it
+                // overwrites the file and returns neither side, so the diff only exists because
+                // the pre-call snapshot above captured "before". Attaching it to the completion
+                // keeps the change on the call that made it.
+                var fileMutation = result.IsSuccessful && diffCapture != null
+                    ? TryBuildFileMutationView(diffCapture)
+                    : null;
+
+                bool renderedStructurally = feedViewForStructuredCompletion?.CompleteToolCall(
+                    uiToolId, new ToolResults.ToolCallCompletion
+                    {
+                        IsSuccessful = result.IsSuccessful,
+                        Data = result.Data,
+                        Metadata = result.Metadata,
+                        ErrorMessage = result.ErrorMessage,
+                        Message = result.Message,
+                        Duration = toolStopwatch.Elapsed,
+                        WasCancelled = result.WasCancelled,
+                        FileMutation = fileMutation
+                    }) ?? false;
 
                 ToolExecutionTracker.Instance.TrackToolComplete(uiToolId, result.IsSuccessful, resultMessage, result.Data);
 
@@ -587,8 +598,11 @@ namespace Andy.Cli.Services
                 feedViewForCompletion?.AddToolExecutionComplete(
                     uiToolId, result.IsSuccessful, FormatToolDuration(toolStopwatch.Elapsed), resultMessage);
 
-                // Render a git-style diff for a successful file write/edit, right under the tool line.
-                if (result.IsSuccessful && diffCapture != null && feedViewForCompletion != null)
+                // Render a git-style diff for a successful file write/edit, right under the tool
+                // line. Only for tools still on the legacy path: a presenter-backed call already
+                // received the same change on its completion and renders it inside the call, so
+                // emitting a second item here would show the diff twice.
+                if (result.IsSuccessful && diffCapture != null && feedViewForCompletion != null && !renderedStructurally)
                 {
                     TryRenderFileDiff(diffCapture, feedViewForCompletion);
                 }
@@ -759,6 +773,39 @@ namespace Andy.Cli.Services
             catch (Exception ex)
             {
                 _logger?.LogWarning(ex, "[UI_EXECUTOR] Failed to capture pre-write content for {ToolId}", toolId);
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Read the file back after a successful mutation and compute the change, as structured
+        /// data for the presenter. Returns null when there is nothing meaningful to show - the
+        /// file is gone, too large, binary, or the write produced no visible change.
+        /// </summary>
+        private ToolResults.FileMutationView? TryBuildFileMutationView(FileMutationCapture capture)
+        {
+            try
+            {
+                if (!File.Exists(capture.ResolvedPath)) return null; // e.g. the tool deleted it
+                if (new FileInfo(capture.ResolvedPath).Length > MaxDiffFileBytes) return null;
+
+                var after = File.ReadAllText(capture.ResolvedPath);
+                if (after.Contains('\0')) return null; // binary
+
+                var diff = UnifiedDiff.Compute(capture.BeforeText, after);
+                if (diff.IsEmpty) return null; // identical write / no-op edit
+
+                var kind = capture.Existed ? FileChangeKind.Update : FileChangeKind.Create;
+                return new ToolResults.FileMutationView(
+                    capture.DisplayPath,
+                    kind,
+                    diff,
+                    // Only a creation needs the content: an update is better read as a diff.
+                    kind == FileChangeKind.Create ? after : null);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "[UI_EXECUTOR] Failed to compute file change for {Path}", capture.ResolvedPath);
                 return null;
             }
         }

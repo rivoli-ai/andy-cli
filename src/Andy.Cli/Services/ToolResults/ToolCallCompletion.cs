@@ -38,9 +38,21 @@ public sealed record ToolCallCompletion
     /// <summary>The permission gate refused the call and the tool never ran.</summary>
     public bool WasDenied { get; init; }
 
+    /// <summary>
+    /// The change a file-mutating tool made, computed locally by the executor.
+    ///
+    /// This is the one piece of display data the tool cannot supply itself: write_file and
+    /// replace_text overwrite the file and return neither the old nor the new content, so a diff
+    /// only exists if something captures "before" around the call. It travels here as structured
+    /// data for the presenter rather than being rendered into a separate feed item, so the change
+    /// stays attached to the call that made it.
+    /// </summary>
+    public FileMutationView? FileMutation { get; init; }
+
     /// <summary>Fold this completion into a running snapshot.</summary>
     public ToolCallSnapshot ApplyTo(ToolCallSnapshot snapshot) => snapshot with
     {
+        FileMutation = FileMutation,
         IsComplete = true,
         IsSuccessful = IsSuccessful,
         Data = Data,

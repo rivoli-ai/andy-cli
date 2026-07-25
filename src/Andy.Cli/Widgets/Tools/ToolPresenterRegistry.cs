@@ -41,6 +41,8 @@ namespace Andy.Cli.Widgets.Tools
             new SearchTextToolPresenter(),
             new ListDirectoryToolPresenter(),
             new FileMutationToolPresenter(),
+            new WriteFileToolPresenter(),
+            new ReplaceTextToolPresenter(),
         });
 
         /// <summary>Find the presenter for a tool id, never returning null.</summary>

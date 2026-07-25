@@ -10,7 +10,15 @@ namespace Andy.Cli.Widgets.Tools
     /// <param name="Text">The characters.</param>
     /// <param name="Foreground">Foreground color, or null to inherit the caller's default.</param>
     /// <param name="Attributes">Bold/italic/underline flags.</param>
-    public readonly record struct StyledSpan(string Text, DL.Rgb24? Foreground, DL.CellAttrFlags Attributes)
+    /// <param name="Background">
+    /// Background color, or null to inherit. Used by the diff renderer to tint added and removed
+    /// lines: with syntax highlighting on the content, a leading +/- alone is too weak a signal.
+    /// </param>
+    public readonly record struct StyledSpan(
+        string Text,
+        DL.Rgb24? Foreground = null,
+        DL.CellAttrFlags Attributes = DL.CellAttrFlags.None,
+        DL.Rgb24? Background = null)
     {
         /// <summary>An unstyled run that inherits the caller's color.</summary>
         public static StyledSpan Plain(string text) => new(text, null, DL.CellAttrFlags.None);
@@ -164,7 +172,7 @@ namespace Andy.Cli.Widgets.Tools
                 var text = span.Text;
                 if (drawn + text.Length > maxWidth) text = text.Substring(0, maxWidth - drawn);
                 b.DrawText(new DL.TextRun(x + drawn, y, text,
-                    span.Foreground ?? defaultForeground, background, span.Attributes));
+                    span.Foreground ?? defaultForeground, span.Background ?? background, span.Attributes));
                 drawn += text.Length;
             }
         }
