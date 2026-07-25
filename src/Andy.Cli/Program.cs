@@ -237,6 +237,25 @@ class Program
         {
             bool running = true;
 
+            // Throw away keystrokes buffered before a modal appeared, so type-ahead cannot answer
+            // a prompt the user had not seen yet. Only ever called at the moment a modal opens.
+            void DrainTypeAhead()
+            {
+                try
+                {
+                    if (rawInput != null)
+                    {
+                        while (rawInput.TryDequeue(out _)) { }
+                        return;
+                    }
+                    while (Console.KeyAvailable) Console.ReadKey(intercept: true);
+                }
+                catch (InvalidOperationException)
+                {
+                    // Console.KeyAvailable throws when input is redirected; nothing to drain.
+                }
+            }
+
             // Blocking read of a single key, sourced from whichever input path is
             // active. Used by modal loops (e.g. the exit dialog) that need to wait
             // for one keypress. Wheel events are ignored while a modal is up.
@@ -1171,6 +1190,15 @@ class Program
                 if (!inlineApproval.IsActive && permissionBroker.TryDequeue(out var pendingPermission) && pendingPermission != null)
                 {
                     activeApprovalRequest = pendingPermission;
+
+                    // Discard anything already typed before discarding nothing else: the prompt
+                    // resolves on a SINGLE bare keystroke (Esc / d / n deny, Enter / space allow),
+                    // so a character the user typed a moment earlier - while the tool was still
+                    // running and no prompt was on screen - would be consumed the instant the
+                    // prompt appears and silently answer it. Any English word containing "d" or
+                    // "n" is enough to deny a command the user never saw a prompt for.
+                    DrainTypeAhead();
+
                     inlineApproval.Begin(pendingPermission.Request);
                 }
                 else if (inlineApproval.IsActive && activeApprovalRequest != null && activeApprovalRequest.Completion.Task.IsCompleted)

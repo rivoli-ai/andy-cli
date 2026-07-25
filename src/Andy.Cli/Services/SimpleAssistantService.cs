@@ -30,8 +30,28 @@ public class SimpleAssistantService : IDisposable
     // and returns a full conversation-history dump as its response (see the guard in
     // ProcessMessageAsync). 10 was far too low for real coding tasks, which routinely
     // need a dozen+ explore/edit round-trips.
-    private const int MaxAgentTurns = 50;
+    /// <summary>
+    /// Tool-call round-trips allowed in one request before the agent gives up.
+    ///
+    /// 10 was far too low, then 50 - and a real refactoring session still hits 50, which reads as
+    /// the tool breaking rather than a safety valve doing its job. The default is now high enough
+    /// that only a genuinely runaway loop reaches it, and ANDY_MAX_TURNS overrides it for the
+    /// cases that need more still.
+    /// </summary>
+    private static readonly int MaxAgentTurns = ResolveMaxAgentTurns();
+
+    private const int DefaultMaxAgentTurns = 300;
     private const string MaxTurnsStopReason = "max_turns_exceeded";
+
+    private static int ResolveMaxAgentTurns()
+    {
+        var configured = Environment.GetEnvironmentVariable("ANDY_MAX_TURNS");
+        if (int.TryParse(configured, out var turns) && turns > 0)
+        {
+            return turns;
+        }
+        return DefaultMaxAgentTurns;
+    }
 
     private int _toolCallCounter = 0;
     private int _lastInputTokens = 0;
