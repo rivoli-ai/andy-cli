@@ -21,6 +21,7 @@ public static class HelpText
         "- **F3**: Toggle mouse capture (OFF by default = plain-drag native selection and copy; ON = mouse-wheel scroll)\n" +
         "- **Click while scrolled up**: releases mouse capture so plain click-drag selects text; capture is restored when back at the bottom\n" +
         "- **Ctrl+O**: Expand/collapse tool output detail (view-only; does not affect a running turn)\n" +
+        "- **Ctrl+X**: Edit the current prompt in your external editor ($VISUAL, then $EDITOR)\n" +
         "- **ESC**: Quit application (closes the command palette first if open)\n" +
         "- **Page Up/Down**: Scroll chat history\n" +
         "- **Up/Down**: Navigate multi-line text or prompt history (when in History mode)\n" +
@@ -40,6 +41,11 @@ public static class HelpText
         "- **/sessions**: List saved sessions that can be resumed\n" +
         "- **/resume [session-id]**: Resume a saved session (most recent when no id is given)\n" +
         "- **/help**: Show this help message\n\n" +
+        "### External Editor:\n" +
+        "- **/editor**: Compose a prompt in your external editor, then return to Andy\n" +
+        "- **Ctrl+X**: Same, but starts from the text already in the composer\n" +
+        "- Andy reads **VISUAL** first, then **EDITOR**; e.g. `export VISUAL='vim'` or `export VISUAL='code --wait'`\n" +
+        "- GUI editors need a blocking flag (`--wait`); see docs/external-editor.md\n\n" +
         "### Model Commands:\n" +
         "- **/model list**: Show available models\n" +
         "- **/model switch <provider>**: Change provider\n" +

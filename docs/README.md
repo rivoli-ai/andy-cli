@@ -10,6 +10,8 @@ linked below.
 
 - [Commands and keyboard shortcuts](README_COMMANDS.md) - Interactive, command-line,
   headless, and ACP invocations.
+- [External editor](external-editor.md) - `/editor` and Ctrl+X: composing prompts in
+  `$VISUAL`/`$EDITOR`, per-editor setup, quoting rules, and troubleshooting.
 - [Zed quickstart](QUICKSTART_ZED.md) - Minimal ACP setup for a local build.
 - [Zed and ACP integration](ZED_INTEGRATION.md) - Publishing, configuration,
   supported behavior, limitations, and troubleshooting.

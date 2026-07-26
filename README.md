@@ -265,6 +265,7 @@ this repository). The application is built on a set of Andy.* NuGet packages:
 
 - [`docs/README.md`](docs/README.md) - Documentation index
 - [`docs/README_COMMANDS.md`](docs/README_COMMANDS.md) - Commands and shortcuts
+- [`docs/external-editor.md`](docs/external-editor.md) - Composing prompts in $VISUAL/$EDITOR
 - [`docs/headless-runtime.md`](docs/headless-runtime.md) - Headless config and execution contract
 - [`docs/mcp-configuration.md`](docs/mcp-configuration.md) - Interactive MCP server configuration
 - [`docs/ZED_INTEGRATION.md`](docs/ZED_INTEGRATION.md) - ACP editor integration

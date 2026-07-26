@@ -1090,6 +1090,41 @@ class Program
             var lastWidth = viewport.Width;
             var lastHeight = viewport.Height;
 
+            // External editor round trip (issue #287). Both /editor and Ctrl+X funnel through
+            // OpenExternalEditorAsync so the key binding and the slash command cannot drift.
+            // Everything risky (terminal hand-off, process launch, temp file, size limit,
+            // structured-part preservation) lives in Andy.Cli.Editor and is unit-tested there;
+            // this is only the wiring.
+            var externalEditor = new Andy.Cli.Editor.ExternalEditorService(
+                new Andy.Cli.Editor.EditorResolver(),
+                new Andy.Cli.Editor.EditorProcessRunner(),
+                new Andy.Cli.Editor.TerminalSuspendController(
+                    Console.Write,
+                    rawInput,
+                    // The editor scribbled over the terminal while it owned it, so the next
+                    // frame must be a full clear + repaint and the cursor style re-applied.
+                    () => { lastReflowSig = int.MinValue; cursorStyledShown = false; }));
+            var promptComposer = new Andy.Cli.Editor.PromptLineComposer(prompt);
+
+            async Task OpenExternalEditorAsync()
+            {
+                var result = await externalEditor.EditAsync(promptComposer.GetDocument());
+                if (result.Applied)
+                {
+                    // Only a clean editor exit replaces the composer; every other outcome
+                    // leaves the original text untouched and just reports why.
+                    promptComposer.SetDocument(result.Document);
+                    feed.SnapToBottom();
+                    toast.Show("Prompt updated from your editor", 90);
+                }
+                else if (!string.IsNullOrEmpty(result.Message))
+                {
+                    feed.AddMarkdownRich("```\n" + result.Message + "\n```");
+                }
+                lastReflowSig = int.MinValue;
+                cursorStyledShown = false;
+            }
+
             // Helper method to show exit confirmation dialog
             async Task<bool> ShowExitConfirmationAsync()
             {
@@ -1371,6 +1406,15 @@ class Program
                                 ? "Mouse capture ON (wheel scrolls; Option+drag to select text, Cmd+C to copy)"
                                 : "Mouse capture OFF (plain-drag native text selection enabled)", 120);
                         }
+                        return;
+                    }
+
+                    // Ctrl+X opens the current prompt in the external editor ($VISUAL, then
+                    // $EDITOR) - issue #287. Same code path as /editor, but this one keeps
+                    // whatever is already typed in the composer.
+                    if (k.Key == ConsoleKey.X && (k.Modifiers & ConsoleModifiers.Control) != 0)
+                    {
+                        await OpenExternalEditorAsync();
                         return;
                     }
 
@@ -1667,6 +1711,15 @@ class Program
                                         var result = await toolsCommand.ExecuteAsync(args);
                                         feed.AddMarkdownRich(result.Message);
                                     }
+                                    return;
+                                }
+                                else if (commandName == "editor" || commandName == "edit")
+                                {
+                                    // Issue #287. Submitting "/editor" has already cleared the
+                                    // composer, so this opens an empty buffer; Ctrl+X is the
+                                    // binding that carries the text you already typed.
+                                    feed.AddUserMessage(cmd);
+                                    await OpenExternalEditorAsync();
                                     return;
                                 }
                                 else if (commandName == "mcp")
