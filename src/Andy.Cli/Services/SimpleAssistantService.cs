@@ -277,10 +277,17 @@ public class SimpleAssistantService : IDisposable
     /// <summary>
     /// Process a user message
     /// </summary>
+    /// <param name="structuredParts">
+    /// Optional multi-part content for this turn (issue #277: @file mentions resolve into a text
+    /// part per attached file). When supplied it is what the agent actually receives;
+    /// <paramref name="userMessage"/> is still used for the local shortcuts, token estimates and
+    /// instrumentation, so pass the flattened equivalent there.
+    /// </param>
     public async Task<string> ProcessMessageAsync(
         string userMessage,
         bool enableStreaming = false, // Ignored for now - streaming not yet implemented
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<Andy.Model.Model.MessagePart>? structuredParts = null)
     {
         try
         {
@@ -347,7 +354,9 @@ public class SimpleAssistantService : IDisposable
 
             // Process message through SimpleAgent
             var llmStartTime = DateTime.UtcNow;
-            var result = await _agent.ProcessMessageAsync(userMessage, cancellationToken);
+            var result = structuredParts is { Count: > 0 }
+                ? await _agent.ProcessMessageAsync(structuredParts, cancellationToken)
+                : await _agent.ProcessMessageAsync(userMessage, cancellationToken);
             var llmDuration = DateTime.UtcNow - llmStartTime;
 
             // INSTRUMENTATION: Publish LLM response event
