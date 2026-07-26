@@ -6,14 +6,33 @@ using L = Andy.Tui.Layout;
 
 namespace Andy.Cli.Widgets
 {
+    /// <summary>What the composer will do with the line when it is submitted.</summary>
+    public enum PromptMode
+    {
+        /// <summary>The line is a message for the model (or a slash command).</summary>
+        Normal,
+
+        /// <summary>
+        /// Shell escape (issue #286): the line is a shell command the USER wants to run locally.
+        /// Entered by typing <c>!</c> at offset zero on an empty prompt; left with Escape or
+        /// Backspace on an empty prompt.
+        /// </summary>
+        Shell
+    }
+
     /// <summary>
     /// Single-line prompt with editing, history, suggestions, optional caret and border.
     /// Provides a method to compute the terminal cursor position for a thin-bar caret.
     /// </summary>
     public sealed class PromptLine
     {
+        /// <summary>The character that switches the composer into shell mode.</summary>
+        public const char ShellModeTrigger = '!';
+
         private string _text = string.Empty;
         private int _cursor;
+        private PromptMode _mode = PromptMode.Normal;
+        private bool _shellModeAvailable = true;
         private bool _focused;
         private readonly List<string> _history = new();
         private int _historyIndex = -1; // -1 = current editing
@@ -57,6 +76,48 @@ namespace Andy.Cli.Widgets
             _text = text ?? string.Empty;
             _cursor = _text.Length;
         }
+
+        /// <summary>What submitting the current line will do. See <see cref="PromptMode"/>.</summary>
+        public PromptMode Mode => _mode;
+
+        /// <summary>
+        /// Whether typing <c>!</c> at offset zero can enter shell mode. Set false when the feature
+        /// is disabled by configuration, in which case <c>!</c> is an ordinary character again and
+        /// the composer can never leave <see cref="PromptMode.Normal"/>.
+        /// </summary>
+        public void SetShellModeAvailable(bool available)
+        {
+            _shellModeAvailable = available;
+            if (!available) _mode = PromptMode.Normal;
+        }
+
+        /// <summary>
+        /// Leaves shell mode when the prompt is in it AND empty, returning true when it did.
+        ///
+        /// The empty-prompt condition is what makes Escape safe to route here first: with text on
+        /// the line Escape keeps its usual meaning (the exit dialog), so the key never silently
+        /// changes behaviour depending on an invisible mode. Backspace follows the same rule, which
+        /// is why deleting back past the start of a shell command drops you into normal mode
+        /// instead of doing nothing.
+        /// </summary>
+        public bool TryExitShellMode()
+        {
+            if (_mode != PromptMode.Shell || _text.Length != 0) return false;
+            _mode = PromptMode.Normal;
+            return true;
+        }
+
+        /// <summary>
+        /// Enters shell mode when it is available and the prompt is empty. Returns true when the
+        /// mode changed. Exposed for the command palette and tests; ordinary entry is by typing
+        /// <see cref="ShellModeTrigger"/>.
+        /// </summary>
+        public bool TryEnterShellMode()
+        {
+            if (!_shellModeAvailable || _mode == PromptMode.Shell || _text.Length != 0) return false;
+            _mode = PromptMode.Shell;
+            return true;
+        }
         /// <summary>Compute the terminal 1-based cursor column and row for the caret, if terminal cursor is enabled.</summary>
         public bool TryGetTerminalCursor(out int col1, out int row1)
         {
@@ -97,6 +158,34 @@ namespace Andy.Cli.Widgets
 
             var isPasting = _inPasteMode;
             _lastKeyTime = now;
+
+            // Shell escape (#286): "!" typed at offset zero on an empty prompt switches the
+            // composer to shell mode instead of inserting the character.
+            //
+            // Two guards keep this from firing when the user did not mean it. The prompt must be
+            // EMPTY with the cursor at zero, so a "!" anywhere in a message ("really!") is just a
+            // character. And it must not be part of a PASTE: pasting a script or a chat snippet
+            // that happens to start with "!" must land as text, not silently arm a shell command.
+            if (_shellModeAvailable
+                && _mode == PromptMode.Normal
+                && !isPasting
+                && k.KeyChar == ShellModeTrigger
+                && (k.Modifiers & (ConsoleModifiers.Control | ConsoleModifiers.Alt)) == 0
+                && _cursor == 0
+                && _text.Length == 0)
+            {
+                _mode = PromptMode.Shell;
+                return null;
+            }
+
+            // Escape on an empty shell prompt returns to normal mode. The interactive loop routes
+            // Escape here first for exactly this case; with text on the line it keeps its usual
+            // meaning and never reaches this method.
+            if (k.Key == ConsoleKey.Escape)
+            {
+                TryExitShellMode();
+                return null;
+            }
 
             // Ctrl+Enter inserts newline
             if (k.Key == ConsoleKey.Enter && (k.Modifiers & ConsoleModifiers.Control) != 0)
@@ -261,6 +350,10 @@ namespace Andy.Cli.Widgets
             // Editing keys
             if (k.Key == ConsoleKey.Backspace)
             {
+                // Backspace at the very start of an empty shell prompt deletes the mode itself -
+                // the "!" the user typed to get here - rather than doing nothing (#286).
+                if (TryExitShellMode()) return null;
+
                 if (_cursor > 0)
                 {
                     _text = _text.Remove(_cursor - 1, 1);
@@ -370,7 +463,13 @@ namespace Andy.Cli.Widgets
             b.PushClip(new DL.ClipPush(x, y, w, h));
             // background and optional border
             b.DrawRect(new DL.Rect(x, y, w, h, theme.PromptBackground));
-            if (_showBorder) b.DrawBorder(new DL.Border(x, y, w, h, "single", theme.Border));
+            // Shell mode is deliberately loud (#286): the border and the prompt glyph both change,
+            // because the cost of not noticing which mode you are in is running a shell command you
+            // meant to send to the model. Two independent signals, so a theme that dims one still
+            // leaves the other.
+            bool shellMode = _mode == PromptMode.Shell;
+            var borderColor = shellMode ? theme.Warning : theme.Border;
+            if (_showBorder) b.DrawBorder(new DL.Border(x, y, w, h, "single", borderColor));
             // Visual rows after soft-wrapping; caret placement uses the same rows.
             string norm = Normalize(_text);
             var rows = ComputeVisualRows(norm, innerW);
@@ -402,14 +501,28 @@ namespace Andy.Cli.Widgets
                 // Draw prompt prefix " > " on first visible row
                 if (i == 0)
                 {
+                    var glyph = shellMode ? ShellModeTrigger.ToString() : ">";
+                    var glyphColor = shellMode ? theme.Warning : theme.Accent;
                     b.DrawText(new DL.TextRun(x + 1, textStartY + i, " ", theme.Primary, theme.PromptBackground, DL.CellAttrFlags.None));
-                    b.DrawText(new DL.TextRun(x + 2, textStartY + i, ">", theme.Accent, theme.PromptBackground, DL.CellAttrFlags.Bold));
+                    b.DrawText(new DL.TextRun(x + 2, textStartY + i, glyph, glyphColor, theme.PromptBackground, DL.CellAttrFlags.Bold));
                     b.DrawText(new DL.TextRun(x + 3, textStartY + i, " ", theme.Primary, theme.PromptBackground, DL.CellAttrFlags.None));
                 }
                 var row = rows[startLine + i];
                 string snippet = norm.Substring(row.Start, row.Length);
                 b.DrawText(new DL.TextRun(textStartX, textStartY + i, snippet, theme.PromptText, theme.PromptBackground, DL.CellAttrFlags.None));
             }
+            // Shell mode with nothing typed yet explains itself, so the changed border and glyph
+            // are not the only clue about what Enter is about to do.
+            if (shellMode && norm.Length == 0 && visible > 0)
+            {
+                const string hint = "shell command - Esc to cancel";
+                var trimmed = hint.Length > innerW ? hint[..Math.Max(0, innerW)] : hint;
+                if (trimmed.Length > 0)
+                {
+                    b.DrawText(new DL.TextRun(textStartX, textStartY, trimmed, theme.Ghost, theme.PromptBackground, DL.CellAttrFlags.None));
+                }
+            }
+
             // ghost suggestion only on last visible row
             if (_suggest is not null && _focused && visible > 0)
             {

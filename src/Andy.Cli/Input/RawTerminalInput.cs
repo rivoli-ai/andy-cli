@@ -156,7 +156,21 @@ public sealed class RawTerminalInput : IDisposable
 
     private void OnProcessExit(object? sender, EventArgs e) => RestoreTerminal();
 
-    private void OnCancelKeyPress(object? sender, ConsoleCancelEventArgs e) => RestoreTerminal();
+    private void OnCancelKeyPress(object? sender, ConsoleCancelEventArgs e)
+    {
+        // Ctrl+C while something interruptible is running (a user-invoked shell command, #286)
+        // must cancel THAT and leave the app alive. Restoring the terminal here would drop it out
+        // of raw mode for the rest of the session, so the next frame would paint into a cooked
+        // terminal - the "corrupted TUI" the feature must not cause. Suppressing termination is
+        // likewise required, or the runtime kills the process the moment the handler returns.
+        if (InterruptDispatcher.Instance.Dispatch())
+        {
+            e.Cancel = true;
+            return;
+        }
+
+        RestoreTerminal();
+    }
 
     private void RestoreTerminal()
     {

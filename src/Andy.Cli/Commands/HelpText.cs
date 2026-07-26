@@ -27,7 +27,9 @@ public static class HelpText
         "- **Ctrl+A/E**: Jump to start/end of current line\n" +
         "- **Home/End**: Start/end of line (Ctrl: whole text)\n" +
         "- **Ctrl+K**: Delete from cursor to end of line\n" +
-        "- **Ctrl+U**: Delete from start of line to cursor\n\n" +
+        "- **Ctrl+U**: Delete from start of line to cursor\n" +
+        "- **!**: At the start of an empty prompt, enter shell mode to run a local command\n" +
+        "- **Ctrl+C**: Cancel the running shell-mode command (does not quit the app)\n\n" +
         "## Scroll Modes:\n" +
         "- **Feed Mode** (default): Blue indicator on left. PageUp/PageDown scrolls conversation.\n" +
         "- **Prompt History Mode**: Orange indicator on left. Up/Down navigates previous messages. Shows message counter (e.g., 5/12).\n\n" +
@@ -40,6 +42,12 @@ public static class HelpText
         "- **/sessions**: List saved sessions that can be resumed\n" +
         "- **/resume [session-id]**: Resume a saved session (most recent when no id is given)\n" +
         "- **/help**: Show this help message\n\n" +
+        "### Shell Escape:\n" +
+        "- **!**: Press at an empty prompt to switch the composer to shell mode; Esc or Backspace leaves it\n" +
+        "- **/attach**: List recent shell-mode commands whose output can be attached to your next prompt\n" +
+        "- **/attach <n>**: Insert that command's redacted output into the prompt (nothing is sent until you press Enter)\n" +
+        "- Commands run through the same permission rules, timeout, and output limits as the model's shell tool.\n" +
+        "  Disable with ShellEscape:Enabled=false or ANDY_SHELL_ESCAPE=0.\n\n" +
         "### Model Commands:\n" +
         "- **/model list**: Show available models\n" +
         "- **/model switch <provider>**: Change provider\n" +

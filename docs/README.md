@@ -17,6 +17,8 @@ linked below.
   command and feature comparison, including Andy Engine and Tools.
 - [Interactive MCP configuration](mcp-configuration.md) - Project/appsettings
   configuration, stdio and HTTP transports, commands, security, and troubleshooting.
+- [Interactive shell escape](shell-escape.md) - The `!` composer mode, its security
+  model (permission gate, cancellation, redaction, auditing), and how to disable it.
 
 ## Headless runtime
 

@@ -571,9 +571,15 @@ class Program
                 }
             }
 
-            void ReplaySessionIntoFeed(Andy.Engine.TranscriptSnapshot snapshot)
+            // Commands the user ran themselves in shell mode (#286) live in their own per-session
+            // file, never in the engine transcript, so replaying a session cannot pass them off as
+            // something the model did.
+            var userShellLog = new Andy.Cli.Services.Sessions.UserShellLogStore();
+
+            void ReplaySessionIntoFeed(Andy.Engine.TranscriptSnapshot snapshot, string replaySessionId)
             {
-                foreach (var entry in Andy.Cli.Services.Sessions.SessionReplayFormatter.Format(snapshot))
+                var shellCommands = userShellLog.Load(replaySessionId);
+                foreach (var entry in Andy.Cli.Services.Sessions.SessionReplayFormatter.Format(snapshot, shellCommands))
                 {
                     switch (entry.Kind)
                     {
@@ -582,6 +588,11 @@ class Program
                             break;
                         case Andy.Cli.Services.Sessions.SessionReplayFormatter.EntryKind.Assistant:
                             feed.AddMarkdownRich(entry.Text);
+                            break;
+                        case Andy.Cli.Services.Sessions.SessionReplayFormatter.EntryKind.UserShell:
+                            // Warning-toned, like the shell prompt itself, so a replayed user
+                            // command reads as the user's own action rather than a system notice.
+                            feed.AddMarkdownRich(ConsoleColors.WarningPrefix(entry.Text));
                             break;
                         default:
                             feed.AddMarkdownRich(ConsoleColors.Dim(entry.Text));
@@ -627,7 +638,7 @@ class Program
                             {
                                 aiService.RestoreTranscript(record.Snapshot);
                                 sessionId = targetId;
-                                ReplaySessionIntoFeed(record.Snapshot);
+                                ReplaySessionIntoFeed(record.Snapshot, targetId);
                                 feed.AddMarkdownRich($"[session] Resumed session {targetId} ({record.Summary.TurnCount} turn{(record.Summary.TurnCount == 1 ? "" : "s")} restored)");
                             }
                         }
@@ -664,6 +675,116 @@ class Program
                 autoApprovalMode.Enable();
                 contextStatusBar.SetAutoMode(true);
                 feed.AddMarkdownRich("[auto] Auto-approve ON for this session. Low-risk actions run without prompting; destructive actions still ask.");
+            }
+
+            // ---- Shell escape (issue #286) ---------------------------------------------------
+            //
+            // Typing "!" at offset zero switches the composer to shell mode; submitting runs the
+            // line through the SAME permission-gated execute_command path the model's shell tool
+            // uses (see UserShellCommandRunner for the security model). Disable with
+            // ShellEscape:Enabled=false or ANDY_SHELL_ESCAPE=0.
+            var shellEscapeOptions = Andy.Cli.Configuration.ShellEscapeOptions.Resolve(configuration);
+            prompt.SetShellModeAvailable(shellEscapeOptions.Enabled);
+
+            var userShellRunner = shellEscapeOptions.Enabled
+                ? new Andy.Cli.Services.Shell.UserShellCommandRunner(
+                    serviceProvider.GetRequiredService<IToolExecutor>(),
+                    shellEscapeOptions)
+                : null;
+            var userShellAttachment = new Andy.Cli.Services.Shell.UserShellOutputAttachment();
+
+            // Cancellation for the command currently running in shell mode. Ctrl+C cancels THIS,
+            // not the app: the dispatcher claims SIGINT only while a command is in flight, so an
+            // idle prompt keeps the ordinary Ctrl+C behaviour.
+            CancellationTokenSource? activeShellCts = null;
+            var shellRunLock = new object();
+
+            // Without a raw terminal (redirected input) nothing else has claimed CancelKeyPress,
+            // so the interactive loop registers the bridge itself. With one, RawTerminalInput's own
+            // handler already consults the dispatcher and additionally keeps the tty in raw mode.
+            if (rawInput == null)
+            {
+                Console.CancelKeyPress += (_, e) =>
+                {
+                    if (Andy.Cli.Input.InterruptDispatcher.Instance.Dispatch()) e.Cancel = true;
+                };
+            }
+
+            async Task RunUserShellCommandAsync(string command)
+            {
+                if (userShellRunner == null)
+                {
+                    toast.Show("Shell escape is disabled for this session.", 120);
+                    return;
+                }
+
+                CancellationTokenSource cts;
+                lock (shellRunLock)
+                {
+                    if (activeShellCts != null)
+                    {
+                        toast.Show("A shell command is already running (Ctrl+C to cancel it).", 120);
+                        return;
+                    }
+                    cts = new CancellationTokenSource();
+                    activeShellCts = cts;
+                }
+
+                var row = Andy.Cli.Widgets.Tools.UserShellFeedRow.CreateRunning(
+                    command, Andy.Cli.Services.WorkingDirectoryTracker.Instance.Current);
+                feed.AddItem(row);
+                feed.SnapToBottom();
+
+                // Claim Ctrl+C for the duration of the command. Cancelling the token kills the
+                // child through the tool layer and, if a consent prompt is up, resolves it to
+                // deny-once - so the composer is never left waiting on a dialog nobody can answer.
+                var interrupt = Andy.Cli.Input.InterruptDispatcher.Instance.Install(() =>
+                {
+                    try { cts.Cancel(); } catch (ObjectDisposedException) { /* already finished */ }
+                    return true;
+                });
+
+                Andy.Cli.Services.Shell.UserShellCommandResult result;
+                try
+                {
+                    result = await userShellRunner.RunAsync(command, cts.Token);
+                }
+                catch (Exception ex)
+                {
+                    Andy.Cli.Services.CrashLog.Write("shell.Run", ex);
+                    result = Andy.Cli.Services.Shell.UserShellCommandResult.DisabledResult(
+                        command, Andy.Cli.Services.WorkingDirectoryTracker.Instance.Current) with
+                    {
+                        Outcome = Andy.Cli.Services.Shell.UserShellOutcome.Failed,
+                        ErrorMessage = ex.Message
+                    };
+                }
+                finally
+                {
+                    // Release the key BEFORE disposing the source it cancels, so a press landing
+                    // in the gap falls through to the ordinary Ctrl+C behaviour rather than being
+                    // swallowed by a handler that can no longer do anything.
+                    interrupt.Dispose();
+                    lock (shellRunLock) { activeShellCts = null; }
+                    cts.Dispose();
+                }
+
+                Andy.Cli.Widgets.Tools.UserShellFeedRow.Complete(row, result);
+                feed.SnapToBottom();
+
+                // Recorded for audit and replay (redacted on the way to disk) and made available to
+                // /attach. Output is NEVER handed to the model on its own.
+                userShellLog.Record(sessionId, result);
+                userShellAttachment.Record(result);
+
+                if (result.Outcome == Andy.Cli.Services.Shell.UserShellOutcome.Denied)
+                {
+                    toast.Show("Command blocked by the permission rules (/permissions to review).", 150);
+                }
+                else if (!result.HasNoOutput)
+                {
+                    toast.Show("/attach adds this output to your next prompt.", 90);
+                }
             }
 
             // In-place session switch for /resume <id>: replaces the assistant service with a
@@ -731,7 +852,7 @@ class Program
                 promptHistory.Clear();
                 historyIndex = -1;
                 feed.Clear();
-                ReplaySessionIntoFeed(record.Snapshot);
+                ReplaySessionIntoFeed(record.Snapshot, targetId);
                 feed.AddMarkdownRich($"[session] Resumed session {targetId} ({record.Summary.TurnCount} turn{(record.Summary.TurnCount == 1 ? "" : "s")} restored)");
                 await Task.CompletedTask;
                 return null;
@@ -1341,6 +1462,14 @@ class Program
                             return;
                         }
 
+                        // Shell escape (#286): Escape on an EMPTY shell prompt leaves shell mode.
+                        // Only when empty, so Escape never quietly stops meaning "quit" while
+                        // there is text on the line.
+                        if (prompt.TryExitShellMode())
+                        {
+                            return;
+                        }
+
                         // Show exit confirmation dialog
                         if (await ShowExitConfirmationAsync())
                         {
@@ -1540,6 +1669,7 @@ class Program
 
                     // Avoid mapping regular alphanumeric keys to actions
                     var textBeforeKey = prompt.Text;
+                    var submittedInShellMode = prompt.Mode == Andy.Cli.Widgets.PromptMode.Shell;
                     var submitted = prompt.OnKey(k);
                     // If the keystroke edited the prompt text (typing, paste, backspace,
                     // delete, etc.), snap the feed back to the bottom where the prompt
@@ -1551,6 +1681,27 @@ class Program
                     }
                     if (submitted is string cmd && !string.IsNullOrWhiteSpace(cmd))
                     {
+                        // Shell escape (#286) is decided FIRST and independently of everything
+                        // below. A shell-mode line is a local command, so it must not be parsed as
+                        // a slash command, must not be queued behind an in-flight model turn (the
+                        // whole point is running something while the model works), and must never
+                        // be sent to the provider. The mode is read before OnKey, because Enter
+                        // clears the line but deliberately keeps shell mode armed for the next
+                        // command - a shell prompt you have to re-arm every time is a worse shell.
+                        if (submittedInShellMode)
+                        {
+                            // Deliberately NOT added to promptHistory: that list is indexed by
+                            // queued-message number (pendingByHistoryIndex), so inserting a shell
+                            // command would shift every queued message's identity. Shell commands
+                            // are still recallable with Ctrl+Up, which uses the composer's own
+                            // history.
+                            historyIndex = -1;
+                            // Fire and forget: the render loop keeps drawing while the command
+                            // runs, and the row updates itself when it finishes.
+                            _ = RunUserShellCommandAsync(cmd);
+                            return;
+                        }
+
                         bool processingNow;
                         lock (messagePumpLock) processingNow = isProcessingMessage;
                         if (processingNow)
@@ -1710,6 +1861,43 @@ class Program
                                     feed.AddMarkdownRich(on
                                         ? "[auto] Auto-approve ON for this session. Low-risk actions run without prompting; destructive actions (outside-project deletes, git/DB destruction) still ask. Toggle off with /auto off."
                                         : "[auto] Auto-approve OFF. Every action will prompt as usual.");
+                                    return;
+                                }
+                                else if (commandName == "attach")
+                                {
+                                    // The ONLY path from shell-mode output into the model's
+                                    // context (#286). Output is never forwarded automatically:
+                                    // the user picks which command's output is worth the tokens,
+                                    // and it is redacted on the way into the composer. Nothing is
+                                    // sent here - the text lands in the prompt, so the user still
+                                    // sees exactly what they are about to send and can edit it.
+                                    if (!shellEscapeOptions.Enabled)
+                                    {
+                                        feed.AddMarkdownRich(ConsoleColors.WarningPrefix("[attach] Shell escape is disabled, so there is no command output to attach."));
+                                        return;
+                                    }
+                                    if (userShellAttachment.Count == 0)
+                                    {
+                                        feed.AddMarkdownRich(ConsoleColors.NotePrefix("[attach] No shell-mode commands yet. Press ! at an empty prompt to run one."));
+                                        return;
+                                    }
+                                    if (args.Length == 0)
+                                    {
+                                        feed.AddMarkdownRich("```\n[attach] Pick a command by number, e.g. /attach 1\n"
+                                            + string.Join("\n", userShellAttachment.DescribeAvailable()) + "\n```");
+                                        return;
+                                    }
+                                    if (!int.TryParse(args[0], out var attachIndex)
+                                        || userShellAttachment.BuildAttachment(attachIndex) is not { } attachment)
+                                    {
+                                        feed.AddMarkdownRich(ConsoleColors.WarningPrefix($"[attach] No shell command '{args[0]}'. Run /attach to see what is available."));
+                                        return;
+                                    }
+                                    var existing = prompt.Text;
+                                    prompt.SetText(string.IsNullOrWhiteSpace(existing)
+                                        ? attachment
+                                        : existing.TrimEnd() + "\n\n" + attachment);
+                                    toast.Show("Command output added to the prompt. Edit it or press Enter to send.", 150);
                                     return;
                                 }
                                 else if (commandName == "skills" || commandName == "skill")
@@ -2052,7 +2240,10 @@ class Program
                 {
                     // Update inline command help filter based on current prompt text.
                     // Slash-command help is suppressed while an inline approval is pending.
-                    inlineCommandHelp.UpdateFilter(prompt.Text);
+                    // Slash-command help is meaningless in shell mode: a leading "/" there is a
+                    // path, not a command (#286).
+                    inlineCommandHelp.UpdateFilter(
+                        prompt.Mode == Andy.Cli.Widgets.PromptMode.Shell ? string.Empty : prompt.Text);
                     int helpH = inlineApproval.IsActive ? 0 : inlineCommandHelp.GetHeight();
 
                     // Keep the prompt's wrap width in sync with its render width so soft-wrapping,
