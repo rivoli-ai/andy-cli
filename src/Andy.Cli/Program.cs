@@ -551,6 +551,9 @@ class Program
             var sessionStore = new Andy.Cli.Services.Sessions.SessionStore();
             var sessionsCommand = new Andy.Cli.Commands.SessionsCommand(sessionStore);
             var sessionId = Andy.Cli.Services.Sessions.SessionStore.NewSessionId();
+            // Archive management (issue #285): export/import/fork/rename/stats. The id
+            // getter lets /session default to the session currently being recorded.
+            var sessionCommand = new Andy.Cli.Commands.SessionCommand(sessionStore, () => sessionId);
 
             void SaveSession()
             {
@@ -558,11 +561,19 @@ class Program
                 {
                     var service = aiService;
                     if (service == null) return;
+                    var sessionProvider = modelCommand.GetCurrentProvider();
+                    var sessionModel = modelCommand.GetCurrentModel();
+                    // Aggregate usage travels in the session envelope (issue #285) as an
+                    // optional field, so sessions written before it existed still load.
+                    var usage = Andy.Cli.Services.Sessions.SessionUsage
+                        .FromTokenCounts(tokenCounter.TotalInputTokens, tokenCounter.TotalOutputTokens)
+                        .WithEstimatedCost(sessionProvider, sessionModel);
                     sessionStore.Save(
                         sessionId,
                         service.ExportTranscript(),
-                        modelCommand.GetCurrentProvider(),
-                        modelCommand.GetCurrentModel());
+                        sessionProvider,
+                        sessionModel,
+                        new Andy.Cli.Services.Sessions.SessionSaveOptions { Usage = usage });
                 }
                 catch (Exception ex)
                 {
@@ -1759,6 +1770,21 @@ class Program
                                     feed.AddMarkdownRich("```\n" + result.Message + "\n```");
                                     return;
                                 }
+                                else if (commandName == "session")
+                                {
+                                    // Session archive management (issue #285): export,
+                                    // import, fork, rename, stats. Never resumes or
+                                    // deletes - that surface belongs to /resume.
+                                    feed.AddUserMessage(cmd);
+                                    // Persist the live transcript first so /session export
+                                    // and /session fork see the turns just typed.
+                                    SaveSession();
+                                    var result = await sessionCommand.ExecuteAsync(args);
+                                    feed.AddMarkdownRich(result.Success
+                                        ? "```\n" + result.Message + "\n```"
+                                        : ConsoleColors.WarningPrefix(result.Message));
+                                    return;
+                                }
                                 else if (commandName == "resume")
                                 {
                                     // Switch to a saved session in place (issue #231). With no
@@ -2591,6 +2617,12 @@ class Program
                 // List interactive sessions saved under ~/.andy/sessions that can be
                 // resumed with --resume <id> / --continue (issue #231).
                 command = new SessionsCommand(new Andy.Cli.Services.Sessions.SessionStore());
+                break;
+            case "session":
+                // Noninteractive equivalent of the /session slash command (issue #285):
+                // export, import, fork, rename, and usage stats over ~/.andy/sessions.
+                command = new Andy.Cli.Commands.SessionCommand(
+                    new Andy.Cli.Services.Sessions.SessionStore());
                 break;
             case "help":
             case "?":

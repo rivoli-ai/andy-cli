@@ -65,6 +65,21 @@ project-local `.andy/mcp-servers.json`. See
 [Interactive MCP configuration](mcp-configuration.md) for schemas, environment
 interpolation, supported transports, and current management limitations.
 
+### Sessions
+
+| Command | Behavior |
+| --- | --- |
+| `/session export [id] [--out path] [--markdown] [--tools] [--metadata]` | Write a portable archive, or a readable Markdown transcript. |
+| `/session import <path> [--dry-run] [--title t]` | Validate and install an exported archive. |
+| `/session fork [id] [--at turn] [--title t]` | Branch a session; `--at N` keeps the history before turn N. |
+| `/session rename [id] <title>` | Title a session so it stays discoverable. |
+| `/session stats [id] [--all]` | Token and estimated-cost totals. |
+
+The same subcommands are available noninteractively as `andy-cli session ...`.
+See [Session archives, forks, and usage stats](session-archives.md) for the archive
+format, validation rules, fork boundary semantics, and the unknown-versus-zero cost
+distinction.
+
 ### Permissions
 
 | Command | Behavior |

@@ -40,6 +40,12 @@ public static class HelpText
         "- **/sessions**: List saved sessions that can be resumed\n" +
         "- **/resume [session-id]**: Resume a saved session (most recent when no id is given)\n" +
         "- **/help**: Show this help message\n\n" +
+        "### Session Archive Commands:\n" +
+        "- **/session export [id] [--out path] [--markdown] [--tools] [--metadata]**: Write a portable archive (or Markdown transcript)\n" +
+        "- **/session import <path> [--dry-run] [--title t]**: Validate and install an exported archive\n" +
+        "- **/session fork [id] [--at turn] [--title t]**: Branch a session (--at forks the history before that turn)\n" +
+        "- **/session rename [id] <title>**: Title a session so it stays discoverable\n" +
+        "- **/session stats [id] [--all]**: Token and estimated-cost totals\n\n" +
         "### Model Commands:\n" +
         "- **/model list**: Show available models\n" +
         "- **/model switch <provider>**: Change provider\n" +
@@ -90,6 +96,7 @@ public static class HelpText
         "  permissions    - View and modify tool permission rules\n" +
         "  skills         - List, inspect, and enable/disable agent skills\n" +
         "  sessions       - List saved sessions (resume with --resume <id> / --continue)\n" +
+        "  session        - Export, import, fork, rename, and measure saved sessions\n" +
         "  help, ?        - Show this help message\n" +
         "\n" +
         "Run without arguments to start the interactive TUI mode.";

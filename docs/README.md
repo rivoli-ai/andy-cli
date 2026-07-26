@@ -17,6 +17,8 @@ linked below.
   command and feature comparison, including Andy Engine and Tools.
 - [Interactive MCP configuration](mcp-configuration.md) - Project/appsettings
   configuration, stdio and HTTP transports, commands, security, and troubleshooting.
+- [Session archives, forks, and usage stats](session-archives.md) - Portable export/import,
+  point-in-time forks, titles, and token/cost aggregation.
 
 ## Headless runtime
 
