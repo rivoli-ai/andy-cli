@@ -62,6 +62,11 @@ public static class HelpText
         "- **/permissions revoke <tool[(spec)]> [--scope S]**: Remove a persisted rule\n" +
         "- **/permissions reset**: Delete the user/project/local rule files (back to defaults)\n" +
         "- **/permissions path**: Show the rule file locations\n\n" +
+        "### Authentication Commands:\n" +
+        "- **/auth list**: Providers, credential status, and supported login methods\n" +
+        "- **/auth login <provider>**: Sign in (masked prompt; --method oauth or device-code)\n" +
+        "- **/auth status [provider]**: Show where each credential comes from (fully redacted)\n" +
+        "- **/auth logout <provider>**: Remove the stored credential (key and OAuth tokens)\n\n" +
         "### Skill Commands:\n" +
         "- **/skills**: List discovered agent skills (disabled ones are marked)\n" +
         "- **/skills info <name>**: Show a skill's details\n" +
@@ -90,6 +95,7 @@ public static class HelpText
         "  permissions    - View and modify tool permission rules\n" +
         "  skills         - List, inspect, and enable/disable agent skills\n" +
         "  sessions       - List saved sessions (resume with --resume <id> / --continue)\n" +
+        "  auth           - Sign in to providers, review credential status, sign out\n" +
         "  help, ?        - Show this help message\n" +
         "\n" +
         "Run without arguments to start the interactive TUI mode.";

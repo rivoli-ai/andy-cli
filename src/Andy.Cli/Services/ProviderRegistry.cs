@@ -199,9 +199,22 @@ public static class ProviderRegistry
     }
 
     /// <summary>
-    /// Whether the provider's credentials are present in the environment. Local providers
-    /// without required env vars are treated as always available (their reachability is
-    /// checked elsewhere).
+    /// Optional probe that reports whether a provider has a credential in the OS credential
+    /// store (rivoli-ai/andy-cli#284). Installed once at startup by each execution mode
+    /// (interactive, headless, ACP) so a provider configured with <c>andy-cli auth login</c>
+    /// counts as available everywhere env-var detection is used today - detection, /model, and
+    /// the ACP model catalog - without each of them growing its own credential lookup.
+    ///
+    /// Null by default, which keeps this class env-only for tests and for any caller that has
+    /// not opted in. The probe must never return or expose the secret itself.
+    /// </summary>
+    public static Func<string, bool>? StoredCredentialProbe { get; set; }
+
+    /// <summary>
+    /// Whether the provider's credentials are available: present in the environment, or held by
+    /// the credential store when a <see cref="StoredCredentialProbe"/> is installed. Local
+    /// providers without required env vars are treated as always available (their reachability
+    /// is checked elsewhere).
     /// </summary>
     public static bool HasCredentials(string? idOrAlias)
     {
@@ -212,7 +225,10 @@ public static class ProviderRegistry
         if (!descriptor.RequiresApiKey || descriptor.ApiKeyEnvVars.Count == 0)
             return true;
 
-        return descriptor.ApiKeyEnvVars.All(v =>
-            !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(v)));
+        if (descriptor.ApiKeyEnvVars.All(v => !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(v))))
+            return true;
+
+        var probe = StoredCredentialProbe;
+        return probe != null && probe(descriptor.Id);
     }
 }

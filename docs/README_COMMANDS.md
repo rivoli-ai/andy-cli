@@ -12,6 +12,7 @@ replace it with `dotnet run --project src/Andy.Cli --`.
 | Interactive terminal UI | `andy-cli` |
 | Print version | `andy-cli --version`, `andy-cli -v`, or `andy-cli version` |
 | Model command | `andy-cli model <subcommand>` |
+| Authentication command | `andy-cli auth <subcommand>` |
 | Tool command | `andy-cli tools <subcommand>` |
 | Headless run | `andy-cli run --headless --config <path>` |
 | ACP server | `andy-cli --acp` |
@@ -51,6 +52,21 @@ Use IDs from `/tools list`; do not infer an ID from the display name. The curren
 catalog contains 54 tools, including 28 dataframe and six PDF tools. The catalog
 is package-version dependent, and interactive MCP tools are added at startup, so
 the live command is authoritative.
+
+### Provider authentication
+
+| Command | Behavior |
+| --- | --- |
+| `/auth list` | List providers, credential status, and the login methods each supports. |
+| `/auth login <provider>` | Sign in with a masked prompt (`--method api-key`, `oauth`, or `device-code`). |
+| `/auth status [provider]` | Show where each credential comes from, fully redacted. |
+| `/auth logout <provider>` | Remove the stored credential (API key plus OAuth tokens). |
+
+The same verbs are available non-interactively as `andy-cli auth list|login|status|logout`.
+Environment variables are the highest-priority source and are never persisted; stored
+credentials live in the OS credential service. See
+[Provider authentication](provider-auth.md) for precedence, OS behavior, automation,
+rotation, and recovery.
 
 ### MCP servers
 

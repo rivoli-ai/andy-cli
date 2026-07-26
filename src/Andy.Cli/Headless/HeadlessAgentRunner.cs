@@ -597,6 +597,11 @@ public static class HeadlessAgentRunner
         services.Configure<LlmOptions>(options =>
             ApplyConfiguredModel(options, config.Model.Provider, config.Model.Id));
 
+        // rivoli-ai/andy-cli#284: layer in credentials stored by `andy-cli auth login` so a
+        // headless run resolves them exactly like interactive and ACP mode. Environment
+        // variables (including model.api_key_ref below) still win and are never persisted.
+        services.Configure<LlmOptions>(Andy.Cli.Auth.AuthBootstrap.Configure);
+
         // rivoli-ai/andy-cli#180: honor model.api_key_ref. Only the 'env:NAME' form
         // is supported (validated at load time); load that env var's value into the
         // provider's ApiKey so a config that names a non-default key var actually

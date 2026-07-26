@@ -17,6 +17,8 @@ linked below.
   command and feature comparison, including Andy Engine and Tools.
 - [Interactive MCP configuration](mcp-configuration.md) - Project/appsettings
   configuration, stdio and HTTP transports, commands, security, and troubleshooting.
+- [Provider authentication](provider-auth.md) - Credential source precedence, OS
+  credential stores, OAuth flows, automation, rotation, and recovery.
 
 ## Headless runtime
 
