@@ -329,7 +329,27 @@ var timeoutSeconds = config.Limits.TimeoutSeconds > 0 ? config.Limits.TimeoutSec
 5. **Loop guard.** Repeated identical calls are short-circuited with guidance rather than
    re-run.
 
+## Post-Mutation Pipeline
+
+Every single-file mutating tool (`write_file`, `edit_file`, `replace_text`, `move_file`)
+runs through one shared post-mutation pipeline
+(`src/Andy.Cli/Services/Formatting/PostMutationPipeline.cs`) after it succeeds:
+
+1. Configured (or locally detected) formatters run, in deterministic order, each one
+   authorized through the same command-permission gate as any other command Andy runs -
+   before its process is started.
+2. The file's FINAL on-disk bytes are re-read.
+3. Reserved, ordered extension points run (snapshot finalization, LSP notification).
+4. The diff shown in the feed and attached to the tool result is computed from those
+   final bytes, so what the user sees is what the file contains.
+
+A formatter failure never passes as a clean write: the exit code and bounded, redacted
+stderr travel back to the model with the tool result under `formatter_diagnostics`. See
+[Formatters](./formatters.md) for configuration, `/formatters status`, and the failure
+taxonomy.
+
 ## Related Documentation
 
 - [Headless Runtime](./headless-runtime.md)
 - [Event Stream](./event-stream.md)
+- [Formatters and the post-mutation pipeline](./formatters.md)

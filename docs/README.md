@@ -36,6 +36,8 @@ linked below.
   dependency manifest, and source compatibility status.
 - [Tool execution architecture](tool-execution-architecture.md) - Engine/tool adapter,
   permission, progress, and result flow.
+- [Formatters and the post-mutation pipeline](formatters.md) - Configured formatters,
+  ordering, permission-gated execution, and diffs computed from the final on-disk bytes.
 - [Refactoring plan](REFACTORING_PLAN.md) - Current maintainability work and task
   tracking.
 - [FeedView inventory](feedview-inventory.md) - Feed item ownership and extraction
