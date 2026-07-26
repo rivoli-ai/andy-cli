@@ -2,8 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Andy.Tools.Core;
+using Andy.Cli.Lsp;
 using Andy.Cli.Widgets;
 using Andy.Cli.Instrumentation;
 using Microsoft.Extensions.Logging;
@@ -20,6 +22,7 @@ namespace Andy.Cli.Services
         private readonly IToolRegistry? _toolRegistry;
         private readonly ToolCallLoopDetector _loopDetector = new();
         private readonly WorkingDirectoryTracker _workingDirectory;
+        private readonly IFileMutationDiagnosticsReporter? _diagnosticsReporter;
 
         public event EventHandler<ToolExecutionStartedEventArgs>? ExecutionStarted
         {
@@ -39,12 +42,15 @@ namespace Andy.Cli.Services
             remove { _innerExecutor.SecurityViolation -= value; }
         }
 
-        public UiUpdatingToolExecutor(IToolExecutor innerExecutor, ILogger<UiUpdatingToolExecutor>? logger = null, IToolRegistry? toolRegistry = null, WorkingDirectoryTracker? workingDirectoryTracker = null)
+        public UiUpdatingToolExecutor(IToolExecutor innerExecutor, ILogger<UiUpdatingToolExecutor>? logger = null, IToolRegistry? toolRegistry = null, WorkingDirectoryTracker? workingDirectoryTracker = null, IFileMutationDiagnosticsReporter? diagnosticsReporter = null)
         {
             _innerExecutor = innerExecutor;
             _logger = logger;
             _toolRegistry = toolRegistry;
             _workingDirectory = workingDirectoryTracker ?? WorkingDirectoryTracker.Instance;
+            // Null here means "use whatever the session has installed", resolved per call: the
+            // executor is rebuilt on /restart and on model switches, but the LSP session is not.
+            _diagnosticsReporter = diagnosticsReporter;
         }
 
         public async Task<ToolExecutionResult> ExecuteAsync(string toolId, Dictionary<string, object?> parameters, ToolExecutionContext? context = null)
@@ -686,7 +692,64 @@ namespace Andy.Cli.Services
                 InstrumentationHub.Instance.Publish(toolResultToLlmEvent);
             }
 
+            // POST-MUTATION PIPELINE (rivoli-ai/andy-cli#282).
+            //
+            // Everything that reacts to a file having changed hangs off this one point, and the
+            // ORDER is part of the contract:
+            //
+            //   1. (future, #283) run the post-mutation formatter, rewriting the file on disk
+            //   2. notify the language server and collect diagnostics  <- implemented here
+            //
+            // The formatter must come FIRST because the diagnostics step reads the file back from
+            // disk and reports on exactly what it finds. If a formatter ran afterwards, every
+            // diagnostic's line and column would describe a version of the file that no longer
+            // exists. #283 should insert its call immediately above this one; nothing else needs
+            // to move.
+            if (result.IsSuccessful && diffCapture != null)
+            {
+                await ReportLanguageServerDiagnosticsAsync(result, diffCapture, context);
+            }
+
             return result;
+        }
+
+        /// <summary>
+        /// Sends the changed file's final on-disk content to a configured language server and folds
+        /// the resulting diagnostics into the tool result and the feed.
+        ///
+        /// This runs on the agent's critical path, so it is completely non-fatal: no configured
+        /// server, a server that will not start, one that crashed, one that answers with garbage,
+        /// and one that is simply slow all end the same way - the tool result is returned unchanged
+        /// or with a short status note, and the turn continues.
+        /// </summary>
+        private async Task ReportLanguageServerDiagnosticsAsync(
+            ToolExecutionResult result,
+            FileMutationCapture capture,
+            ToolExecutionContext? context)
+        {
+            var reporter = _diagnosticsReporter ?? LspSession.Instance.Reporter;
+            if (reporter == null) return;
+
+            try
+            {
+                var cancellationToken = context?.CancellationToken ?? CancellationToken.None;
+                var report = await reporter.ReportAsync(capture.ResolvedPath, cancellationToken);
+                if (report == null || report.IsSilent) return;
+
+                // The model reads Data; attaching returns a NEW payload so the snapshot the feed
+                // already captured for this call is left exactly as it was.
+                LspResultAttachment.AttachTo(result, report);
+
+                var feedText = report.ToFeedText();
+                if (!string.IsNullOrWhiteSpace(feedText))
+                {
+                    ToolExecutionTracker.Instance.GetFeedView()?.AddMarkdownRich("```\n" + feedText + "\n```");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "[UI_EXECUTOR] Language server diagnostics failed for {Path}", capture.ResolvedPath);
+            }
         }
 
         public Task<ToolExecutionResult> ExecuteAsync(ToolExecutionRequest request)

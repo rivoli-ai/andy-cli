@@ -409,10 +409,20 @@ class Program
                 toolRegistry,
                 serviceProvider.GetService<ILoggerFactory>());
 
+            // Changed-file diagnostics from configured language servers (rivoli-ai/andy-cli#282).
+            // Inert unless .andy/lsp-servers.json (or Lsp:Servers in appsettings) names a server:
+            // Andy never downloads a toolchain, and servers start lazily on the first matching file
+            // change rather than here. Disposed with the session so no server outlives the process.
+            await using var lspSession = Andy.Cli.Lsp.LspSession.Start(
+                configuration,
+                Directory.GetCurrentDirectory(),
+                serviceProvider.GetService<ILoggerFactory>());
+
             // Initialize commands
             var modelCommand = new ModelCommand(serviceProvider);
             var toolsCommand = new ToolsCommand(serviceProvider);
             var mcpCommand = new McpCommand(mcpToolHost);
+            var lspCommand = new LspCommand();
             var permissionsCommand = new PermissionsCommand(serviceProvider);
             var permissionsManager = new Andy.Cli.Widgets.PermissionsManager(Directory.GetCurrentDirectory());
             var skillsCommand = new Andy.Cli.Commands.SkillsCommand(serviceProvider);
@@ -975,6 +985,19 @@ class Program
                     {
                         var subcommand = args.Length == 0 ? new[] { "status" } : args;
                         var result = await mcpCommand.ExecuteAsync(subcommand);
+                        feed.AddMarkdownRich("```\n" + result.Message + "\n```");
+                    }
+                },
+                new CommandPalette.CommandItem
+                {
+                    Name = "Language Server Status",
+                    Description = "Show configured language servers, their state, and startup errors",
+                    Category = "Tools",
+                    Aliases = new[] { "lsp", "lsp status", "lsp restart" },
+                    AsyncAction = async args =>
+                    {
+                        var subcommand = args.Length == 0 ? new[] { "status" } : args;
+                        var result = await lspCommand.ExecuteAsync(subcommand);
                         feed.AddMarkdownRich("```\n" + result.Message + "\n```");
                     }
                 },
@@ -1673,6 +1696,13 @@ class Program
                                 {
                                     feed.AddUserMessage(cmd);
                                     var result = await mcpCommand.ExecuteAsync(args);
+                                    feed.AddMarkdownRich("```\n" + result.Message + "\n```");
+                                    return;
+                                }
+                                else if (commandName == "lsp")
+                                {
+                                    feed.AddUserMessage(cmd);
+                                    var result = await lspCommand.ExecuteAsync(args);
                                     feed.AddMarkdownRich("```\n" + result.Message + "\n```");
                                     return;
                                 }

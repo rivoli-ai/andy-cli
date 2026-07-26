@@ -16,6 +16,7 @@ public static class SlashCommandCatalog
         new InlineCommandHelp.CommandInfo { Name = "model", Description = "Manage AI models (list, switch, info, test)", Aliases = new[] { "m" } },
         new InlineCommandHelp.CommandInfo { Name = "tools", Description = "Manage and list available tools", Aliases = new[] { "tool", "t" } },
         new InlineCommandHelp.CommandInfo { Name = "mcp", Description = "List MCP servers and connection status", Aliases = Array.Empty<string>() },
+        new InlineCommandHelp.CommandInfo { Name = "lsp", Description = "Show language server status and restart servers", Aliases = Array.Empty<string>() },
         new InlineCommandHelp.CommandInfo { Name = "permissions", Description = "Review and manage tool permission rules", Aliases = new[] { "perms", "perm" } },
         new InlineCommandHelp.CommandInfo { Name = "skills", Description = "List, inspect, and enable/disable agent skills", Aliases = new[] { "skill" } },
         new InlineCommandHelp.CommandInfo { Name = "theme", Description = "List, switch, or toggle transparency of the UI theme", Aliases = new[] { "themes" } },

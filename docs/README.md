@@ -17,6 +17,8 @@ linked below.
   command and feature comparison, including Andy Engine and Tools.
 - [Interactive MCP configuration](mcp-configuration.md) - Project/appsettings
   configuration, stdio and HTTP transports, commands, security, and troubleshooting.
+- [Changed-file LSP diagnostics](lsp-diagnostics.md) - Language server configuration,
+  lifecycle and `/lsp` commands, output bounds, and workspace containment.
 
 ## Headless runtime
 
