@@ -55,6 +55,10 @@ public static class HelpText
         "- **/tools execute <tool_name> [params]**: Run a tool\n" +
         "- **/mcp list**: List configured MCP servers\n" +
         "- **/mcp status**: Show MCP connection state and registered tools\n\n" +
+        "### Mode Commands:\n" +
+        "- **/mode**: Show the current operating mode and the available modes\n" +
+        "- **/mode build**: Full capability; the normal permission rules apply\n" +
+        "- **/mode plan**: Read-only planning; file writes, shell commands, and unclassified tools are denied before they run, and no allow rule can override that\n\n" +
         "### Permission Commands:\n" +
         "- **/permissions**: Open the interactive permission rules manager\n" +
         "- **/permissions list**: List effective permission rules by layer\n" +

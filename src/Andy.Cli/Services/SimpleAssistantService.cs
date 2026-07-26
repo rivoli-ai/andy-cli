@@ -22,6 +22,15 @@ public class SimpleAssistantService : IDisposable
     private readonly ILogger<SimpleAssistantService>? _logger;
     private readonly string _modelName;
     private readonly string _providerName;
+
+    /// <summary>
+    /// The session's operating mode (issue #278), or null when the host does not track one. The
+    /// agent's system prompt is fixed at construction, so the mode is ALSO restated on every turn
+    /// (see <see cref="ComposeAgentMessage"/>) - that is what keeps the model correct after a
+    /// mid-session <c>/mode</c> switch. Neither is the enforcement boundary: that is the permission
+    /// overlay wrapped around the tool executor.
+    /// </summary>
+    private readonly Andy.Cli.Modes.AgentModeState? _modeState;
     // Concurrent: mutated from the agent's ToolCalled callback (background agent thread) and read/
     // removed from the end-of-turn completion loop. A plain Dictionary raced across these threads and
     // could corrupt internally, surfacing as a NullReferenceException that aborted the whole turn.
@@ -130,10 +139,12 @@ public class SimpleAssistantService : IDisposable
         TokenCounter? tokenCounter = null,
         ILoggerFactory? loggerFactory = null,
         IReadOnlyDictionary<string, object?>? extraBody = null,
-        string? systemPromptSuffix = null)
+        string? systemPromptSuffix = null,
+        Andy.Cli.Modes.AgentModeState? modeState = null)
     {
         _feed = feed;
         _tokenCounter = tokenCounter;
+        _modeState = modeState;
         // Take an ILoggerFactory so each collaborator gets a correctly-typed logger. Previously a
         // single ILogger<SimpleAssistantService> was passed and `as ILogger<SimpleAgent>` / etc.
         // were used, which always yield null (the generic types are unrelated) - so engine-, tool-,
@@ -161,6 +172,13 @@ public class SimpleAssistantService : IDisposable
         if (!string.IsNullOrWhiteSpace(systemPromptSuffix))
         {
             systemPrompt = systemPrompt + "\n\n" + systemPromptSuffix.Trim();
+        }
+
+        // Describe the active operating mode and its constraints (issue #278).
+        if (_modeState is not null)
+        {
+            systemPrompt = systemPrompt + "\n\n"
+                + Andy.Cli.Modes.AgentModePrompt.SystemPromptSection(_modeState.CurrentDefinition);
         }
 
         // Store system prompt in instrumentation hub for dashboard display
@@ -347,7 +365,8 @@ public class SimpleAssistantService : IDisposable
 
             // Process message through SimpleAgent
             var llmStartTime = DateTime.UtcNow;
-            var result = await _agent.ProcessMessageAsync(userMessage, cancellationToken);
+            var result = await _agent.ProcessMessageAsync(
+                ComposeAgentMessage(userMessage), cancellationToken);
             var llmDuration = DateTime.UtcNow - llmStartTime;
 
             // INSTRUMENTATION: Publish LLM response event
@@ -688,6 +707,26 @@ public class SimpleAssistantService : IDisposable
     /// Exports the agent's full conversation transcript (message history including tool
     /// calls/results) as the engine's versioned snapshot, for session persistence (issue #231).
     /// </summary>
+    /// <summary>
+    /// Prefixes the user's message with the active mode's constraints when the mode is restrictive.
+    /// Build mode returns the message untouched, so the normal path is byte-for-byte unchanged.
+    ///
+    /// Why per turn: <c>SimpleAgent</c> takes its system prompt once, at construction, and the
+    /// interactive loop must not rebuild the agent on <c>/mode</c> (that would discard the
+    /// conversation). Restating the constraint on each turn keeps the model aligned with whatever
+    /// mode is active right now.
+    /// </summary>
+    internal string ComposeAgentMessage(string userMessage)
+    {
+        var directive = _modeState is null
+            ? null
+            : Andy.Cli.Modes.AgentModePrompt.TurnDirective(_modeState.CurrentDefinition);
+
+        return string.IsNullOrEmpty(directive)
+            ? userMessage
+            : directive + "\n\n" + userMessage;
+    }
+
     public Andy.Engine.TranscriptSnapshot ExportTranscript() => _agent.ExportTranscript();
 
     /// <summary>

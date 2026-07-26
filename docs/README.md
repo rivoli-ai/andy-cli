@@ -17,6 +17,8 @@ linked below.
   command and feature comparison, including Andy Engine and Tools.
 - [Interactive MCP configuration](mcp-configuration.md) - Project/appsettings
   configuration, stdio and HTTP transports, commands, security, and troubleshooting.
+- [Operating modes: Build and Plan](agent-modes.md) - `/mode`, the read-only Plan
+  permission overlay, mode persistence, and why planning data is not a boundary.
 
 ## Headless runtime
 

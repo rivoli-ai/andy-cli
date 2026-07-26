@@ -378,6 +378,13 @@ class Program
             // main input-owning loop (which renders the modal). Same instance used by DI and the loop.
             var permissionBroker = new Andy.Cli.Services.PermissionRequestBroker();
 
+            // Issue #278: the session's primary operating mode (Build / Plan). Registered BEFORE the
+            // tool services so AddAndyCliPermissions' TryAdd keeps this instance and hands it to the
+            // permission overlay that enforces Plan mode.
+            var startupModeSelection = Andy.Cli.Modes.StartupModeSelector.Resolve(args);
+            var agentModeState = new Andy.Cli.Modes.AgentModeState(startupModeSelection.Mode);
+            services.AddSingleton(agentModeState);
+
             // Configure the core Andy.Tools service graph (interactive prompt for the TUI).
             // Shared with the ACP and one-shot command paths via AppCompositionRoot.
             AppCompositionRoot.AddCoreToolServices(services, permissionBroker);
@@ -417,7 +424,28 @@ class Program
             var permissionsManager = new Andy.Cli.Widgets.PermissionsManager(Directory.GetCurrentDirectory());
             var skillsCommand = new Andy.Cli.Commands.SkillsCommand(serviceProvider);
             var themeCommand = new ThemeCommand(themeMemory);
+            var modeCommand = new Andy.Cli.Commands.ModeCommand(agentModeState);
             var commandPalette = new CommandPalette();
+
+            // Issue #278: keep the status line's mode badge in step with the mode. Build shows no
+            // badge (it is the unrestricted default); a restricted mode is always visible.
+            void RefreshModeBadge()
+            {
+                var definition = agentModeState.CurrentDefinition;
+                contextStatusBar.SetAgentModeBadge(definition.AllowsMutation ? null : definition.Badge);
+            }
+
+            RefreshModeBadge();
+            agentModeState.ModeChanged += (_, _) => RefreshModeBadge();
+            if (startupModeSelection.Error != null)
+            {
+                feed.AddMarkdownRich(ConsoleColors.WarningPrefix($"[mode] {startupModeSelection.Error}"));
+            }
+            else if (!agentModeState.CurrentDefinition.AllowsMutation)
+            {
+                feed.AddMarkdownRich($"[mode] Starting in {agentModeState.CurrentDefinition.DisplayName} mode. "
+                    + agentModeState.CurrentDefinition.Summary);
+            }
 
             Andy.Model.Llm.ILlmProvider? llmProvider = null;
             SimpleAssistantService? aiService = null;
@@ -512,7 +540,8 @@ class Program
                     tokenCounter,
                     loggerFactory,
                     extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, currentProvider),
-                    systemPromptSuffix: ComposeSkillsPromptSection());
+                    systemPromptSuffix: ComposeSkillsPromptSection(),
+                    modeState: agentModeState);
 
                 var providerUrl = ProviderUrlResolver.Resolve(currentProvider);
 
@@ -562,13 +591,42 @@ class Program
                         sessionId,
                         service.ExportTranscript(),
                         modelCommand.GetCurrentProvider(),
-                        modelCommand.GetCurrentModel());
+                        modelCommand.GetCurrentModel(),
+                        // Issue #278: record the operating mode so a resumed planning session comes
+                        // back in Plan mode instead of silently regaining write access.
+                        agentModeState.CurrentDefinition.Id);
                 }
                 catch (Exception ex)
                 {
                     // Session persistence must never break the conversation loop.
                     Andy.Cli.Services.CrashLog.Write("session.Save", ex);
                 }
+            }
+
+            // Issue #278: restore the mode a session was saved in. Entering a restrictive mode always
+            // succeeds; LEAVING one never does from a restore (AgentModeState requires an explicit
+            // user action), so a resumed Build session cannot silently re-enable writes for someone
+            // who is currently planning. Returns a feed message, or null when nothing to report.
+            string? ApplySessionMode(Andy.Cli.Services.Sessions.SessionSummary summary)
+            {
+                if (!Andy.Cli.Modes.AgentModeCatalog.TryParse(summary.Mode, out var saved) || saved is null)
+                {
+                    // Sessions saved before modes existed carry no mode: leave the current one alone.
+                    return null;
+                }
+
+                if (saved.Mode == agentModeState.Current)
+                {
+                    return null;
+                }
+
+                if (agentModeState.TrySet(saved.Mode, Andy.Cli.Modes.ModeChangeSource.SessionRestore, out var modeError))
+                {
+                    return $"[mode] Restored {saved.DisplayName} mode from the session. {saved.Summary}";
+                }
+
+                return ConsoleColors.WarningPrefix(
+                    $"[mode] The session was saved in {saved.DisplayName} mode, but {modeError}");
             }
 
             void ReplaySessionIntoFeed(Andy.Engine.TranscriptSnapshot snapshot)
@@ -629,6 +687,11 @@ class Program
                                 sessionId = targetId;
                                 ReplaySessionIntoFeed(record.Snapshot);
                                 feed.AddMarkdownRich($"[session] Resumed session {targetId} ({record.Summary.TurnCount} turn{(record.Summary.TurnCount == 1 ? "" : "s")} restored)");
+                                var startupModeMessage = ApplySessionMode(record.Summary);
+                                if (startupModeMessage != null)
+                                {
+                                    feed.AddMarkdownRich(startupModeMessage);
+                                }
                             }
                         }
                         catch (Exception ex)
@@ -708,7 +771,8 @@ class Program
                     resumeProvider,
                     tokenCounter,
                     resumeLoggerFactory,
-                    extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, resumeProvider));
+                    extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, resumeProvider),
+                    modeState: agentModeState);
                 aiService.RestoreTranscript(record.Snapshot);
                 sessionId = targetId;
 
@@ -733,6 +797,11 @@ class Program
                 feed.Clear();
                 ReplaySessionIntoFeed(record.Snapshot);
                 feed.AddMarkdownRich($"[session] Resumed session {targetId} ({record.Summary.TurnCount} turn{(record.Summary.TurnCount == 1 ? "" : "s")} restored)");
+                var resumeModeMessage = ApplySessionMode(record.Summary);
+                if (resumeModeMessage != null)
+                {
+                    feed.AddMarkdownRich(resumeModeMessage);
+                }
                 await Task.CompletedTask;
                 return null;
             }
@@ -762,7 +831,8 @@ class Program
                         tokenCounter,
                         loggerFactory,
                         extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, provider),
-                        systemPromptSuffix: ComposeSkillsPromptSection());
+                        systemPromptSuffix: ComposeSkillsPromptSection(),
+                        modeState: agentModeState);
                 }
                 else
                 {
@@ -863,7 +933,8 @@ class Program
                                         tokenCounter,
                                         loggerFactory,
                                         extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, newProvider),
-                                        systemPromptSuffix: ComposeSkillsPromptSection());
+                                        systemPromptSuffix: ComposeSkillsPromptSection(),
+                                        modeState: agentModeState);
                                 }
 
                                 feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
@@ -1644,7 +1715,8 @@ class Program
                                                     tokenCounter,
                                                     loggerFactory,
                                                     extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, newProvider),
-                                                    systemPromptSuffix: ComposeSkillsPromptSection());
+                                                    systemPromptSuffix: ComposeSkillsPromptSection(),
+                                                    modeState: agentModeState);
                                             }
 
                                             feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
@@ -1710,6 +1782,18 @@ class Program
                                     feed.AddMarkdownRich(on
                                         ? "[auto] Auto-approve ON for this session. Low-risk actions run without prompting; destructive actions (outside-project deletes, git/DB destruction) still ask. Toggle off with /auto off."
                                         : "[auto] Auto-approve OFF. Every action will prompt as usual.");
+                                    return;
+                                }
+                                else if (commandName == "mode")
+                                {
+                                    // Issue #278: the only interactive way in or out of Plan mode.
+                                    // Plan mode's tool denials are enforced by the permission overlay,
+                                    // so this command changes real capability, not just prompt text.
+                                    feed.AddUserMessage(cmd);
+                                    var result = modeCommand.Execute(args);
+                                    feed.AddMarkdownRich(result.Success
+                                        ? result.Message
+                                        : ConsoleColors.WarningPrefix(result.Message));
                                     return;
                                 }
                                 else if (commandName == "skills" || commandName == "skill")

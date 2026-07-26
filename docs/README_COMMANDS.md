@@ -77,6 +77,21 @@ interpolation, supported transports, and current management limitations.
 `perms` and `perm` are aliases. Mutating file tools and `execute_command`
 normally require consent unless a higher-precedence rule allows them.
 
+### Operating modes
+
+| Command | Behavior |
+| --- | --- |
+| `/mode` | Show the current mode and the available modes. |
+| `/mode build` | Full capability; the normal permission rules apply. |
+| `/mode plan` | Read-only planning; mutating and unclassified tools are denied before they run. |
+
+Plan mode is enforced by a tool-permission overlay that runs ahead of the rule
+layers, so an existing allow rule (user, project, local, session, injected, or
+auto-approve) cannot re-enable a denied tool. `--mode <build/plan>` selects the
+start-up mode, and `andy-cli run --headless ... --mode <id>` selects it for a
+headless run; an unknown mode is rejected rather than defaulted. See
+[Operating modes: Build and Plan](agent-modes.md).
+
 ### Themes and general commands
 
 | Command | Behavior |

@@ -52,7 +52,8 @@ public static class HeadlessAgentRunner
         ILoggerFactory loggerFactory,
         ILlmProvider? llmProviderOverride = null,
         CancellationToken ct = default,
-        Func<string, string?>? currentBranchResolver = null)
+        Func<string, string?>? currentBranchResolver = null,
+        Andy.Cli.Modes.AgentMode mode = Andy.Cli.Modes.AgentMode.Build)
     {
         var transcriptCreation = HeadlessTranscriptSession.TryCreate(config);
         using var emitter = new HeadlessEventEmitter(
@@ -100,7 +101,8 @@ public static class HeadlessAgentRunner
                 llmProviderOverride,
                 ct,
                 currentBranchResolver,
-                Finish);
+                Finish,
+                mode);
         }
         catch (OperationCanceledException)
         {
@@ -132,7 +134,8 @@ public static class HeadlessAgentRunner
         ILlmProvider? llmProviderOverride,
         CancellationToken ct,
         Func<string, string?>? currentBranchResolver,
-        Action<HeadlessExitCode, int> finish)
+        Action<HeadlessExitCode, int> finish,
+        Andy.Cli.Modes.AgentMode mode)
     {
         var iterations = 0;
         var exitCode = HeadlessExitCode.Success;
@@ -143,7 +146,7 @@ public static class HeadlessAgentRunner
         // rejected at config-load time, so this can never shadow a runtime secret.
         ApplyEnvVars(config.EnvVars);
 
-        await using var services = BuildServiceProvider(config, loggerFactory);
+        await using var services = BuildServiceProvider(config, loggerFactory, mode);
 
         // AX.3 (rivoli-ai/conductor#2090): register the assistant's built-in
         // tools into the SAME IToolRegistry the agent uses, so a headless
@@ -256,11 +259,19 @@ public static class HeadlessAgentRunner
         var workingDirectory = !string.IsNullOrWhiteSpace(config.Workspace.Root)
             ? config.Workspace.Root
             : null;
+        // Issue #278: tell the model which mode it is in. This is context, not the boundary - the
+        // boundary is the overlay wrapped around the executor and the authorizer above.
+        var modeSection = Andy.Cli.Modes.AgentModePrompt.SystemPromptSection(
+            Andy.Cli.Modes.AgentModeCatalog.Get(mode));
+        var systemPrompt = string.IsNullOrWhiteSpace(config.Agent.Instructions)
+            ? modeSection
+            : config.Agent.Instructions + "\n\n" + modeSection;
+
         using var agent = new SimpleAgent(
             llmProvider,
             toolHost.Registry,
             toolExecutor,
-            systemPrompt: config.Agent.Instructions,
+            systemPrompt: systemPrompt,
             maxTurns: maxTurns,
             workingDirectory: workingDirectory,
             logger: loggerFactory.CreateLogger<SimpleAgent>());
@@ -573,11 +584,19 @@ public static class HeadlessAgentRunner
 
     // Internal for testing: lets a test exercise the real DI wiring (built-in
     // tool catalog included) instead of reimplementing it in a parallel path.
-    internal static ServiceProvider BuildServiceProvider(HeadlessRunConfig config, ILoggerFactory loggerFactory)
+    internal static ServiceProvider BuildServiceProvider(
+        HeadlessRunConfig config,
+        ILoggerFactory loggerFactory,
+        Andy.Cli.Modes.AgentMode mode = Andy.Cli.Modes.AgentMode.Build)
     {
         var services = new ServiceCollection();
         services.AddSingleton(loggerFactory);
         services.AddLogging();
+
+        // Issue #278: seed the run's primary mode BEFORE AddAndyCliPermissions, whose TryAdd keeps
+        // this instance and hands it to the mode overlay. A headless run's mode is fixed for its
+        // lifetime - there is no interactive path that could switch it.
+        services.AddSingleton(new Andy.Cli.Modes.AgentModeState(mode));
 
         // Andy.Llm: factory + per-provider configuration from environment
         // variables (CEREBRAS_API_KEY, ANTHROPIC_API_KEY, etc.). Default

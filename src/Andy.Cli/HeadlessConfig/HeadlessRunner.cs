@@ -76,7 +76,8 @@ public static class HeadlessRunner
                     stderr: stderr,
                     loggerFactory: loggerFactory,
                     llmProviderOverride: null,
-                    ct: ct);
+                    ct: ct,
+                    mode: parsed.Mode);
             }
             finally
             {
@@ -108,9 +109,15 @@ public static class HeadlessRunner
     }
 
     private const string Usage =
-        "Usage: andy-cli run --headless --config <path>\n"
+        "Usage: andy-cli run --headless --config <path> [--mode <build|plan>]\n"
         + "  --headless        Non-interactive execution driven entirely by the config file (required).\n"
-        + "  --config <path>   Path to a headless-config.v1 JSON file (required).";
+        + "  --config <path>   Path to a headless-config.v1 JSON file (required).\n"
+        + "  --mode <id>       Primary operating mode: build (default) or plan (read-only).\n"
+        + "                    An unknown mode is rejected; the run never falls back to build.";
+
+    // Internal for tests: the arg parser is the fail-closed boundary for `--mode`, so it is
+    // exercised directly rather than only through a full headless run.
+    internal static ParsedArgs ParseArgsForTest(string[] args) => ParseArgs(args);
 
     private static ParsedArgs ParseArgs(string[] args)
     {
@@ -121,6 +128,7 @@ public static class HeadlessRunner
 
         var headless = false;
         string? configPath = null;
+        var mode = Andy.Cli.Modes.AgentModeCatalog.DefaultMode;
 
         for (var i = 0; i < remaining.Length; i++)
         {
@@ -137,6 +145,25 @@ public static class HeadlessRunner
                     }
                     configPath = remaining[++i];
                     break;
+                case "--mode":
+                    if (i + 1 >= remaining.Length)
+                    {
+                        return ParsedArgs.ErrorOnly(
+                            $"`--mode` requires a mode argument ({Andy.Cli.Modes.AgentModeCatalog.KnownIds}).");
+                    }
+
+                    // Fail closed (issue #278): an unrecognized mode is a hard config error, never a
+                    // silent fallback to the mutation-capable default.
+                    var requested = remaining[++i];
+                    if (!Andy.Cli.Modes.AgentModeCatalog.TryParse(requested, out var parsedMode)
+                        || parsedMode is null)
+                    {
+                        return ParsedArgs.ErrorOnly(
+                            $"Unknown mode '{requested}'. Known modes: {Andy.Cli.Modes.AgentModeCatalog.KnownIds}.");
+                    }
+
+                    mode = parsedMode.Mode;
+                    break;
                 default:
                     return ParsedArgs.ErrorOnly($"Unknown argument: {token}");
             }
@@ -152,13 +179,16 @@ public static class HeadlessRunner
             return ParsedArgs.ErrorOnly("`--config <path>` is required.");
         }
 
-        return new ParsedArgs { ConfigPath = configPath };
+        return new ParsedArgs { ConfigPath = configPath, Mode = mode };
     }
 
-    private readonly record struct ParsedArgs
+    internal readonly record struct ParsedArgs
     {
         public string? ConfigPath { get; init; }
         public string? Error { get; init; }
+
+        /// <summary>The selected primary mode; Build unless `--mode plan` was supplied.</summary>
+        public Andy.Cli.Modes.AgentMode Mode { get; init; }
 
         public static ParsedArgs ErrorOnly(string message) => new() { Error = message };
     }

@@ -20,6 +20,7 @@ namespace Andy.Cli.Widgets
     {
         Status,
         AutoMode,
+        AgentMode,
         Model,
         Usage,
         Live,
@@ -66,8 +67,19 @@ namespace Andy.Cli.Widgets
         // Auto-approve (session-scoped yolo) indicator: when true a highlighted AUTO segment is shown.
         private bool _autoModeEnabled;
 
+        // Primary operating mode (issue #278). Build is the default and shows no badge - the badge
+        // exists to make a RESTRICTED mode unmistakable, in the same spirit as the AUTO indicator.
+        private string _agentModeBadge = string.Empty;
+
         /// <summary>Toggle the highlighted AUTO-approve indicator shown in the left zone.</summary>
         public void SetAutoMode(bool enabled) => _autoModeEnabled = enabled;
+
+        /// <summary>
+        /// Set the operating-mode badge shown in the left zone. Pass null/empty (which the caller
+        /// does for Build, the unrestricted default) to hide it.
+        /// </summary>
+        public void SetAgentModeBadge(string? badge) =>
+            _agentModeBadge = string.IsNullOrWhiteSpace(badge) ? string.Empty : $" {badge.Trim()} ";
 
         // Foreground/accent colors. The row background always follows the active theme's
         // status-line background so the bar stays consistent across theme switches.
@@ -243,6 +255,11 @@ namespace Andy.Cli.Widgets
             if (_autoModeEnabled)
                 segments.Add(new StatusSegment(StatusSegmentKind.AutoMode, AutoBadgeText, 0));
 
+            // Same reasoning as AUTO: a restricted mode must always be visible, so it rides in the
+            // left zone and is never dropped.
+            if (!string.IsNullOrEmpty(_agentModeBadge))
+                segments.Add(new StatusSegment(StatusSegmentKind.AgentMode, _agentModeBadge, 0));
+
             if (!string.IsNullOrEmpty(_modelName))
                 segments.Add(new StatusSegment(StatusSegmentKind.Model, ModelSegmentText(), 1));
 
@@ -298,7 +315,7 @@ namespace Andy.Cli.Widgets
             // right-anchored model/token/turn readouts, which is exactly the jitter we removed. The AUTO
             // indicator in particular must always stay visible while auto-approve is active.
             static bool IsLeftZone(StatusSegmentKind k) =>
-                k is StatusSegmentKind.Status or StatusSegmentKind.AutoMode;
+                k is StatusSegmentKind.Status or StatusSegmentKind.AutoMode or StatusSegmentKind.AgentMode;
             bool IsDropCandidate(StatusSegment s) => !IsLeftZone(s.Kind);
 
             while (fitted.Count(IsDropCandidate) > 1 && JoinedWidth(fitted) > maxWidth)
@@ -343,7 +360,7 @@ namespace Andy.Cli.Widgets
             AlignSegments(List<StatusSegment> segments, int avail)
         {
             static bool IsLeftZone(StatusSegmentKind k) =>
-                k is StatusSegmentKind.Status or StatusSegmentKind.AutoMode;
+                k is StatusSegmentKind.Status or StatusSegmentKind.AutoMode or StatusSegmentKind.AgentMode;
             var left = segments.Where(s => IsLeftZone(s.Kind)).ToList();
             var right = segments.Where(s => !IsLeftZone(s.Kind)).ToList();
 
@@ -522,6 +539,15 @@ namespace Andy.Cli.Widgets
                         var badgeBg = theme.Warning;
                         var badgeFg = new DL.Rgb24(20, 20, 20);
                         b.DrawText(new DL.TextRun(x, y, segment.Text, badgeFg, badgeBg, DL.CellAttrFlags.Bold));
+                        return x + segment.Text.Length;
+                    }
+                case StatusSegmentKind.AgentMode:
+                    {
+                        // Restricted-mode badge (e.g. PLAN): filled, bold, and impossible to miss so
+                        // the user always knows the session cannot mutate anything.
+                        var theme = Theme.Current;
+                        var badgeFg = new DL.Rgb24(20, 20, 20);
+                        b.DrawText(new DL.TextRun(x, y, segment.Text, badgeFg, theme.Info, DL.CellAttrFlags.Bold));
                         return x + segment.Text.Length;
                     }
                 case StatusSegmentKind.Status:
