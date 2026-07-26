@@ -191,6 +191,31 @@ dotnet run --project src/Andy.Cli -- tools info <tool_name>
 dotnet run --project src/Andy.Cli -- --version
 ```
 
+### One-Shot Prompt
+
+Run a single prompt without writing a config file. Prompt text can come from
+the command line, from piped stdin, or both:
+
+```bash
+dotnet run --project src/Andy.Cli -- run "explain this repository"
+git diff | dotnet run --project src/Andy.Cli -- run "review this diff"
+git diff | dotnet run --project src/Andy.Cli -- run --json "review this diff"
+```
+
+When both sources are present they are combined deterministically, positional
+text first, with the piped payload fenced between `--- begin piped stdin ---`
+and `--- end piped stdin ---`.
+
+By default stdout carries only the final answer (tool narration goes to stderr)
+and `--json` switches stdout to the NDJSON event stream. `--provider`,
+`--model`, `--cwd`, `--timeout`, `--max-iterations`, `--allow-tool` and
+`--output` are supported, and the exit codes are the headless ones.
+
+With no `--allow-tool`, a one-shot run uses the **fail-closed read-only**
+permission profile: read-only tools are allowed, every mutating tool and
+`execute_command` is denied, and the run never blocks waiting for an approval.
+See [`docs/headless-runtime.md`](docs/headless-runtime.md#one-shot-prompt-execution).
+
 ### Headless Agent Runtime
 
 Run the agent non-interactively from a config file. The headless runtime

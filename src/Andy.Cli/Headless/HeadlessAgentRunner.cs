@@ -52,7 +52,12 @@ public static class HeadlessAgentRunner
         ILoggerFactory loggerFactory,
         ILlmProvider? llmProviderOverride = null,
         CancellationToken ct = default,
-        Func<string, string?>? currentBranchResolver = null)
+        Func<string, string?>? currentBranchResolver = null,
+        // rivoli-ai/andy-cli#279: the one-shot front end (`andy-cli run "<prompt>"`)
+        // carries the operator's prompt as the USER turn instead of baking it into
+        // the system prompt. Absent/blank keeps the config-driven contract's
+        // "Begin." kickoff exactly as before.
+        string? kickoffMessage = null)
     {
         var transcriptCreation = HeadlessTranscriptSession.TryCreate(config);
         using var emitter = new HeadlessEventEmitter(
@@ -100,7 +105,8 @@ public static class HeadlessAgentRunner
                 llmProviderOverride,
                 ct,
                 currentBranchResolver,
-                Finish);
+                Finish,
+                kickoffMessage);
         }
         catch (OperationCanceledException)
         {
@@ -132,7 +138,8 @@ public static class HeadlessAgentRunner
         ILlmProvider? llmProviderOverride,
         CancellationToken ct,
         Func<string, string?>? currentBranchResolver,
-        Action<HeadlessExitCode, int> finish)
+        Action<HeadlessExitCode, int> finish,
+        string? kickoffMessage)
     {
         var iterations = 0;
         var exitCode = HeadlessExitCode.Success;
@@ -317,7 +324,8 @@ public static class HeadlessAgentRunner
         SimpleAgentResult? result = null;
         try
         {
-            result = await agent.ProcessMessageAsync(KickoffMessage, linkedCts.Token);
+            var kickoff = string.IsNullOrWhiteSpace(kickoffMessage) ? KickoffMessage : kickoffMessage;
+            result = await agent.ProcessMessageAsync(kickoff, linkedCts.Token);
             iterations = result?.TurnCount ?? 0;
         }
         catch (OperationCanceledException)
