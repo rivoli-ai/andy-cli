@@ -189,12 +189,26 @@ class Program
                 // Fall through to the interactive TUI setup below.
                 break;
         }
-        // Apply the persisted theme (falling back to an ANDY_THEME env default,
-        // then the built-in dark theme) before the first frame is rendered.
+        // Layered configuration (rivoli-ai/andy-cli#280). Loaded once, before the
+        // first frame, and shared with every other mode through
+        // AndyConfigurationService.Shared so no two entry points can disagree.
+        // ANDY_THEME, ANDY_DIFF_STYLE, ANDY_MAX_TURNS, ANDY_AUTO_APPROVE, ANDY_DEBUG,
+        // --auto and --yolo are all folded in by the loader at their documented
+        // precedence, so their old spellings keep working unchanged.
+        var andyConfig = Andy.Cli.Configuration.AndyConfigurationService.InitializeShared(
+            new Andy.Cli.Configuration.ConfigLoadRequest
+            {
+                WorkspaceDirectory = Directory.GetCurrentDirectory(),
+                CommandLineArguments = args,
+            });
+        Andy.Cli.Configuration.ConfigStartup.Apply(andyConfig);
+
+        // Apply the persisted theme (falling back to the effective ui.theme, then the
+        // built-in dark theme) before the first frame is rendered.
         var themeMemory = new ThemeMemoryService();
-        var savedThemeName = themeMemory.LoadTheme()
-            ?? Environment.GetEnvironmentVariable("ANDY_THEME");
-        var savedTheme = Andy.Cli.Themes.Theme.Resolve(savedThemeName, themeMemory.LoadTransparentBackground());
+        var (savedThemeName, transparentBackground) =
+            Andy.Cli.Configuration.ConfigStartup.ResolveTheme(andyConfig, themeMemory);
+        var savedTheme = Andy.Cli.Themes.Theme.Resolve(savedThemeName, transparentBackground);
         if (savedTheme != null)
         {
             Andy.Cli.Themes.Theme.Current = savedTheme;
@@ -325,16 +339,15 @@ class Program
 
             services.AddSingleton<IConfiguration>(configuration);
 
+            // Logging comes from the effective logging.level / logging.console, which
+            // already folds in ANDY_DEBUG=true and --debug / --verbose / --quiet.
+            // Console logging stays off by default: stdout output corrupts the TUI.
             services.AddLogging(builder =>
-            {
-                // Disable console logging to avoid UI interference
-                // To enable debugging, set environment variable ANDY_DEBUG=true
-                if (Environment.GetEnvironmentVariable("ANDY_DEBUG") == "true")
-                {
-                    builder.AddConsole();
-                    builder.SetMinimumLevel(LogLevel.Information);
-                }
-            }); // Conditional logging based on environment variable
+                Andy.Cli.Configuration.ConfigStartup.ConfigureLogging(builder, andyConfig));
+
+            // The typed configuration is available to every service in the graph.
+            services.AddSingleton(andyConfig);
+            services.AddSingleton(andyConfig.Config);
 
             // Configure LLM services: env vars first (as fallback defaults), then
             // appsettings.json Llm section (takes precedence, overwrites env var defaults)
@@ -354,8 +367,14 @@ class Program
                     }
                 }
 
-                // Only auto-detect if no DefaultProvider was explicitly configured in appsettings
-                var configuredDefault = configuration.GetSection("Llm:DefaultProvider").Value;
+                // andy.jsonc llm.* on top: it has already merged user, project,
+                // environment and CLI at their documented precedence.
+                Andy.Cli.Configuration.LlmOptionsBinder.Apply(options, andyConfig.Config.Llm);
+
+                // Only auto-detect if no DefaultProvider was explicitly configured
+                var configuredDefault = string.IsNullOrEmpty(options.DefaultProvider)
+                    ? configuration.GetSection("Llm:DefaultProvider").Value
+                    : options.DefaultProvider;
                 if (string.IsNullOrEmpty(configuredDefault))
                 {
                     var detectionService = new ProviderDetectionService();
@@ -403,7 +422,8 @@ class Program
             // discovered remote tools are included in its initial tool set.
             var mcpConfiguration = McpConfigurationLoader.Load(
                 configuration,
-                Directory.GetCurrentDirectory());
+                Directory.GetCurrentDirectory(),
+                andyConfig.Config);
             await using var mcpToolHost = await InteractiveMcpToolHost.BuildAsync(
                 mcpConfiguration,
                 toolRegistry,
@@ -548,7 +568,8 @@ class Program
             // to ~/.andy/sessions/<id>.json. The user can exit and later restore the full
             // conversation context with `andy-cli --resume <id>` / `--continue`, or switch
             // sessions in place with /resume. /sessions lists what can be resumed.
-            var sessionStore = new Andy.Cli.Services.Sessions.SessionStore();
+            var sessionStore = new Andy.Cli.Services.Sessions.SessionStore(
+                andyConfig.Config.Session.Directory);
             var sessionsCommand = new Andy.Cli.Commands.SessionsCommand(sessionStore);
             var sessionId = Andy.Cli.Services.Sessions.SessionStore.NewSessionId();
 
@@ -656,10 +677,10 @@ class Program
                     }
                 }
             }
-            // --auto / ANDY_AUTO_APPROVE=1: start the session with auto-approve already on.
-            if (autoApprovalMode != null &&
-                (args.Any(a => a == "--auto" || a == "--yolo") ||
-                 !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ANDY_AUTO_APPROVE"))))
+            // permissions.mode == "auto": start the session with auto-approve already
+            // on. The loader folds --auto, --yolo and ANDY_AUTO_APPROVE into that mode,
+            // so all three keep working exactly as before.
+            if (autoApprovalMode != null && andyConfig.Config.Permissions.AutoApprove)
             {
                 autoApprovalMode.Enable();
                 contextStatusBar.SetAutoMode(true);
@@ -2361,8 +2382,20 @@ class Program
 
     private static async Task RunAcpServerModeAsync()
     {
+        // Same layered configuration as interactive mode (rivoli-ai/andy-cli#280),
+        // loaded through the shared instance so ACP sessions see the same typed
+        // provider/model, session and logging values the TUI would.
+        var acpConfig = Andy.Cli.Configuration.AndyConfigurationService.InitializeShared(
+            new Andy.Cli.Configuration.ConfigLoadRequest
+            {
+                WorkspaceDirectory = Directory.GetCurrentDirectory(),
+            });
+        Andy.Cli.Configuration.ConfigStartup.Apply(acpConfig);
+
         // Configure logging with stderr output (to avoid polluting stdout used for ACP protocol)
         var services = new ServiceCollection();
+        services.AddSingleton(acpConfig);
+        services.AddSingleton(acpConfig.Config);
         services.AddLogging(builder =>
         {
             builder.AddConsole(options =>
@@ -2376,12 +2409,16 @@ class Program
         services.ConfigureLlmFromEnvironment();
         services.AddLlmServices(options =>
         {
-            // Auto-detect the default provider based on environment variables
+            Andy.Cli.Configuration.LlmOptionsBinder.Apply(options, acpConfig.Config.Llm);
+
+            // Auto-detect the default provider unless llm.defaultProvider named one
             var detectionService = new ProviderDetectionService();
-            var detectedProvider = detectionService.DetectDefaultProvider();
-            var defaultProvider = detectedProvider ?? "cerebras";
+            var defaultProvider = !string.IsNullOrWhiteSpace(options.DefaultProvider)
+                ? options.DefaultProvider
+                : detectionService.DetectDefaultProvider() ?? "cerebras";
             options.DefaultProvider = defaultProvider;
-            Andy.Cli.ACP.AcpModelConfiguration.EnsureProviderConfig(options, defaultProvider);
+            Andy.Cli.ACP.AcpModelConfiguration.EnsureProviderConfig(
+                options, defaultProvider, acpConfig.Config.Llm.DefaultModel);
         });
 
         // Add the provider factory
@@ -2513,27 +2550,34 @@ class Program
 
     private static async Task HandleCommandLineArgs(string[] args)
     {
+        // Same layered configuration the TUI uses (rivoli-ai/andy-cli#280), so a
+        // one-shot command reports the values an interactive session would use.
+        var commandConfig = Andy.Cli.Configuration.AndyConfigurationService.InitializeShared(
+            new Andy.Cli.Configuration.ConfigLoadRequest
+            {
+                WorkspaceDirectory = Directory.GetCurrentDirectory(),
+                CommandLineArguments = args,
+            });
+        Andy.Cli.Configuration.ConfigStartup.Apply(commandConfig);
+
         // Initialize services for command-line mode
         var services = new ServiceCollection();
+        services.AddSingleton(commandConfig);
+        services.AddSingleton(commandConfig.Config);
         services.AddLogging(builder =>
-        {
-            // Disable console logging to avoid UI interference
-            // To enable debugging, set environment variable ANDY_DEBUG=true
-            if (Environment.GetEnvironmentVariable("ANDY_DEBUG") == "true")
-            {
-                builder.AddConsole();
-                builder.SetMinimumLevel(LogLevel.Information);
-            }
-        });
+            Andy.Cli.Configuration.ConfigStartup.ConfigureLogging(builder, commandConfig));
 
         // Configure LLM services
         services.ConfigureLlmFromEnvironment();
         services.AddLlmServices(options =>
         {
-            // Auto-detect the default provider based on environment variables
+            Andy.Cli.Configuration.LlmOptionsBinder.Apply(options, commandConfig.Config.Llm);
+
+            // Auto-detect the default provider unless llm.defaultProvider named one
             var detectionService = new ProviderDetectionService();
-            var detectedProvider = detectionService.DetectDefaultProvider();
-            options.DefaultProvider = detectedProvider ?? "cerebras"; // Fallback to Cerebras if none detected
+            options.DefaultProvider = !string.IsNullOrWhiteSpace(options.DefaultProvider)
+                ? options.DefaultProvider
+                : detectionService.DetectDefaultProvider() ?? "cerebras";
         });
 
         // JSON repair still available if needed elsewhere
@@ -2587,10 +2631,16 @@ class Program
             case "skill":
                 command = new Andy.Cli.Commands.SkillsCommand(serviceProvider);
                 break;
+            case "config":
+                // Layered configuration inspection (rivoli-ai/andy-cli#280):
+                // `andy-cli config validate` and `config show --effective --sources`.
+                command = new ConfigCommand(Directory.GetCurrentDirectory());
+                break;
             case "sessions":
                 // List interactive sessions saved under ~/.andy/sessions that can be
                 // resumed with --resume <id> / --continue (issue #231).
-                command = new SessionsCommand(new Andy.Cli.Services.Sessions.SessionStore());
+                command = new SessionsCommand(new Andy.Cli.Services.Sessions.SessionStore(
+                    commandConfig.Config.Session.Directory));
                 break;
             case "help":
             case "?":

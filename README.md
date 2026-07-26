@@ -52,6 +52,34 @@ against the release checksums before running them.
 
 ## Configuration
 
+### andy.jsonc
+
+Andy CLI reads a layered JSONC configuration file:
+
+- user scope: `~/.andy/andy.jsonc`
+- project scope: `<workspace>/andy.jsonc` and `<workspace>/.andy/andy.jsonc`
+
+Sources are merged in the order **packaged defaults < user < project <
+environment < CLI arguments**, validated against a versioned JSON Schema
+(`schemas/andy-config.v1.json`), and merged per field: keyed maps merge entry by
+entry, arrays are replaced rather than concatenated. `{env:NAME}` pulls a value
+from the environment without ever printing it back out, and relative paths
+resolve against the file that declared them.
+
+```console
+$ andy-cli config validate
+$ andy-cli config show --effective --sources
+```
+
+`config show` reports the origin (file, line, column) of every value and redacts
+API keys, tokens, headers and substituted secrets. Every environment variable and
+command-line flag documented below still works and is folded into the same merged
+result.
+
+See [`docs/configuration.md`](docs/configuration.md) for the full schema and
+[`docs/configuration-migration.md`](docs/configuration-migration.md) for moving
+existing `appsettings.json`, MCP, theme and session settings across.
+
 ### Automatic Provider Detection
 
 By default no provider is pinned (the `DefaultProvider` setting in
@@ -98,9 +126,10 @@ providers are configured, detection prefers them in this order:
 
 ### Interactive MCP servers
 
-Interactive mode loads MCP servers from `Mcp:Servers` in `appsettings.json`
-and from `<working-directory>/.andy/mcp-servers.json`, with the project file
-taking precedence. Both stdio and Streamable HTTP transports are supported.
+Interactive mode loads MCP servers from `Mcp:Servers` in `appsettings.json`,
+from `mcp.servers` in `andy.jsonc`, and from
+`<working-directory>/.andy/mcp-servers.json`, in that order of increasing
+precedence. Both stdio and Streamable HTTP transports are supported.
 Use `${VARIABLE_NAME}` placeholders for credentials; a server referencing an
 unset variable is rejected without printing the expanded value.
 
@@ -265,6 +294,8 @@ this repository). The application is built on a set of Andy.* NuGet packages:
 
 - [`docs/README.md`](docs/README.md) - Documentation index
 - [`docs/README_COMMANDS.md`](docs/README_COMMANDS.md) - Commands and shortcuts
+- [`docs/configuration.md`](docs/configuration.md) - Layered andy.jsonc configuration
+- [`docs/configuration-migration.md`](docs/configuration-migration.md) - Migrating existing settings to andy.jsonc
 - [`docs/headless-runtime.md`](docs/headless-runtime.md) - Headless config and execution contract
 - [`docs/mcp-configuration.md`](docs/mcp-configuration.md) - Interactive MCP server configuration
 - [`docs/ZED_INTEGRATION.md`](docs/ZED_INTEGRATION.md) - ACP editor integration

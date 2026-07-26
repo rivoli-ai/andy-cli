@@ -17,6 +17,10 @@ linked below.
   command and feature comparison, including Andy Engine and Tools.
 - [Interactive MCP configuration](mcp-configuration.md) - Project/appsettings
   configuration, stdio and HTTP transports, commands, security, and troubleshooting.
+- [Layered configuration](configuration.md) - andy.jsonc locations, precedence,
+  merge semantics, environment substitution, diagnostics, and secret redaction.
+- [Migrating to andy.jsonc](configuration-migration.md) - Moving appsettings,
+  MCP, theme, session and environment settings into the layered configuration.
 
 ## Headless runtime
 
@@ -48,7 +52,10 @@ linked below.
   files, and committed NuGet lock files.
 - Provider defaults are authoritative in `src/Andy.Cli/appsettings.json`; provider
   aliases and detection priority are authoritative in
-  `src/Andy.Cli/Services/ProviderRegistry.cs`.
+  `src/Andy.Cli/Services/ProviderRegistry.cs`. Both are read as the lowest layer of
+  the merged configuration described in [Layered configuration](configuration.md);
+  `andy-cli config show --effective --sources` is authoritative for what a given
+  run actually used.
 - The live built-in tool catalog is assembled by
   `src/Andy.Cli/Services/ToolCatalog.cs` and can be inspected with
   `andy-cli tools list`.

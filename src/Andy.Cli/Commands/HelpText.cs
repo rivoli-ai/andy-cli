@@ -90,6 +90,7 @@ public static class HelpText
         "  permissions    - View and modify tool permission rules\n" +
         "  skills         - List, inspect, and enable/disable agent skills\n" +
         "  sessions       - List saved sessions (resume with --resume <id> / --continue)\n" +
+        "  config         - Show and validate the layered andy.jsonc configuration\n" +
         "  help, ?        - Show this help message\n" +
         "\n" +
         "Run without arguments to start the interactive TUI mode.";

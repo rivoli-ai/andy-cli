@@ -12,14 +12,24 @@ Headless MCP bindings use the separate versioned configuration documented in
 
 ## Configuration sources
 
-Interactive mode merges two sources:
+Interactive mode merges three sources, in increasing order of precedence:
 
 1. `Mcp:Servers` in the packaged `appsettings.json`
-2. `<working-directory>/.andy/mcp-servers.json`
+2. `mcp.servers` in the layered [`andy.jsonc`](configuration.md) configuration
+   (user and project scope, already merged)
+3. `<working-directory>/.andy/mcp-servers.json`
 
-The project file wins when both sources define the same server name. Server
-names are compared case-insensitively. The project file is read once at
-startup; editing it does not change a running session.
+A later source wins when several define the same server name. Server names are
+compared case-insensitively. All three are read once at startup; editing them
+does not change a running session.
+
+Server fields are spelled identically in `andy.jsonc` and in
+`.andy/mcp-servers.json`, so a server definition can be moved between them
+unchanged. Two behaviours differ, both in `andy.jsonc`'s favour: a relative
+`workingDirectory` resolves against the file that declared it rather than the
+process working directory, and `args` declared by a higher scope REPLACES a lower
+one instead of being concatenated. See
+[Migrating to andy.jsonc](configuration-migration.md).
 
 ### Project file
 
