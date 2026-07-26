@@ -23,6 +23,8 @@ public static class SlashCommandCatalog
         new InlineCommandHelp.CommandInfo { Name = "restart", Description = "Restart the session with a fresh conversation context", Aliases = Array.Empty<string>() },
         new InlineCommandHelp.CommandInfo { Name = "sessions", Description = "List saved sessions that can be resumed", Aliases = Array.Empty<string>() },
         new InlineCommandHelp.CommandInfo { Name = "resume", Description = "Resume a saved session (most recent when no id is given)", Aliases = Array.Empty<string>() },
+        new InlineCommandHelp.CommandInfo { Name = "undo", Description = "Revert the file changes made by the last turn", Aliases = Array.Empty<string>() },
+        new InlineCommandHelp.CommandInfo { Name = "redo", Description = "Reapply the turn reverted by the last /undo", Aliases = Array.Empty<string>() },
         new InlineCommandHelp.CommandInfo { Name = "help", Description = "Show help information", Aliases = new[] { "?" } },
         new InlineCommandHelp.CommandInfo { Name = "exit", Description = "Exit the application", Aliases = new[] { "quit", "bye" } }
     };

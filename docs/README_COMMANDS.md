@@ -85,6 +85,8 @@ normally require consent unless a higher-precedence rule allows them.
 | `/theme <name>` | Switch theme and persist the choice. |
 | `/theme transparent <on/off>` | Toggle transparency when the selected theme supports it. |
 | `/clear` | Clear the current feed/conversation history. |
+| `/undo` | Revert the file changes made by the last completed turn and restore its prompt to the composer. Git workspaces only; see [Undo and redo](undo-redo.md). |
+| `/redo` | Reapply the turn reverted by the last `/undo`. Unavailable once a new turn starts. |
 | `/help` or `/?` | Show in-application help. |
 | `/exit`, `/quit`, or `/bye` | Open the exit confirmation. The same words work without `/`. |
 
