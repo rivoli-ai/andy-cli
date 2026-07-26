@@ -77,6 +77,23 @@ interpolation, supported transports, and current management limitations.
 `perms` and `perm` are aliases. Mutating file tools and `execute_command`
 normally require consent unless a higher-precedence rule allows them.
 
+### Markdown slash commands
+
+| Command | Behavior |
+| --- | --- |
+| `/commands` | List Markdown slash commands with their `[user]`/`[project]` source. |
+| `/commands info <name>` | Show a command's file, metadata, placeholders, and template. |
+| `/commands reload` | Re-scan the command roots without restarting the TUI. |
+| `/commands diagnostics` | Show problems found while loading command files. |
+
+`/cmds` is an alias. Commands are Markdown files under `~/.andy/commands` and
+`<workspace>/.andy/commands`; nested folders become colon segments
+(`git/commit.md` becomes `/git:commit`). Project commands win over user commands
+and built-in names cannot be redefined. See
+[Markdown slash commands](markdown-commands.md) for the frontmatter schema,
+argument quoting rules, and the security limitations (no shell interpolation, no
+permission or tool escalation, enforced size limits).
+
 ### Themes and general commands
 
 | Command | Behavior |
