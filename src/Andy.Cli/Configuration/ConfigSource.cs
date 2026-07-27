@@ -24,8 +24,15 @@ public enum ConfigSourceKind
     /// <summary>Legacy environment variables (ANDY_THEME, OPENAI_API_KEY, ...).</summary>
     Environment = 3,
 
+    /// <summary>
+    /// The explicit run-config file passed to <c>andy-cli run --headless --config</c>.
+    /// It sits above the workspace files because it is the caller's deliberate,
+    /// per-run instruction, and below the command line for the usual reason.
+    /// </summary>
+    HeadlessConfig = 4,
+
     /// <summary>Command-line arguments (--theme, --model, --auto, ...).</summary>
-    CommandLine = 4,
+    CommandLine = 5,
 }
 
 /// <summary>
@@ -56,6 +63,7 @@ public sealed record ConfigSource
         ConfigSourceKind.User => "user",
         ConfigSourceKind.Project => "project",
         ConfigSourceKind.Environment => "environment",
+        ConfigSourceKind.HeadlessConfig => "headless config",
         ConfigSourceKind.CommandLine => "cli",
         _ => Kind.ToString().ToLowerInvariant(),
     };
@@ -81,7 +89,12 @@ public sealed record ConfigSource
 /// </summary>
 public sealed record ConfigOrigin(ConfigSource Source, int Line, int Column)
 {
-    /// <summary>"project:/ws/andy.jsonc:12:5" or just "environment" for synthetic layers.</summary>
-    public override string ToString() =>
-        Source.FilePath is null ? Source.KindLabel : $"{Source.Display}:{Line}:{Column}";
+    /// <summary>
+    /// "project:/ws/andy.jsonc:12:5", or the file without a position when the
+    /// source has no position map (the headless run config), or just the layer
+    /// name for the synthetic layers.
+    /// </summary>
+    public override string ToString() => Source.FilePath is null
+        ? Source.KindLabel
+        : Line > 0 ? $"{Source.Display}:{Line}:{Column}" : Source.Display;
 }

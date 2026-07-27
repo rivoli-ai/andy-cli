@@ -52,7 +52,8 @@ public static class HeadlessAgentRunner
         ILoggerFactory loggerFactory,
         ILlmProvider? llmProviderOverride = null,
         CancellationToken ct = default,
-        Func<string, string?>? currentBranchResolver = null)
+        Func<string, string?>? currentBranchResolver = null,
+        Andy.Cli.Configuration.AndyConfiguration? layeredConfiguration = null)
     {
         var transcriptCreation = HeadlessTranscriptSession.TryCreate(config);
         using var emitter = new HeadlessEventEmitter(
@@ -100,7 +101,8 @@ public static class HeadlessAgentRunner
                 llmProviderOverride,
                 ct,
                 currentBranchResolver,
-                Finish);
+                Finish,
+                layeredConfiguration);
         }
         catch (OperationCanceledException)
         {
@@ -132,7 +134,8 @@ public static class HeadlessAgentRunner
         ILlmProvider? llmProviderOverride,
         CancellationToken ct,
         Func<string, string?>? currentBranchResolver,
-        Action<HeadlessExitCode, int> finish)
+        Action<HeadlessExitCode, int> finish,
+        Andy.Cli.Configuration.AndyConfiguration? layeredConfiguration = null)
     {
         var iterations = 0;
         var exitCode = HeadlessExitCode.Success;
@@ -143,7 +146,7 @@ public static class HeadlessAgentRunner
         // rejected at config-load time, so this can never shadow a runtime secret.
         ApplyEnvVars(config.EnvVars);
 
-        await using var services = BuildServiceProvider(config, loggerFactory);
+        await using var services = BuildServiceProvider(config, loggerFactory, layeredConfiguration);
 
         // AX.3 (rivoli-ai/conductor#2090): register the assistant's built-in
         // tools into the SAME IToolRegistry the agent uses, so a headless
@@ -573,7 +576,10 @@ public static class HeadlessAgentRunner
 
     // Internal for testing: lets a test exercise the real DI wiring (built-in
     // tool catalog included) instead of reimplementing it in a parallel path.
-    internal static ServiceProvider BuildServiceProvider(HeadlessRunConfig config, ILoggerFactory loggerFactory)
+    internal static ServiceProvider BuildServiceProvider(
+        HeadlessRunConfig config,
+        ILoggerFactory loggerFactory,
+        Andy.Cli.Configuration.AndyConfiguration? layeredConfiguration = null)
     {
         var services = new ServiceCollection();
         services.AddSingleton(loggerFactory);
@@ -588,6 +594,18 @@ public static class HeadlessAgentRunner
         {
             options.DefaultProvider = config.Model.Provider;
         });
+
+        // Layered andy.jsonc llm.* (rivoli-ai/andy-cli#280) between the environment
+        // and the run config. This is what lets a workspace pin an endpoint - an
+        // internal gateway, say - for every session that runs in it. It is applied
+        // BEFORE the two Configure calls below, so the run config's own model and
+        // api_key_ref still win: an explicit per-run instruction outranks a
+        // workspace default.
+        if (layeredConfiguration is not null)
+        {
+            services.Configure<LlmOptions>(options =>
+                Andy.Cli.Configuration.LlmOptionsBinder.Apply(options, layeredConfiguration.Llm));
+        }
 
         // The headless config names the model explicitly (config.Model.Id), but
         // ConfigureLlmFromEnvironment only populates each provider's Model from
@@ -622,6 +640,13 @@ public static class HeadlessAgentRunner
         services.AddSingleton<Andy.Tools.Framework.IToolLifecycleManager, Andy.Tools.Framework.ToolLifecycleManager>();
         // Gate tool execution through the permission engine. Headless is non-interactive: anything that
         // would prompt is denied (fail-closed) unless ANDY_PERMISSION_MODE=bypass or rules/injection allow it.
+        //
+        // The layered andy.jsonc configuration is DELIBERATELY not consulted here.
+        // Its permissions section carries only a prompting mode, and a file checked
+        // into a workspace must never be able to loosen a containerised run: the
+        // per-run allow-list in the run config is the sole relaxation mechanism.
+        // HeadlessConfigLayer pins permissions.mode to "ask" so the merged view
+        // agrees with what is enforced.
         Andy.Cli.Services.CliPermissionServiceExtensions.AddAndyCliPermissions(services, null);
         services.AddSingleton(new Andy.Tools.Framework.ToolFrameworkOptions
         {

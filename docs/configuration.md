@@ -1,6 +1,6 @@
 # Layered configuration (andy.jsonc)
 
-Updated: 2026-07-25
+Updated: 2026-07-27
 
 Andy CLI reads one configuration file format, `andy.jsonc`, from a fixed set of
 locations, merges them in a documented order, validates every source against a
@@ -26,6 +26,14 @@ twice.
 
 ```text
 packaged defaults  <  user  <  project  <  environment  <  CLI arguments
+```
+
+A headless run inserts its `--config` file between the environment and the
+command line:
+
+```text
+packaged defaults  <  user  <  project  <  environment
+                   <  headless --config file  <  CLI arguments
 ```
 
 The highest layer that declares a value wins. Layers are merged per field, not
@@ -247,16 +255,38 @@ error ANDYCFG002 project:/work/repo/andy.jsonc:12:3 [ui.themee]: unknown key 'th
 
 Keys are case sensitive. `"UI"` is an unknown key, not another spelling of `ui`.
 
+## Headless runs
+
+`andy-cli run --headless --config <path>` reads this configuration too. The
+workspace folder is carried across several agentic sessions, so its project-scope
+settings apply to headless runs in that folder.
+
+- Project discovery is rooted at **`workspace.root` from the run config**, not
+  the process working directory.
+- The run config file is projected into this schema (provider, model,
+  `api_key_ref`, `limits.max_iterations`) and layered above user, project and the
+  environment, so an explicit per-run instruction wins over a workspace default
+  key by key.
+- The runtime still reads `tools`, `workspace`, `output`, `limits`,
+  `permissions.allowed_tools` and the rest **directly** from the run config.
+  Nothing here can weaken its schema validation, fail-closed permission gate, or
+  exit-code contract.
+- `permissions.mode` is pinned to `ask` above the user and project layers, so a
+  committed file cannot turn a containerised run into an auto-approving one.
+- An invalid user or project file **fails the run** with exit code 2 rather than
+  being ignored.
+- `--isolated` (synonym `--no-project-config`) skips the user and project layers
+  entirely, for a run that must reproduce from its own file alone.
+
+See [Headless runtime](headless-runtime.md#layered-configuration-in-headless-runs).
+
 ## What is deliberately not in here
 
 - **Permission rules.** `permissions.json`, `permissions.local.json` and the user
   rule file keep their own security format and are not merged into this
-  configuration. Only `permissions.mode` is configurable here. Their resolved
-  locations are printed by `config show --effective` so they are still easy to
-  find.
-- **The headless run config.** `andy-cli run --headless --config <path>` is a
-  single self-contained contract (`headless-config.v1`) precisely so that a
-  containerised run reproduces from one file. It does not read `andy.jsonc`.
+  configuration. Only `permissions.mode` is configurable here, and headless
+  overrides even that. Their resolved locations are printed by
+  `config show --effective` so they are still easy to find.
 
 ## Extending the schema
 

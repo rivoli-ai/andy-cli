@@ -1,4 +1,5 @@
 using System.IO;
+using Andy.Cli.Configuration;
 using Andy.Cli.Headless;
 using Microsoft.Extensions.Logging;
 
@@ -46,6 +47,41 @@ public static class HeadlessRunner
 
             var config = load.Config!;
 
+            // Layered andy.jsonc configuration (rivoli-ai/andy-cli#280). The
+            // workspace folder is carried across several agentic sessions, so its
+            // project-scope settings apply to headless runs too. Discovery is rooted
+            // at workspace.root, NOT the process working directory, because the
+            // container's CWD is not the folder the operator configured. The run
+            // config file is layered on top; --isolated drops the workspace and user
+            // files entirely for a run that must reproduce from its own file alone.
+            var layered = AndyConfigurationService.InitializeShared(
+                new ConfigLoadRequest
+                {
+                    WorkspaceDirectory = string.IsNullOrWhiteSpace(config.Workspace.Root)
+                        ? Directory.GetCurrentDirectory()
+                        : config.Workspace.Root,
+                    IncludeUserAndProjectLayers = !parsed.Isolated,
+                    OverrideLayer = HeadlessConfigLayer.Build(config, parsed.ConfigPath!),
+                    CommandLineArguments = args,
+                },
+                force: true);
+
+            if (layered.HasErrors)
+            {
+                // A broken workspace config is a config error, not something to
+                // shrug off: the operator asked for settings the run cannot honour.
+                stderr.WriteLine(
+                    "andy-cli run --headless: the layered configuration is invalid.");
+                foreach (var diagnostic in layered.Errors)
+                {
+                    stderr.WriteLine(
+                        "  " + ConfigRedactor.Scrub(diagnostic.ToString(), layered.SecretValues));
+                }
+                stderr.WriteLine(
+                    "  Fix the file, or re-run with --isolated to ignore the user and project configuration.");
+                return HeadlessExitCode.ConfigError;
+            }
+
             // rivoli-ai/andy-cli#180: honor output.stream. 'stdout' (default) streams
             // the NDJSON events to standard output; 'fifo' redirects them to the named
             // FIFO at event_sink.path (guaranteed present by config validation). The
@@ -76,7 +112,8 @@ public static class HeadlessRunner
                     stderr: stderr,
                     loggerFactory: loggerFactory,
                     llmProviderOverride: null,
-                    ct: ct);
+                    ct: ct,
+                    layeredConfiguration: layered.Config);
             }
             finally
             {
@@ -108,9 +145,13 @@ public static class HeadlessRunner
     }
 
     private const string Usage =
-        "Usage: andy-cli run --headless --config <path>\n"
+        "Usage: andy-cli run --headless --config <path> [--isolated]\n"
         + "  --headless        Non-interactive execution driven entirely by the config file (required).\n"
-        + "  --config <path>   Path to a headless-config.v1 JSON file (required).";
+        + "  --config <path>   Path to a headless-config.v1 JSON file (required).\n"
+        + "  --isolated        Ignore ~/.andy/andy.jsonc and the workspace andy.jsonc files, so the\n"
+        + "                    run reproduces from packaged defaults plus this config file, the\n"
+        + "                    environment, and these arguments only.\n"
+        + "                    (--no-project-config is accepted as a synonym.)";
 
     private static ParsedArgs ParseArgs(string[] args)
     {
@@ -120,6 +161,7 @@ public static class HeadlessRunner
             : args.AsSpan();
 
         var headless = false;
+        var isolated = false;
         string? configPath = null;
 
         for (var i = 0; i < remaining.Length; i++)
@@ -129,6 +171,10 @@ public static class HeadlessRunner
             {
                 case "--headless":
                     headless = true;
+                    break;
+                case "--isolated":
+                case "--no-project-config":
+                    isolated = true;
                     break;
                 case "--config":
                     if (i + 1 >= remaining.Length)
@@ -152,12 +198,13 @@ public static class HeadlessRunner
             return ParsedArgs.ErrorOnly("`--config <path>` is required.");
         }
 
-        return new ParsedArgs { ConfigPath = configPath };
+        return new ParsedArgs { ConfigPath = configPath, Isolated = isolated };
     }
 
     private readonly record struct ParsedArgs
     {
         public string? ConfigPath { get; init; }
+        public bool Isolated { get; init; }
         public string? Error { get; init; }
 
         public static ParsedArgs ErrorOnly(string message) => new() { Error = message };

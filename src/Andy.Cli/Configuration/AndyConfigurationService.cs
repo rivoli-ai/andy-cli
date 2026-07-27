@@ -30,6 +30,23 @@ public sealed class ConfigLoadRequest
     public IReadOnlyList<string> CommandLineArguments { get; init; } = Array.Empty<string>();
 
     /// <summary>
+    /// When false, the user and project andy.jsonc files are not read at all.
+    /// Set by <c>andy-cli run --headless --isolated</c> so a containerised run is
+    /// reproducible from its own config file plus the environment, and cannot be
+    /// altered by whatever happens to be checked into the workspace.
+    /// </summary>
+    public bool IncludeUserAndProjectLayers { get; init; } = true;
+
+    /// <summary>
+    /// An already-built layer inserted ABOVE the environment and BELOW the command
+    /// line. Used for the headless run config, which is a different file format
+    /// (headless-config.v1) translated into this schema by
+    /// <c>HeadlessConfigLayer.Build</c>; keeping it as an opaque layer means the
+    /// configuration service does not have to know that contract exists.
+    /// </summary>
+    public ConfigLayer? OverrideLayer { get; init; }
+
+    /// <summary>
     /// Environment used both for the environment layer and for <c>{env:NAME}</c>
     /// substitution. Null means the real process environment.
     /// </summary>
@@ -135,20 +152,29 @@ public sealed class AndyConfigurationService
         layers.Add(defaults);
         sources.Add(defaults.Source);
 
-        foreach (var (kind, path) in ConfigLayerBuilder.DiscoverFiles(request.ResolvedHome, workspace))
+        if (request.IncludeUserAndProjectLayers)
         {
-            var layer = TryLoadFile(kind, path, diagnostics);
-            if (layer is null)
+            foreach (var (kind, path) in ConfigLayerBuilder.DiscoverFiles(request.ResolvedHome, workspace))
             {
-                continue;
+                var layer = TryLoadFile(kind, path, diagnostics);
+                if (layer is null)
+                {
+                    continue;
+                }
+                layers.Add(layer);
+                sources.Add(layer.Source);
             }
-            layers.Add(layer);
-            sources.Add(layer.Source);
         }
 
         var environment = ConfigLayerBuilder.BuildEnvironment(request.Lookup, workspace, secretValues);
         layers.Add(environment);
         sources.Add(environment.Source);
+
+        if (request.OverrideLayer is { } overrideLayer)
+        {
+            layers.Add(overrideLayer);
+            sources.Add(overrideLayer.Source);
+        }
 
         var commandLine = ConfigLayerBuilder.BuildCommandLine(
             request.CommandLineArguments.ToArray(), workspace);

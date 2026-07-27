@@ -1,6 +1,6 @@
 # Migrating to andy.jsonc
 
-Updated: 2026-07-25
+Updated: 2026-07-27
 
 Andy configuration used to be spread across the packaged `appsettings.json`,
 environment variables, `.andy/mcp-servers.json`, and a few small memory files
@@ -31,7 +31,7 @@ exactly which of the old sources is still supplying each value.
 | `~/.andy/permissions.json` and friends | Unchanged, separate security format | Not merged; locations shown by `config show` |
 | `ANDY_*` and provider environment variables | Still read | Environment layer |
 | `--auto`, `--yolo`, `--debug`, `--verbose`, `--quiet` | Still read | CLI layer (highest) |
-| `run --headless --config <path>` | Unchanged, separate contract | Does not read `andy.jsonc` |
+| `run --headless --config <path>` | Still authoritative for the run | Layered above user and project `andy.jsonc` |
 
 ## appsettings.json
 
@@ -209,10 +209,22 @@ which is the file equivalent of `--auto` / `--yolo` / `ANDY_AUTO_APPROVE`.
 
 ## Headless runs
 
-`andy-cli run --headless --config <path>` is unchanged and deliberately does not
-read `andy.jsonc`. A containerised run must reproduce from the single file it was
-handed; letting a stray `~/.andy/andy.jsonc` on the host change its behaviour
-would defeat that. See [Headless runtime](headless-runtime.md).
+`andy-cli run --headless --config <path>` now reads `andy.jsonc` as well, because
+the workspace folder is carried across several agentic sessions and its settings
+should apply to runs in that folder. The run config file is layered on top of the
+user and project files, so it still wins wherever it speaks.
+
+Two things to check when adopting this:
+
+- Project discovery follows `workspace.root` from the run config, not the process
+  working directory. Put the file where the run will look for it.
+- An invalid user or project `andy.jsonc` fails the run with exit code 2. Run
+  `andy-cli config validate` in the workspace before relying on it.
+
+If a run must reproduce from its own config file alone, pass `--isolated` (or
+`--no-project-config`). `permissions.mode` from a workspace file is overridden
+regardless: only the run config's `permissions.allowed_tools` can relax a
+headless run. See [Headless runtime](headless-runtime.md#layered-configuration-in-headless-runs).
 
 ## Checklist
 
