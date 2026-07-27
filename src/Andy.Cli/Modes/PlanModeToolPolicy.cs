@@ -162,6 +162,8 @@ public sealed class PlanModeToolPolicy
     };
 
     private readonly HashSet<string> _additionalReadOnlyTools;
+    private readonly HashSet<string> _additionalReadOnlyServers;
+    private readonly List<string> _additionalReadOnlyServerPrefixes;
 
     /// <summary>
     /// The policy with no opt-in additions - the one used unless a caller supplies configuration.
@@ -169,10 +171,17 @@ public sealed class PlanModeToolPolicy
     public static PlanModeToolPolicy Default { get; } = new();
 
     /// <param name="additionalReadOnlyTools">
-    /// Tool ids an operator has explicitly declared read-only (see <see cref="ModeConfigFile"/>).
+    /// Tool ids a user has explicitly declared read-only (see <see cref="ModeConfigFile"/>).
     /// Used to re-enable specific MCP or CLI tools that the fail-closed default would deny.
     /// </param>
-    public PlanModeToolPolicy(IEnumerable<string>? additionalReadOnlyTools = null)
+    /// <param name="additionalReadOnlyServers">
+    /// MCP server names granted server-wide. Matching is by the <c>mcp_&lt;server&gt;_</c> tool-id
+    /// prefix (see <see cref="McpToolNaming"/>), which is what makes a server-wide grant cover
+    /// tools that server exposes for the first time later.
+    /// </param>
+    public PlanModeToolPolicy(
+        IEnumerable<string>? additionalReadOnlyTools = null,
+        IEnumerable<string>? additionalReadOnlyServers = null)
     {
         _additionalReadOnlyTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (additionalReadOnlyTools is not null)
@@ -185,10 +194,28 @@ public sealed class PlanModeToolPolicy
                 }
             }
         }
+
+        _additionalReadOnlyServers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        _additionalReadOnlyServerPrefixes = new List<string>();
+        if (additionalReadOnlyServers is not null)
+        {
+            foreach (var server in additionalReadOnlyServers)
+            {
+                if (string.IsNullOrWhiteSpace(server) || !_additionalReadOnlyServers.Add(server.Trim()))
+                {
+                    continue;
+                }
+
+                _additionalReadOnlyServerPrefixes.Add(McpToolNaming.ServerToolPrefix(server));
+            }
+        }
     }
 
-    /// <summary>Tool ids an operator opted back in as read-only.</summary>
+    /// <summary>Tool ids a user opted back in as read-only.</summary>
     public IReadOnlyCollection<string> AdditionalReadOnlyTools => _additionalReadOnlyTools;
+
+    /// <summary>MCP server names granted server-wide.</summary>
+    public IReadOnlyCollection<string> AdditionalReadOnlyServers => _additionalReadOnlyServers;
 
     /// <summary>
     /// Classifies one tool call for Plan mode. Never throws: an unusable parameter bag is treated
@@ -230,7 +257,11 @@ public sealed class PlanModeToolPolicy
                     + "Switch to Build mode with '/mode build' to make changes.");
         }
 
-        if (ReadOnlyTools.Contains(id) || _additionalReadOnlyTools.Contains(id))
+        // Opt-ins are consulted LAST, after every capability-based deny above. That ordering is the
+        // invariant that stops a grant from re-enabling a mutating tool: a user (or a hand-edited
+        // config, or a server-wide MCP grant) can only rescue calls that would otherwise fall
+        // through to the fail-closed default below.
+        if (ReadOnlyTools.Contains(id) || _additionalReadOnlyTools.Contains(id) || IsGrantedByServer(id))
         {
             return ModeToolVerdict.Allow();
         }
@@ -243,6 +274,38 @@ public sealed class PlanModeToolPolicy
             + "are denied. Switch to Build mode with '/mode build', or declare the tool read-only in "
             + $"{ModeConfigFile.FileName}.");
     }
+
+    /// <summary>
+    /// True when the tool id falls under a server-wide MCP grant. Prefix matching is what lets a
+    /// server-wide grant cover tools discovered after the grant was made; a per-tool grant
+    /// deliberately does not.
+    /// </summary>
+    private bool IsGrantedByServer(string toolId)
+    {
+        foreach (var prefix in _additionalReadOnlyServerPrefixes)
+        {
+            if (toolId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// True when Plan mode denies <paramref name="toolId"/> on capability grounds alone - i.e. no
+    /// opt-in of any shape could ever allow it. The grant store uses this to refuse a bad grant at
+    /// write time instead of silently accepting one that can never take effect.
+    /// </summary>
+    public static bool IsNeverGrantable(string toolId) =>
+        !string.IsNullOrWhiteSpace(toolId) && KnownMutatingTools.ContainsKey(toolId.Trim());
+
+    /// <summary>The recorded reason a tool is classified as mutating, or null when it is not.</summary>
+    public static string? MutationReason(string toolId) =>
+        !string.IsNullOrWhiteSpace(toolId) && KnownMutatingTools.TryGetValue(toolId.Trim(), out var reason)
+            ? reason
+            : null;
 
     private static string? SafeInspect(
         Func<IReadOnlyDictionary<string, object?>?, string?> inspect,

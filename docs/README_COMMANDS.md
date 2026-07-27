@@ -84,6 +84,16 @@ normally require consent unless a higher-precedence rule allows them.
 | `/mode` | Show the current mode and the available modes. |
 | `/mode build` | Full capability; the normal permission rules apply. |
 | `/mode plan` | Read-only planning; mutating and unclassified tools are denied before they run. |
+| `/mode grants` | Review the Plan-mode read-only tool opt-ins. |
+| `/mode allow <tool-id>` | Opt specific tools into Plan mode. A mutating tool can never be opted in. |
+| `/mode allow-server <name>` | Opt in every tool from an MCP server, including ones it exposes later. |
+| `/mode revoke <tool-id\|server-name>` | Remove a Plan-mode opt-in. |
+
+MCP tools are denied in Plan mode until opted in. When an MCP server connects,
+the TUI offers the choice (all tools from the server, or selected ones); the
+same grants are available non-interactively as `andy-cli mode allow`,
+`allow-server`, `revoke`, and `grants`. Headless and one-shot runs never prompt -
+they read the persisted grants in `.andy/modes.json`.
 
 Plan mode is enforced by a tool-permission overlay that runs ahead of the rule
 layers, so an existing allow rule (user, project, local, session, injected, or

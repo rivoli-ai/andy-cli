@@ -32,9 +32,14 @@ This first slice deliberately has **no writable plan file**: Plan mode is non-mu
 ## Using it
 
 ```
-/mode              show the current mode and the available modes
-/mode plan         switch to read-only planning
-/mode build        switch back to full capability
+/mode                      show the current mode and the available modes
+/mode plan                 switch to read-only planning
+/mode build                switch back to full capability
+
+/mode grants               review the Plan-mode read-only tool opt-ins
+/mode allow <tool-id>      opt specific tools into Plan mode
+/mode allow-server <name>  opt in every tool from an MCP server
+/mode revoke <id|name>     remove an opt-in
 ```
 
 Start-up and headless selection:
@@ -65,26 +70,102 @@ state-changing method, and any call that names an output-file argument
 **Anything unclassified is denied.** Plan mode fails closed. MCP tools carry no capability metadata
 (see `McpRemoteTool`, which leaves `RequiredPermissions` at `None`), so their effects cannot be
 proven and they are refused by default. The same applies to CLI subprocess tools and to any tool a
-future package upgrade introduces.
+future package upgrade introduces. MCP tools can be opted back in - see
+[Opting MCP tools into Plan mode](#opting-mcp-tools-into-plan-mode).
 
 Denied calls return a normal unsuccessful tool result explaining the mode, so the agent reports the
 refusal and keeps planning instead of crashing the turn.
 
-## Re-enabling a known read-only tool
+## Opting MCP tools into Plan mode
 
-If you know a specific MCP or CLI tool is read-only, list it in `.andy/modes.json` - in the project
-and/or under your home directory. Both files are read and merged.
+The fail-closed default means a freshly connected MCP server is unusable in Plan mode until you say
+otherwise. Rather than leaving you to discover that when a plan turn fails, Andy offers the choice
+**when the server connects**.
+
+### The connection-time offer
+
+When an interactive session connects an MCP server that exposes tools Plan mode would deny, an
+overlay lists those tools and offers:
+
+| Key | Effect |
+| --- | --- |
+| `A` | Allow **all** tools from this server, including ones it exposes later |
+| `Space` | Tick/untick the highlighted tool |
+| `Enter` | Allow **only** the ticked tools |
+| `N` / `Esc` | Skip - nothing is granted, the tools stay denied |
+| Up/Down | Move through the list |
+
+Nothing is granted unless you pick `A` or `Enter`. Skipping records only that the offer was shown.
+
+The offer is raised once per server. It is **not** raised again on later starts - unless that server
+exposes a tool it has never offered you, in which case the new tool is surfaced on its own. That
+keeps a declined server from nagging while making sure a newly added tool cannot slip past unseen.
+
+The offer only ever appears in the interactive TUI. Headless, ACP, and one-shot runs never prompt:
+they read the persisted grants and otherwise stay denied.
+
+### Granting without the TUI
+
+The same decisions are available as commands, for scripting or for when you already know what you
+want. They work both as slash commands in the TUI and as `andy-cli mode ...` from a shell:
+
+```
+andy-cli mode grants                        # review what is currently opted in
+andy-cli mode allow mcp_docs_search         # opt in specific tool ids
+andy-cli mode allow-server docs             # opt in a whole MCP server
+andy-cli mode revoke mcp_docs_search        # remove a per-tool opt-in
+andy-cli mode revoke docs                   # remove a server-wide opt-in
+```
+
+### The two grant shapes
+
+- **Per tool** (`planReadOnlyTools`): exact tool ids, no wildcards. Covers only the ids listed. A
+  tool the server adds tomorrow stays denied until you opt it in.
+- **Per server** (`planReadOnlyMcpServers`): matches every tool id starting with
+  `mcp_<server>_`, which is the id shape the MCP host generates. This is the only grant that covers
+  tools discovered later - that is exactly what "allow all from this server" means, and it is why
+  the two are recorded separately.
+
+### The file
+
+Grants live in `.andy/modes.json`. The commands and the offer write the **project** file, since an
+MCP server is configured per project and its Plan-mode grant should travel with the repository. The
+same file under your home directory is also read and merged, so a hand-written global opt-in keeps
+working.
 
 ```json
 {
-  "planReadOnlyTools": ["mcp__docs__search", "mcp__jira__get_issue"]
+  "planReadOnlyTools": ["mcp_jira_get_issue"],
+  "planReadOnlyMcpServers": ["docs"],
+  "mcpPlanOptInAsked": { "docs": ["mcp_docs_search", "mcp_docs_fetch"] }
 }
 ```
 
-Entries are exact tool ids; there are no wildcards, so an entry can never widen beyond the one tool
-it names, and it can never re-enable a tool the built-in classification already knows is mutating -
-listing `write_file` here does nothing. A malformed file contributes no opt-ins (it cannot silently
-disable Plan mode) and never breaks start-up.
+`mcpPlanOptInAsked` is bookkeeping for the "do not nag" rule above. It grants nothing.
+
+A malformed file contributes no opt-ins - it cannot silently disable Plan mode - and never breaks
+start-up.
+
+### What a grant can never do
+
+A grant is a **read-only opt-in**, and opt-ins are consulted last, after every capability-based
+denial:
+
+- `/mode allow write_file` is refused outright, and nothing is written.
+- Hand-editing `write_file` or `execute_command` into `planReadOnlyTools` has no effect either;
+  the policy checks the mutating classification before it looks at any opt-in.
+- A server-wide grant cannot smuggle in a mutating built-in, and it does not disable the
+  parameter-level checks: a granted MCP tool called with an `output_file` argument is still denied,
+  because that call writes.
+
+In short, a grant can only rescue calls that would otherwise be denied for being *unclassified*. It
+can never widen Plan mode past the mutation boundary.
+
+### Reviewing and revoking
+
+`andy-cli mode grants` (or `/mode grants`) prints every opt-in in force, which file it came from,
+and how to remove it. `revoke` takes either a tool id or a server name - whichever you see in the
+listing.
 
 ## How the enforcement is wired
 
@@ -159,7 +240,10 @@ model should be introduced.
 | `src/Andy.Cli/Modes/ModeGatedPermissionAuthorizer.cs` | Overlay over the permission engine |
 | `src/Andy.Cli/Modes/ModeGatedToolExecutor.cs` | Overlay over tool execution |
 | `src/Andy.Cli/Modes/AgentModePrompt.cs` | Mode text for the model (context, not the boundary) |
-| `src/Andy.Cli/Modes/ModeConfigFile.cs` | `.andy/modes.json` read-only opt-ins |
+| `src/Andy.Cli/Modes/ModeConfigFile.cs` | `.andy/modes.json` on-disk shape |
+| `src/Andy.Cli/Modes/PlanModeGrantStore.cs` | Reading, granting and revoking the opt-ins |
+| `src/Andy.Cli/Modes/McpToolNaming.cs` | The MCP tool-id convention server-wide grants match on |
+| `src/Andy.Cli/Widgets/McpPlanOptInPrompt.cs` | The connection-time opt-in offer |
 | `src/Andy.Cli/Modes/StartupModeSelector.cs` | `--mode` for the interactive CLI |
 | `src/Andy.Cli/Commands/ModeCommand.cs` | The `/mode` command |
 | `tests/Andy.Cli.Tests/Modes/` | Tests, including the end-to-end overlay proofs |

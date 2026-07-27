@@ -58,7 +58,11 @@ public static class HelpText
         "### Mode Commands:\n" +
         "- **/mode**: Show the current operating mode and the available modes\n" +
         "- **/mode build**: Full capability; the normal permission rules apply\n" +
-        "- **/mode plan**: Read-only planning; file writes, shell commands, and unclassified tools are denied before they run, and no allow rule can override that\n\n" +
+        "- **/mode plan**: Read-only planning; file writes, shell commands, and unclassified tools are denied before they run, and no allow rule can override that\n" +
+        "- **/mode grants**: Review the Plan-mode read-only tool opt-ins\n" +
+        "- **/mode allow <tool-id>**: Opt specific tools into Plan mode (a mutating tool can never be opted in)\n" +
+        "- **/mode allow-server <name>**: Opt in every tool from an MCP server, including ones it exposes later\n" +
+        "- **/mode revoke <tool-id|server-name>**: Remove a Plan-mode opt-in\n\n" +
         "### Permission Commands:\n" +
         "- **/permissions**: Open the interactive permission rules manager\n" +
         "- **/permissions list**: List effective permission rules by layer\n" +
@@ -94,6 +98,8 @@ public static class HelpText
         "  permissions    - View and modify tool permission rules\n" +
         "  skills         - List, inspect, and enable/disable agent skills\n" +
         "  sessions       - List saved sessions (resume with --resume <id> / --continue)\n" +
+        "  mode           - Review/grant/revoke Plan-mode read-only tool opt-ins\n" +
+        "                   (grants, allow <tool-id>, allow-server <name>, revoke <id>)\n" +
         "  help, ?        - Show this help message\n" +
         "\n" +
         "Run without arguments to start the interactive TUI mode.";

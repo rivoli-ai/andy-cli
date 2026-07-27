@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace Andy.Cli.Modes;
@@ -16,16 +17,32 @@ namespace Andy.Cli.Modes;
 public sealed class ModeToolGate
 {
     private readonly AgentModeState _state;
-    private readonly PlanModeToolPolicy _planPolicy;
+    private readonly Func<PlanModeToolPolicy> _planPolicy;
 
     public ModeToolGate(AgentModeState state, PlanModeToolPolicy? planPolicy = null)
     {
         _state = state;
-        _planPolicy = planPolicy ?? PlanModeToolPolicy.Default;
+        var policy = planPolicy ?? PlanModeToolPolicy.Default;
+        _planPolicy = () => policy;
+    }
+
+    /// <summary>
+    /// Reads the policy from a live grant store instead of capturing it. A Plan-mode opt-in granted
+    /// mid-session (via the MCP offer or <c>/mode allow</c>) therefore takes effect on the next tool
+    /// call, with no restart and without rebuilding the enforcement decorators around it.
+    /// </summary>
+    public ModeToolGate(AgentModeState state, PlanModeGrantStore grantStore)
+    {
+        ArgumentNullException.ThrowIfNull(grantStore);
+        _state = state;
+        _planPolicy = () => grantStore.CurrentPolicy;
     }
 
     /// <summary>The mode state this gate consults.</summary>
     public AgentModeState State => _state;
+
+    /// <summary>The Plan-mode policy currently in force.</summary>
+    public PlanModeToolPolicy PlanPolicy => _planPolicy();
 
     /// <summary>
     /// Classifies a tool call under the ACTIVE mode. Build allows everything (the permission
@@ -39,7 +56,7 @@ public sealed class ModeToolGate
             return ModeToolVerdict.Allow();
         }
 
-        return _planPolicy.Evaluate(toolId, parameters);
+        return _planPolicy().Evaluate(toolId, parameters);
     }
 
     /// <summary>Convenience for callers that only have a mutable dictionary.</summary>

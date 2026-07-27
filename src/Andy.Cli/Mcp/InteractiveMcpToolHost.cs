@@ -165,13 +165,10 @@ public sealed class InteractiveMcpToolHost : IAsyncDisposable
     internal static string BuildArguments(IEnumerable<string> arguments) =>
         string.Join(" ", arguments.Select(QuoteArgument));
 
-    internal static string BuildToolId(string serverName, string remoteToolName)
-    {
-        var serverId = NormalizeIdentifier(serverName);
-        var toolId = NormalizeIdentifier(remoteToolName);
-        return $"mcp_{(serverId.Length == 0 ? "server" : serverId)}_"
-            + (toolId.Length == 0 ? "tool" : toolId);
-    }
+    // Delegates to the shared convention in Andy.Cli.Modes.McpToolNaming: Plan-mode server-wide
+    // grants match on the "mcp_<server>_" prefix this produces, so the two must never diverge.
+    internal static string BuildToolId(string serverName, string remoteToolName) =>
+        Andy.Cli.Modes.McpToolNaming.BuildToolId(serverName, remoteToolName);
 
     private static IClientTransport BuildTransport(
         McpServerConfiguration server,
@@ -211,27 +208,6 @@ public sealed class InteractiveMcpToolHost : IAsyncDisposable
             candidate = $"{baseId}_{suffix++}";
         }
         return candidate;
-    }
-
-    private static string NormalizeIdentifier(string value)
-    {
-        var result = new StringBuilder(value.Length);
-        var previousUnderscore = false;
-        foreach (var character in value)
-        {
-            if (char.IsAsciiLetterOrDigit(character))
-            {
-                result.Append(char.ToLowerInvariant(character));
-                previousUnderscore = false;
-            }
-            else if (!previousUnderscore)
-            {
-                result.Append('_');
-                previousUnderscore = true;
-            }
-        }
-
-        return result.ToString().Trim('_');
     }
 
     private static string QuoteArgument(string argument)

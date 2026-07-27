@@ -473,9 +473,14 @@ public static class CliPermissionServiceExtensions
     private static void AddAgentModeOverlay(IServiceCollection services)
     {
         services.TryAddSingleton(_ => new AgentModeState());
+
+        // The grant store is the live source of Plan-mode opt-ins (.andy/modes.json). The gate reads
+        // it per call, so an opt-in granted mid-session applies immediately. Headless, ACP and
+        // one-shot runs get the same store: they READ the persisted grants and never prompt.
+        services.TryAddSingleton(_ => new PlanModeGrantStore(Directory.GetCurrentDirectory()));
         services.TryAddSingleton(sp => new ModeToolGate(
             sp.GetRequiredService<AgentModeState>(),
-            ModeConfigFile.LoadPolicy(Directory.GetCurrentDirectory())));
+            sp.GetRequiredService<PlanModeGrantStore>()));
 
         Decorate<IToolPermissionAuthorizer>(services, (inner, sp) =>
             new ModeGatedPermissionAuthorizer(inner, sp.GetRequiredService<ModeToolGate>()));

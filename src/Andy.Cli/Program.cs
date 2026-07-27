@@ -424,8 +424,23 @@ class Program
             var permissionsManager = new Andy.Cli.Widgets.PermissionsManager(Directory.GetCurrentDirectory());
             var skillsCommand = new Andy.Cli.Commands.SkillsCommand(serviceProvider);
             var themeCommand = new ThemeCommand(themeMemory);
-            var modeCommand = new Andy.Cli.Commands.ModeCommand(agentModeState);
+            var planModeGrants = serviceProvider.GetRequiredService<Andy.Cli.Modes.PlanModeGrantStore>();
+            var modeCommand = new Andy.Cli.Commands.ModeCommand(agentModeState, planModeGrants);
             var commandPalette = new CommandPalette();
+
+            // Issue #278: offer a Plan-mode opt-in for each MCP server that just connected. Plan mode
+            // denies MCP tools by default (they carry no capability metadata), so the choice is put in
+            // front of the user at connection time instead of surfacing as a failed plan turn later.
+            // The offer grants NOTHING unless the user picks one of the allow actions, and it is only
+            // raised once per server unless that server later exposes a tool it has not offered.
+            var mcpPlanOptIn = new Andy.Cli.Widgets.McpPlanOptInPrompt(planModeGrants);
+            foreach (var mcpStatus in mcpToolHost.Statuses)
+            {
+                if (mcpStatus.State == Andy.Cli.Mcp.McpServerConnectionState.Connected)
+                {
+                    mcpPlanOptIn.Enqueue(mcpStatus.Name, mcpStatus.ToolIds);
+                }
+            }
 
             // Issue #278: keep the status line's mode badge in step with the mode. Build shows no
             // badge (it is the unrestricted default); a restricted mode is always visible.
@@ -1386,6 +1401,32 @@ class Program
                         return;
                     }
 
+                    // Issue #278: the MCP Plan-mode opt-in offer owns all keys while open. It is shown
+                    // once per server (and again only when that server exposes a NEW tool), and every
+                    // exit path other than A/Enter grants nothing.
+                    if (mcpPlanOptIn.IsOpen)
+                    {
+                        string optInMessage = string.Empty;
+                        switch (k.Key)
+                        {
+                            case ConsoleKey.Escape: optInMessage = mcpPlanOptIn.Skip(); break;
+                            case ConsoleKey.UpArrow: mcpPlanOptIn.MoveSelection(-1); return;
+                            case ConsoleKey.DownArrow: mcpPlanOptIn.MoveSelection(1); return;
+                            case ConsoleKey.Spacebar: mcpPlanOptIn.ToggleSelected(); return;
+                            case ConsoleKey.Enter: optInMessage = mcpPlanOptIn.GrantSelectedTools(); break;
+                            default:
+                                if (k.KeyChar is 'a' or 'A') { optInMessage = mcpPlanOptIn.GrantServerWide(); break; }
+                                if (k.KeyChar is 'n' or 'N') { optInMessage = mcpPlanOptIn.Skip(); break; }
+                                return; // swallow any other key while the offer is open
+                        }
+
+                        if (!string.IsNullOrEmpty(optInMessage))
+                        {
+                            feed.AddMarkdownRich(optInMessage);
+                        }
+                        return;
+                    }
+
                     // Interactive permissions manager owns all keys while open.
                     if (permissionsManager.IsOpen)
                     {
@@ -2243,6 +2284,7 @@ class Program
                 var overlayB = new DL.DisplayListBuilder();
                 commandPalette.Render(new L.Rect(0, 0, viewport.Width, viewport.Height), baseDl, overlayB);
                 permissionsManager.Render(new L.Rect(0, 0, viewport.Width, viewport.Height), baseDl, overlayB);
+                mcpPlanOptIn.Render(new L.Rect(0, 0, viewport.Width, viewport.Height), baseDl, overlayB);
 
                 var overlay = new DL.DisplayListBuilder();
                 hud.ViewportCols = viewport.Width; hud.ViewportRows = viewport.Height;
@@ -2675,6 +2717,15 @@ class Program
                 // List interactive sessions saved under ~/.andy/sessions that can be
                 // resumed with --resume <id> / --continue (issue #231).
                 command = new SessionsCommand(new Andy.Cli.Services.Sessions.SessionStore());
+                break;
+            case "mode":
+                // Issue #278: the non-interactive path to the Plan-mode opt-ins, so automation and
+                // scripts can grant/revoke without the TUI. A fresh AgentModeState is fine here: a
+                // one-shot invocation has no session to switch, and the grant verbs act only on the
+                // persisted store. This path NEVER prompts.
+                command = new Andy.Cli.Commands.ModeCommand(
+                    new Andy.Cli.Modes.AgentModeState(),
+                    new Andy.Cli.Modes.PlanModeGrantStore(Directory.GetCurrentDirectory()));
                 break;
             case "help":
             case "?":

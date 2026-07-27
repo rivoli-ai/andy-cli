@@ -372,6 +372,12 @@ built-in, every shell command, and every unclassified tool (including `cli` and
 re-enable them - the overlay runs outside the rule layers the allow-list installs.
 Read-only built-ins continue to work.
 
+A headless run NEVER prompts for a Plan-mode opt-in. It reads the grants already
+persisted in `.andy/modes.json` (project, merged with the user-level file) and
+denies everything else. To let a headless plan run use an MCP server's tools,
+grant them ahead of time with `andy-cli mode allow-server <name>` or
+`andy-cli mode allow <tool-id>`, or write the entries into the file directly.
+
 An unrecognized `--mode` value is a hard failure: the run exits with
 `ConfigError` (2) before the agent loop starts and never falls back to `build`.
 The mode is fixed for the lifetime of a headless run and is also stated in the
