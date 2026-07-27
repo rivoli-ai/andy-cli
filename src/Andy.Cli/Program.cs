@@ -1105,15 +1105,15 @@ class Program
                     // frame must be a full clear + repaint and the cursor style re-applied.
                     () => { lastReflowSig = int.MinValue; cursorStyledShown = false; }));
             var promptComposer = new Andy.Cli.Editor.PromptLineComposer(prompt);
+            // Decides what each entry point starts from and what the composer ends up holding;
+            // Ctrl+X and /editor share it so they cannot diverge.
+            var externalEditorInvoker = new Andy.Cli.Editor.ExternalEditorInvoker(externalEditor, promptComposer);
 
-            async Task OpenExternalEditorAsync()
+            void ReportExternalEditorResult(Andy.Cli.Editor.ExternalEditorResult result)
             {
-                var result = await externalEditor.EditAsync(promptComposer.GetDocument());
+                // The invoker has already updated the composer; this is only presentation.
                 if (result.Applied)
                 {
-                    // Only a clean editor exit replaces the composer; every other outcome
-                    // leaves the original text untouched and just reports why.
-                    promptComposer.SetDocument(result.Document);
                     feed.SnapToBottom();
                     toast.Show("Prompt updated from your editor", 90);
                 }
@@ -1414,7 +1414,7 @@ class Program
                     // whatever is already typed in the composer.
                     if (k.Key == ConsoleKey.X && (k.Modifiers & ConsoleModifiers.Control) != 0)
                     {
-                        await OpenExternalEditorAsync();
+                        ReportExternalEditorResult(await externalEditorInvoker.FromComposerAsync());
                         return;
                     }
 
@@ -1584,6 +1584,15 @@ class Program
 
                     // Avoid mapping regular alphanumeric keys to actions
                     var textBeforeKey = prompt.Text;
+                    // Snapshot the composer BEFORE PromptLine consumes the key: an Enter that
+                    // submits clears it, and /editor (issue #287) has to open on the content
+                    // that was there a moment ago. Reading the composer after dispatch would
+                    // yield an empty document and, once #277 lands, would also lose the
+                    // structured parts a plain string cannot carry. Only taken on the keystroke
+                    // that can submit, so ordinary typing costs nothing.
+                    var documentBeforeKey = k.Key == ConsoleKey.Enter
+                        ? promptComposer.GetDocument()
+                        : Andy.Cli.Editor.ComposerDocument.Empty;
                     var submitted = prompt.OnKey(k);
                     // If the keystroke edited the prompt text (typing, paste, backspace,
                     // delete, etc.), snap the feed back to the bottom where the prompt
@@ -1715,11 +1724,14 @@ class Program
                                 }
                                 else if (commandName == "editor" || commandName == "edit")
                                 {
-                                    // Issue #287. Submitting "/editor" has already cleared the
-                                    // composer, so this opens an empty buffer; Ctrl+X is the
-                                    // binding that carries the text you already typed.
+                                    // Issue #287. Enter has already cleared the composer, so the
+                                    // editor is seeded from documentBeforeKey (captured above the
+                                    // OnKey call) minus the leading "/editor" token. The invoker
+                                    // writes the composer back on every outcome, so a failed edit
+                                    // restores the text instead of losing it.
                                     feed.AddUserMessage(cmd);
-                                    await OpenExternalEditorAsync();
+                                    ReportExternalEditorResult(
+                                        await externalEditorInvoker.FromSubmittedCommandAsync(documentBeforeKey));
                                     return;
                                 }
                                 else if (commandName == "mcp")

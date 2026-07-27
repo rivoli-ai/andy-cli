@@ -10,8 +10,13 @@ Implements issue #287.
 
 | Trigger | What it does |
 | --- | --- |
-| **Ctrl+X** | Opens your editor with whatever is currently in the composer. This is the binding to use. |
-| **/editor** (alias **/edit**) | Same round trip, but submitting the slash command has already cleared the composer, so you start from an empty buffer. |
+| **Ctrl+X** | Opens your editor on whatever is currently in the composer. |
+| **/editor** (alias **/edit**) | Opens your editor on the text that follows the command. `/editor` on its own starts from an empty buffer; `/editor draft the release notes` starts from `draft the release notes`. |
+
+Both triggers do the same job. Andy snapshots the composer *before* the submitting
+keystroke clears it, so `/editor` never loses what you had typed, and both paths
+end with the composer holding exactly the edited text - never the edited text
+appended to what it replaced.
 
 What happens:
 
@@ -24,7 +29,8 @@ What happens:
 5. Andy restores the terminal, repaints the TUI, and deletes the temporary file.
 6. **Only if the editor exited with status 0** is the composer replaced. A nonzero exit,
    a crash, a signal, a failed launch or an over-sized file all leave your prompt exactly
-   as it was.
+   as it was - and on the `/editor` path the text is written back into the composer,
+   so a failed edit never costs you what you had typed.
 
 Press Enter afterwards to send the prompt as usual - Andy never submits for you.
 

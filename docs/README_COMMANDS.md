@@ -92,15 +92,16 @@ normally require consent unless a higher-precedence rule allows them.
 
 | Command | Behavior |
 | --- | --- |
-| `/editor` (alias `/edit`) | Compose the prompt in `$VISUAL`, then `$EDITOR`, and return to the TUI. |
+| `/editor [text]` (alias `/edit`) | Compose the prompt in `$VISUAL`, then `$EDITOR`, and return to the TUI. The editor opens on the text that follows the command. |
 
-`Ctrl+X` runs the same round trip but starts from the text already in the
-composer, so it is the binding to use in practice. The composer is replaced only
-when the editor exits with status 0; a nonzero exit, a signal, a failed launch or
-an over-sized file leave the prompt untouched. GUI editors need their blocking
-flag (`export VISUAL='code --wait'`). See
-[External editor](external-editor.md) for per-editor examples, the quoting rules
-used to split the value without a shell, and troubleshooting.
+`Ctrl+X` runs the same round trip on whatever is currently in the composer. Both
+paths behave identically: the composer is snapshotted before submission clears it,
+and it ends up holding exactly the edited text. It is replaced only when the editor
+exits with status 0; a nonzero exit, a signal, a failed launch or an over-sized file
+leave the prompt text intact. GUI editors need their blocking flag
+(`export VISUAL='code --wait'`). See [External editor](external-editor.md) for
+per-editor examples, the quoting rules used to split the value without a shell, and
+troubleshooting.
 
 ## Keyboard shortcuts
 

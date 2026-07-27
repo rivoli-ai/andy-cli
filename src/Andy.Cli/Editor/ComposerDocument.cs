@@ -184,6 +184,46 @@ public sealed class ComposerDocument
         return new ComposerDocument(result);
     }
 
+    /// <summary>
+    /// Drop the first <paramref name="count"/> characters of <see cref="ToEditableText"/>,
+    /// keeping every structured part that survives the cut. A structured part is never split:
+    /// if the removed span reaches into a placeholder without covering it, the part is kept
+    /// whole and removal stops there. Used to strip a leading slash command from a submitted
+    /// composer without flattening its attachments.
+    /// </summary>
+    public ComposerDocument RemoveLeadingCharacters(int count)
+    {
+        if (count <= 0) return this;
+
+        var kept = new List<ComposerPart>();
+        int remaining = count;
+        int i = 0;
+        for (; i < _parts.Count; i++)
+        {
+            if (remaining <= 0) break;
+            var part = _parts[i];
+            switch (part)
+            {
+                case ComposerTextPart t when t.Text.Length <= remaining:
+                    remaining -= t.Text.Length;
+                    break;
+                case ComposerTextPart t:
+                    kept.Add(new ComposerTextPart(t.Text.Substring(remaining)));
+                    remaining = 0;
+                    break;
+                case ComposerAttachmentPart a when a.Placeholder.Length <= remaining:
+                    remaining -= a.Placeholder.Length;
+                    break;
+                default:
+                    kept.Add(part);
+                    remaining = 0;
+                    break;
+            }
+        }
+        for (; i < _parts.Count; i++) kept.Add(_parts[i]);
+        return new ComposerDocument(kept);
+    }
+
     /// <summary>Normalize CRLF and lone CR to LF (the composer's internal convention).</summary>
     internal static string NormalizeNewlines(string text) =>
         text.Replace("\r\n", "\n").Replace('\r', '\n');

@@ -86,6 +86,18 @@ public class ExternalEditorDocsTests
     }
 
     [Fact]
+    public void Docs_DescribeBothTriggersAsEquivalent_NotAsAnEmptyBufferWorkaround()
+    {
+        var docs = DocsText();
+
+        Assert.Contains("Both triggers do the same job", docs);
+        Assert.Contains("snapshots the composer", docs);
+        // The shipped-limitation wording that /editor "starts from an empty buffer" is gone.
+        Assert.DoesNotContain("so you start from an empty buffer", docs);
+        Assert.DoesNotContain("Ctrl+X is the binding that carries", docs);
+    }
+
+    [Fact]
     public void Docs_CoverPathsWithSpaces_AndTheNoShellRule()
     {
         var docs = DocsText();

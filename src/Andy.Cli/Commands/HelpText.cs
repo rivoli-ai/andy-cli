@@ -42,8 +42,8 @@ public static class HelpText
         "- **/resume [session-id]**: Resume a saved session (most recent when no id is given)\n" +
         "- **/help**: Show this help message\n\n" +
         "### External Editor:\n" +
-        "- **/editor**: Compose a prompt in your external editor, then return to Andy\n" +
-        "- **Ctrl+X**: Same, but starts from the text already in the composer\n" +
+        "- **/editor [text]**: Compose a prompt in your external editor, then return to Andy (the editor opens on the text after the command)\n" +
+        "- **Ctrl+X**: Same round trip, starting from whatever is currently in the composer\n" +
         "- Andy reads **VISUAL** first, then **EDITOR**; e.g. `export VISUAL='vim'` or `export VISUAL='code --wait'`\n" +
         "- GUI editors need a blocking flag (`--wait`); see docs/external-editor.md\n\n" +
         "### Model Commands:\n" +
