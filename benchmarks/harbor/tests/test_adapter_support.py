@@ -2,6 +2,7 @@ import unittest
 
 from benchmarks.harbor.adapter_support import (
     ALLOWED_CODING_TOOLS,
+    SYSTEM_DEPENDENCY_INSTALL_COMMAND,
     build_headless_config,
     parse_model_name,
 )
@@ -77,6 +78,18 @@ class BuildHeadlessConfigTests(unittest.TestCase):
                 max_iterations=80,
                 timeout_seconds=600,
             )
+
+
+class SystemDependencyCommandTests(unittest.TestCase):
+    def test_supports_harbor_package_manager_matrix(self) -> None:
+        for manager in ("apt-get", "dnf", "yum", "apk"):
+            with self.subTest(manager=manager):
+                self.assertIn(f"command -v {manager}", SYSTEM_DEPENDENCY_INSTALL_COMMAND)
+
+    def test_requires_tar_and_trusted_certificates(self) -> None:
+        self.assertIn("command -v tar", SYSTEM_DEPENDENCY_INSTALL_COMMAND)
+        self.assertIn("ca-certificates", SYSTEM_DEPENDENCY_INSTALL_COMMAND)
+        self.assertIn("exit 1", SYSTEM_DEPENDENCY_INSTALL_COMMAND)
 
 
 if __name__ == "__main__":

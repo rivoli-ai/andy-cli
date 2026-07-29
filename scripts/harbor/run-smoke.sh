@@ -42,15 +42,10 @@ if [ ! -f "$archive" ]; then
     "$script_dir/build-agent-archive.sh" "$archive"
 fi
 
-agent_env=(--agent-env "ANDY_CLI_ARCHIVE=$archive")
-if [ -n "$key_name" ]; then
-    agent_env+=(--agent-env "$key_name=${!key_name}")
-fi
-
 PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}" \
 "$harbor_bin" run \
     --path "$repo_root/benchmarks/harbor/tasks" \
     --agent benchmarks.harbor.andy_agent:AndyCli \
     --model "$model_name" \
     --n-concurrent 1 \
-    "${agent_env[@]}"
+    --agent-env "ANDY_CLI_ARCHIVE=$archive"

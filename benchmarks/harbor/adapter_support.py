@@ -31,6 +31,27 @@ ALLOWED_CODING_TOOLS = (
     "execute_command",
 )
 
+SYSTEM_DEPENDENCY_INSTALL_COMMAND = (
+    "if command -v tar >/dev/null 2>&1 && "
+    "(test -s /etc/ssl/certs/ca-certificates.crt || "
+    "test -s /etc/pki/tls/certs/ca-bundle.crt || "
+    "test -s /etc/ssl/cert.pem); then "
+    ":; "
+    "elif command -v apt-get >/dev/null 2>&1; then "
+    "apt-get update && "
+    "DEBIAN_FRONTEND=noninteractive apt-get install -y tar ca-certificates; "
+    "elif command -v dnf >/dev/null 2>&1; then "
+    "dnf install -y tar ca-certificates; "
+    "elif command -v yum >/dev/null 2>&1; then "
+    "yum install -y tar ca-certificates; "
+    "elif command -v apk >/dev/null 2>&1; then "
+    "apk add --no-cache tar ca-certificates; "
+    "else "
+    "echo 'Andy requires tar and trusted CA certificates' >&2; "
+    "exit 1; "
+    "fi"
+)
+
 
 @dataclass(frozen=True)
 class ModelSelection:

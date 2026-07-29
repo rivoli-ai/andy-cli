@@ -16,7 +16,7 @@ running larger datasets such as Terminal-Bench or SWE-bench.
 
 ## Status
 
-As of 2026-07-22, the adapter is validated against Harbor 0.20.0. Both bundled
+As of 2026-07-28, the adapter is validated against Harbor 0.20.0. Both bundled
 reference solutions pass Harbor's Docker verifier with a reward of 1.0. A
 trimmed, self-contained Andy archive has also been installed and invoked through
 the adapter, including structured `started`, `error`, `tool_usage_audit`, and
@@ -46,6 +46,12 @@ The aggregate easy-tier score is 2/4, with a mean reward of 0.5. An initial
 did not include trusted CA certificates. That infrastructure-only attempt is
 excluded from the score; the adapter now installs `ca-certificates`, and the
 replacement trial reached the model and official verifier successfully.
+
+On 2026-07-28, Andy completed a 30-task Terminal-Bench 2 sample with 10 passes,
+20 failures, and a mean reward of 0.333. Sixteen trials reached their agent
+timeout; `overfull-hbox` still passed its verifier from the persisted workspace.
+See the
+[full configuration and per-task results](results/terminal-bench-30-2026-07-28.md).
 
 ## Prerequisites
 
@@ -105,7 +111,6 @@ PYTHONPATH="$PWD" harbor run \
   --agent benchmarks.harbor.andy_agent:AndyCli \
   --model openai/gpt-5.4 \
   --agent-env "ANDY_CLI_ARCHIVE=$PWD/artifacts/harbor/andy-cli-linux-x64.tar.gz" \
-  --agent-env "OPENAI_API_KEY=$OPENAI_API_KEY" \
   --n-concurrent 1
 ```
 
@@ -154,10 +159,14 @@ PYTHONPATH="$PWD" harbor run \
   --agent benchmarks.harbor.andy_agent:AndyCli \
   --model openrouter/xiaomi/mimo-v2.5 \
   --agent-env "ANDY_CLI_ARCHIVE=$PWD/artifacts/harbor/andy-cli-linux-x64.tar.gz" \
-  --agent-env "OPENROUTER_API_KEY=$OPENROUTER_API_KEY" \
   --agent-env "ANDY_PERMISSION_MODE=bypass" \
   --agent-env "ANDY_WORKSPACE_ROOT=/"
 ```
+
+Provider API keys are inherited from the Harbor process and transferred through
+an ephemeral container file for both smoke and Terminal-Bench runs. Do not pass
+them with `--agent-env`: Harbor retains agent environment values in its job
+configuration.
 
 Start with one task and one concurrent trial while validating a new provider or
 model. Public suites can be expensive and execute untrusted model-generated code;

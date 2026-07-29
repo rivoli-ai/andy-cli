@@ -363,8 +363,9 @@ The repository includes a Harbor adapter and a deterministic .NET smoke dataset
 for exercising the published CLI in isolated containers. See
 [`benchmarks/harbor/README.md`](benchmarks/harbor/README.md) for setup, local
 archive publishing, retained run artifacts, and Terminal-Bench runs. The adapter
-has completed all four Terminal-Bench 2 tasks marked `easy`, passing two for an
-aggregate mean reward of 0.5 with `xiaomi/mimo-v2.5`.
+has completed a 30-task Terminal-Bench 2 sample with `xiaomi/mimo-v2.5`,
+passing 10 for an aggregate mean reward of 0.333. The detailed report records
+the exact task set, timeout outcomes, and effective concurrency.
 
 ### Building
 

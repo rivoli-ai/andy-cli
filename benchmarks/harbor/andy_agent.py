@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import shlex
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import override
 from uuid import uuid4
 
@@ -12,7 +13,11 @@ from harbor.agents.installed.base import BaseInstalledAgent, with_prompt_templat
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
-from .adapter_support import build_headless_config, parse_model_name
+from .adapter_support import (
+    SYSTEM_DEPENDENCY_INSTALL_COMMAND,
+    build_headless_config,
+    parse_model_name,
+)
 
 
 class AndyCli(BaseInstalledAgent):
@@ -22,6 +27,7 @@ class AndyCli(BaseInstalledAgent):
     _REMOTE_ARCHIVE = "/tmp/andy-cli-harbor.tar.gz"
     _REMOTE_INSTALL_DIR = "/installed-agent/andy-cli"
     _REMOTE_CONFIG = "/tmp/andy-headless-config.json"
+    _REMOTE_API_KEY = "/tmp/andy-provider-api-key"
     _EVENTS_FILE = "/logs/agent/andy-events.jsonl"
     _STDERR_FILE = "/logs/agent/andy-stderr.txt"
     _OUTPUT_FILE = "/logs/agent/andy-final.txt"
@@ -67,9 +73,12 @@ class AndyCli(BaseInstalledAgent):
         if not archive.is_file():
             raise ValueError(f"Andy archive does not exist: {archive}")
 
-        await self.ensure_system_dependencies(
+        # Keep installation compatible with Harbor 0.20.0 from PyPI as well as
+        # newer source builds. The published base class does not yet expose the
+        # ensure_system_dependencies helper.
+        await self.exec_as_root(
             environment,
-            ("tar", "ca_certificates"),
+            command=SYSTEM_DEPENDENCY_INSTALL_COMMAND,
         )
         await environment.upload_file(archive, self._REMOTE_ARCHIVE)
         await self.exec_as_root(
@@ -116,10 +125,13 @@ class AndyCli(BaseInstalledAgent):
         context: AgentContext,
     ) -> None:
         model = parse_model_name(self.model_name)
-        if model.api_key_env is not None and not self._get_env(model.api_key_env):
-            raise ValueError(
-                f"{model.api_key_env} must be passed to Harbor with --agent-env"
-            )
+        api_key = (
+            self._get_env(model.api_key_env)
+            if model.api_key_env is not None
+            else None
+        )
+        if model.api_key_env is not None and not api_key:
+            raise ValueError(f"{model.api_key_env} must be set in the environment")
 
         workspace_root = await self._workspace_root(environment)
         config = build_headless_config(
@@ -137,12 +149,35 @@ class AndyCli(BaseInstalledAgent):
         local_config.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
         await environment.upload_file(local_config, self._REMOTE_CONFIG)
 
+        command_prefix = ""
+        if model.api_key_env is not None and api_key is not None:
+            with NamedTemporaryFile(mode="w", encoding="utf-8") as secret_file:
+                secret_file.write(api_key)
+                secret_file.flush()
+                await environment.upload_file(
+                    Path(secret_file.name),
+                    self._REMOTE_API_KEY,
+                )
+            command_prefix += (
+                f"export {model.api_key_env}="
+                f"\"$(cat {shlex.quote(self._REMOTE_API_KEY)})\" && "
+                f"rm -f {shlex.quote(self._REMOTE_API_KEY)} && "
+            )
+
+        permission_mode = self._get_env("ANDY_PERMISSION_MODE")
+        if permission_mode:
+            command_prefix += (
+                "export ANDY_PERMISSION_MODE="
+                f"{shlex.quote(permission_mode)} && "
+            )
+
         await self.exec_as_agent(
             environment,
             cwd=workspace_root,
             timeout_sec=self._timeout_seconds + 30,
             command=(
-                "mkdir -p /logs/agent && "
+                command_prefix
+                + "mkdir -p /logs/agent && "
                 "andy-cli run --headless "
                 f"--config {shlex.quote(self._REMOTE_CONFIG)} "
                 f"> >(tee {shlex.quote(self._EVENTS_FILE)}) "

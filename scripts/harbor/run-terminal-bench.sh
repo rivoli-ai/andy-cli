@@ -60,9 +60,6 @@ agent_env=(
     --agent-env "ANDY_PERMISSION_MODE=bypass"
     --agent-env "ANDY_WORKSPACE_ROOT=/"
 )
-if [ -n "$key_name" ]; then
-    agent_env+=(--agent-env "$key_name=${!key_name}")
-fi
 
 PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}" \
 "$harbor_bin" run \
