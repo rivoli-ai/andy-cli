@@ -96,6 +96,7 @@ namespace Andy.Cli.Widgets
             length = Math.Clamp(length, 0, _text.Length - start);
             _text = _text.Remove(start, length).Insert(start, replacement);
             _cursor = Math.Clamp(newCursor ?? (start + replacement.Length), 0, _text.Length);
+        }
 
         /// <summary>What submitting the current line will do. See <see cref="PromptMode"/>.</summary>
         public PromptMode Mode => _mode;
