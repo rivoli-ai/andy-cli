@@ -25,6 +25,8 @@ linked below.
   point-in-time forks, titles, and token/cost aggregation.
 - [Changed-file LSP diagnostics](lsp-diagnostics.md) - Language server configuration,
   lifecycle and `/lsp` commands, output bounds, and workspace containment.
+- [Provider authentication](provider-auth.md) - Credential source precedence, OS
+  credential stores, OAuth flows, automation, rotation, and recovery.
 
 ## Headless runtime
 

@@ -364,6 +364,11 @@ class Program
                     }
                 }
 
+                // rivoli-ai/andy-cli#284: layer in credentials stored by `andy-cli auth login`
+                // (OS credential store) and teach provider detection about them. Environment
+                // variables still win and are never persisted. Same call in headless and ACP mode.
+                Andy.Cli.Auth.AuthBootstrap.Configure(options);
+
                 // Only auto-detect if no DefaultProvider was explicitly configured in appsettings
                 var configuredDefault = configuration.GetSection("Llm:DefaultProvider").Value;
                 if (string.IsNullOrEmpty(configuredDefault))
@@ -445,6 +450,12 @@ class Program
             var formattersCommand = new FormattersCommand(Directory.GetCurrentDirectory());
             var permissionsManager = new Andy.Cli.Widgets.PermissionsManager(Directory.GetCurrentDirectory());
             var skillsCommand = new Andy.Cli.Commands.SkillsCommand(serviceProvider);
+            // Provider sign-in / status / sign-out (issue #284). Shares the process-wide
+            // credential resolver so a login is visible to provider detection immediately.
+            var authCommand = new Andy.Cli.Commands.AuthCommand(
+                new Andy.Cli.Auth.AuthService(
+                    Andy.Cli.Auth.AuthBootstrap.Resolver.Store,
+                    Andy.Cli.Auth.AuthBootstrap.Resolver));
             var themeCommand = new ThemeCommand(themeMemory);
             var commandPalette = new CommandPalette();
 
@@ -1803,6 +1814,23 @@ class Program
                                     feed.AddMarkdownRich("```\n" + result.Message + "\n```");
                                     return;
                                 }
+                                else if (commandName == "auth")
+                                {
+                                    // Provider sign-in / status / sign-out (issue #284). The
+                                    // credential value is typed into a masked modal, so it never
+                                    // reaches the prompt line, the history, or the transcript.
+                                    feed.AddUserMessage(cmd);
+                                    DrainTypeAhead();
+                                    var authPrompt = new Andy.Cli.Widgets.AuthLoginModal(
+                                        dl => scheduler.RenderOnceAsync(dl, viewport, caps, pty, CancellationToken.None),
+                                        ReadKeyBlocking,
+                                        () => (viewport.Width, viewport.Height));
+                                    var result = await authCommand.ExecuteAsync(args, authPrompt);
+                                    // The modal painted over the whole viewport; force a repaint.
+                                    lastReflowSig = int.MinValue;
+                                    feed.AddMarkdownRich("```\n" + result.Message + "\n```");
+                                    return;
+                                }
                                 else if (commandName == "permissions" || commandName == "perms" || commandName == "perm")
                                 {
                                     // No args -> open the interactive manager; subcommands run the command.
@@ -2556,7 +2584,11 @@ class Program
         services.ConfigureLlmFromEnvironment();
         services.AddLlmServices(options =>
         {
-            // Auto-detect the default provider based on environment variables
+            // rivoli-ai/andy-cli#284: same credential resolution as interactive and headless
+            // mode - stored credentials are layered in, environment variables still win.
+            Andy.Cli.Auth.AuthBootstrap.Configure(options);
+
+            // Auto-detect the default provider based on the resolved credentials
             var detectionService = new ProviderDetectionService();
             var detectedProvider = detectionService.DetectDefaultProvider();
             var defaultProvider = detectedProvider ?? "cerebras";
@@ -2782,6 +2814,11 @@ class Program
                 // export, import, fork, rename, and usage stats over ~/.andy/sessions.
                 command = new Andy.Cli.Commands.SessionCommand(
                     new Andy.Cli.Services.Sessions.SessionStore());
+                break;
+            case "auth":
+                // Provider sign-in / status / sign-out (issue #284). Deliberately built
+                // without the DI graph: auth must work before any provider is configured.
+                command = new Andy.Cli.Commands.AuthCommand(serviceProvider);
                 break;
             case "help":
             case "?":
