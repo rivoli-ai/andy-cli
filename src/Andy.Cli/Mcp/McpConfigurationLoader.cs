@@ -1,13 +1,14 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Andy.Cli.Configuration;
 using Microsoft.Extensions.Configuration;
 
 namespace Andy.Cli.Mcp;
 
 /// <summary>
-/// Loads interactive MCP servers from appsettings and the project-local
-/// .andy/mcp-servers.json file. Project configuration overrides an appsettings
-/// server with the same name.
+/// Loads interactive MCP servers from appsettings, the layered andy.jsonc
+/// configuration, and the project-local .andy/mcp-servers.json file. Later sources
+/// override an earlier server with the same name.
 /// </summary>
 public static partial class McpConfigurationLoader
 {
@@ -16,6 +17,19 @@ public static partial class McpConfigurationLoader
     public static McpConfigurationLoadResult Load(
         IConfiguration? applicationConfiguration,
         string projectDirectory)
+        => Load(applicationConfiguration, projectDirectory, layeredConfiguration: null);
+
+    /// <summary>
+    /// Loads MCP servers. <paramref name="layeredConfiguration"/> carries
+    /// <c>mcp.servers</c> from andy.jsonc (rivoli-ai/andy-cli#280), which has already
+    /// been schema-validated, substituted and merged across scopes. It sits between
+    /// appsettings and the dedicated .andy/mcp-servers.json file, so an existing
+    /// project file keeps winning and nothing that worked before changes.
+    /// </summary>
+    public static McpConfigurationLoadResult Load(
+        IConfiguration? applicationConfiguration,
+        string projectDirectory,
+        AndyConfiguration? layeredConfiguration)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectDirectory);
 
@@ -25,6 +39,7 @@ public static partial class McpConfigurationLoader
         var sources = new List<string>();
 
         LoadApplicationConfiguration(applicationConfiguration, servers, sources);
+        LoadLayeredConfiguration(layeredConfiguration, servers, sources);
 
         var projectPath = Path.Combine(projectDirectory, ".andy", ProjectFileName);
         if (File.Exists(projectPath))
@@ -119,6 +134,35 @@ public static partial class McpConfigurationLoader
                     StringComparer.OrdinalIgnoreCase),
             };
             servers[child.Key] = server;
+        }
+    }
+
+    private static void LoadLayeredConfiguration(
+        AndyConfiguration? configuration,
+        IDictionary<string, McpServerConfiguration> servers,
+        ICollection<string> sources)
+    {
+        if (configuration is null || configuration.Mcp.Servers.Count == 0)
+        {
+            return;
+        }
+
+        sources.Add($"{ConfigSchema.FileName} (mcp.servers)");
+        foreach (var (name, declared) in configuration.Mcp.Servers)
+        {
+            servers[name] = new McpServerConfiguration
+            {
+                Name = name,
+                Transport = declared.Transport ?? string.Empty,
+                Enabled = declared.Enabled,
+                Url = declared.Url,
+                Command = declared.Command,
+                WorkingDirectory = declared.WorkingDirectory,
+                Args = new List<string>(declared.Args),
+                Environment = new Dictionary<string, string>(declared.Env, StringComparer.Ordinal),
+                Headers = new Dictionary<string, string>(
+                    declared.Headers, StringComparer.OrdinalIgnoreCase),
+            };
         }
     }
 

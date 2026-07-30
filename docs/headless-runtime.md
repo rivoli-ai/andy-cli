@@ -1,6 +1,6 @@
 # Headless runtime
 
-Updated: 2026-07-25
+Updated: 2026-07-27
 
 ## Concept: andy-cli's dual role
 
@@ -41,7 +41,7 @@ andy-cli and andy-containers can roll independently. See the
 ## The command
 
 ```
-andy-cli run --headless --config <path>
+andy-cli run --headless --config <path> [--isolated]
 ```
 
 Argument parsing lives in
@@ -52,15 +52,77 @@ passes `run` as `args[0]`; the runner parses the remainder:
 | --- | --- | --- |
 | `--headless` | Yes | Selects the strict, config-driven contract. If omitted, `run` is the [one-shot prompt form](#one-shot-prompt-execution) instead; `--config` without `--headless` is rejected. |
 | `--config <path>` | Yes | Path to a `headless-config.v1` JSON file. `--config` with no following token is an error. |
+| `--isolated` | No | Ignore `~/.andy/andy.jsonc` and the workspace `andy.jsonc` files. `--no-project-config` is a synonym. See [Layered configuration in headless runs](#layered-configuration-in-headless-runs). |
 
 Any unrecognized token is rejected (`Unknown argument: <token>`). All argument
 errors, a missing `--headless`, and a missing `--config` produce exit code
 `2` (ConfigError) and print usage to stderr.
 
 After parsing, `HeadlessRunner.RunAsync` loads and validates the config via
-`HeadlessConfigLoader.TryLoadAsync`. A load/validation failure also returns exit
-code `2`. On success it delegates to `HeadlessAgentRunner.ExecuteAsync`, which
-runs the agent loop and emits the [event stream](event-stream.md).
+`HeadlessConfigLoader.TryLoadAsync`, then loads the layered configuration
+described below. A failure in either also returns exit code `2`. On success it
+delegates to `HeadlessAgentRunner.ExecuteAsync`, which runs the agent loop and
+emits the [event stream](event-stream.md).
+
+## Layered configuration in headless runs
+
+A headless run happens inside a workspace folder that is typically carried across
+several agentic sessions, so settings that folder declares apply to the run. The
+run config file is layered on top of the general
+[andy.jsonc configuration](configuration.md):
+
+```text
+packaged defaults  <  ~/.andy/andy.jsonc  <  <workspace.root>/andy.jsonc
+                   <  environment  <  --config file  <  CLI arguments
+```
+
+Two details are specific to headless:
+
+- Project discovery is rooted at **`workspace.root` from the run config**, not
+  the process working directory. The container's working directory is not the
+  folder the operator configured.
+- The `--config` file is projected into the same schema (provider, model,
+  `api_key_ref`, and `limits.max_iterations`) so `config show` reports what is
+  actually in force, and so it wins over the workspace files key by key. The
+  runtime still reads `tools`, `workspace`, `output`, `limits`,
+  `permissions.allowed_tools` and the rest **directly** from
+  `HeadlessRunConfig`. Nothing in `andy.jsonc` can weaken schema validation, the
+  fail-closed permission gate, or the exit-code contract.
+
+In practice a workspace file is useful for things the run config does not
+express, such as pinning `llm.providers.<id>.apiBase` to an internal gateway for
+every session that runs in that folder.
+
+### Permissions are not layerable
+
+`permissions.mode` from a user or project `andy.jsonc` is **overridden**, not
+obeyed: `HeadlessConfigLayer` pins it to `ask` above those layers. A file checked
+into a workspace must never be able to turn a containerised run into an
+auto-approving one. The only relaxation mechanism remains
+`permissions.allowed_tools` in the run config, applied against the fail-closed
+default described in
+[Built-in tools and permission gating](#built-in-tools-and-permission-gating).
+
+### Reproducibility: `--isolated`
+
+When a run must reproduce from its own config file alone - a clean-room
+verification, a rerun of a recorded run, or any case where the workspace content
+is untrusted - pass `--isolated` (or `--no-project-config`). The user and project
+`andy.jsonc` files are then not read at all, and the run uses packaged defaults,
+the `--config` file, the environment, and its arguments only.
+
+### Diagnostics
+
+An invalid user or project `andy.jsonc` **fails the run** with exit code `2`
+rather than being silently ignored: the operator asked for settings the run
+cannot honour. Each error names its file, line, column and key path, and the
+message points at `--isolated` as the escape hatch:
+
+```text
+andy-cli run --headless: the layered configuration is invalid.
+  error ANDYCFG002 project:/workspace/andy.jsonc:12:3 [ui.themee]: unknown key 'themee'. Did you mean 'theme'?
+  Fix the file, or re-run with --isolated to ignore the user and project configuration.
+```
 
 ## One-shot prompt execution
 

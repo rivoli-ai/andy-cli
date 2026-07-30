@@ -112,6 +112,7 @@ public static class HelpText
         "  sessions       - List saved sessions (resume with --resume <id> / --continue)\n" +
         "  session        - Export, import, fork, rename, and measure saved sessions\n" +
         "  auth           - Sign in to providers, review credential status, sign out\n" +
+        "  config         - Show and validate the layered andy.jsonc configuration\n" +
         "  help, ?        - Show this help message\n" +
         "\n" +
         "Run without arguments to start the interactive TUI mode.";

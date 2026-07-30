@@ -35,7 +35,19 @@ public class SimpleAssistantService : IDisposable
     /// as the tool breaking rather than a safety valve doing its job. The default is now high
     /// enough that only a genuinely runaway loop reaches it, and ANDY_MAX_TURNS overrides it.
     /// </summary>
-    private static readonly int MaxAgentTurns = ResolveMaxAgentTurns();
+    private static int MaxAgentTurns => s_maxAgentTurnsOverride ?? s_maxAgentTurnsFromEnvironment;
+
+    private static readonly int s_maxAgentTurnsFromEnvironment = ResolveMaxAgentTurns();
+    private static int? s_maxAgentTurnsOverride;
+
+    /// <summary>
+    /// Applies <c>session.maxTurns</c> from the layered configuration
+    /// (rivoli-ai/andy-cli#280), which already folded in ANDY_MAX_TURNS and
+    /// <c>--max-turns</c> at their documented precedence. Null or a non-positive
+    /// value restores the environment/default behaviour.
+    /// </summary>
+    public static void SetMaxAgentTurns(int? turns) =>
+        s_maxAgentTurnsOverride = turns is > 0 ? turns : null;
 
     private const int DefaultMaxAgentTurns = 300;
     private const string MaxTurnsStopReason = "max_turns_exceeded";
