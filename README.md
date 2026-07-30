@@ -33,6 +33,8 @@ runtime, and an Agent Client Protocol (ACP) server for editor integrations.
 - **Code Indexing** - Index a codebase for fast code-aware search
 - **Interactive MCP Tools** - Connect project-configured stdio or HTTP MCP
   servers and expose their tools in the TUI
+- **Changed-file LSP Diagnostics** - Report compiler-grade errors and warnings from a
+  configured language server right after a file is edited, managed through `/lsp`
 - **Headless Agent Runtime** - Non-interactive agent runtime with structured exit codes
 - **ACP Server Mode** - Run as an Agent Client Protocol server for editor integrations
 - **Observability** - Instrumentation and a performance HUD; crash logging for diagnostics
@@ -109,6 +111,18 @@ Connected tools appear in `/tools list` with IDs such as
 See [`docs/mcp-configuration.md`](docs/mcp-configuration.md) for the complete
 schema, examples, security guidance, and current limitations.
 
+### Changed-file language server diagnostics
+
+After a file-editing tool runs, Andy can ask a language server about the file it
+just changed and return the errors and warnings to both you and the model.
+Servers are configured explicitly in `<working-directory>/.andy/lsp-servers.json`
+(or `Lsp:Servers` in `appsettings.json`) by command, extensions, and root markers;
+Andy never downloads a language server, and nothing starts until a matching file
+changes. Use `/lsp status` and `/lsp restart`. See
+[`docs/lsp-diagnostics.md`](docs/lsp-diagnostics.md) for the schema, working
+examples for C#, TypeScript, Python, Go and Rust, output bounds, and the
+workspace containment rules.
+
 ### Examples
 
 ```bash
@@ -162,6 +176,8 @@ dotnet run --project src/Andy.Cli
 - `/tools info <tool_name>` - Show details for a tool
 - `/mcp list` - List configured MCP servers
 - `/mcp status` - Show MCP connection state and registered tool IDs
+- `/lsp status` - Show configured language servers, their state, and startup errors
+- `/lsp restart [id]` - Restart language servers
 - `/permissions` - View and edit tool permissions (aliases: `perms`, `perm`)
 - `/theme` - List and switch the UI theme (alias: `themes`)
 - `/theme transparent on|off` - Toggle a supported theme's transparent background
@@ -292,6 +308,7 @@ this repository). The application is built on a set of Andy.* NuGet packages:
 - [`docs/README_COMMANDS.md`](docs/README_COMMANDS.md) - Commands and shortcuts
 - [`docs/headless-runtime.md`](docs/headless-runtime.md) - Headless config and execution contract
 - [`docs/mcp-configuration.md`](docs/mcp-configuration.md) - Interactive MCP server configuration
+- [`docs/lsp-diagnostics.md`](docs/lsp-diagnostics.md) - Changed-file LSP diagnostics and `/lsp`
 - [`docs/ZED_INTEGRATION.md`](docs/ZED_INTEGRATION.md) - ACP editor integration
 - [`docs/CLI_AGENT_FEATURE_COMPARISON.md`](docs/CLI_AGENT_FEATURE_COMPARISON.md) - Rider CLI-agent comparison
 

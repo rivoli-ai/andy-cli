@@ -60,7 +60,9 @@ public static class HelpText
         "- **/tools info <tool_name>**: Show tool details\n" +
         "- **/tools execute <tool_name> [params]**: Run a tool\n" +
         "- **/mcp list**: List configured MCP servers\n" +
-        "- **/mcp status**: Show MCP connection state and registered tools\n\n" +
+        "- **/mcp status**: Show MCP connection state and registered tools\n" +
+        "- **/lsp status**: Show configured language servers and their state\n" +
+        "- **/lsp restart [id]**: Restart language servers\n\n" +
         "### Permission Commands:\n" +
         "- **/permissions**: Open the interactive permission rules manager\n" +
         "- **/permissions list**: List effective permission rules by layer\n" +

@@ -19,6 +19,8 @@ linked below.
   configuration, stdio and HTTP transports, commands, security, and troubleshooting.
 - [Session archives, forks, and usage stats](session-archives.md) - Portable export/import,
   point-in-time forks, titles, and token/cost aggregation.
+- [Changed-file LSP diagnostics](lsp-diagnostics.md) - Language server configuration,
+  lifecycle and `/lsp` commands, output bounds, and workspace containment.
 
 ## Headless runtime
 

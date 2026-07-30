@@ -185,6 +185,26 @@ flags (FileSystem, Network, Process, Environment) on the execution context so th
 lower-level capability checks do not pre-empt the permission gate; the gate remains the
 actual consent authority (allow / ask / deny per call).
 
+## Post-mutation Pipeline
+
+`UiUpdatingToolExecutor` runs an ordered pipeline after a successful `write_file` / `edit_file` /
+`replace_text`, in the block commented `POST-MUTATION PIPELINE`:
+
+1. **Formatting** (reserved for rivoli-ai/andy-cli#283) - rewrites the file on disk.
+2. **Language server diagnostics** (rivoli-ai/andy-cli#282) - reads the file BACK FROM DISK, sends
+   it to a configured language server as `didOpen`/`didChange` + `didSave`, and waits a bounded
+   time for `publishDiagnostics`.
+
+The order is load-bearing: step 2 reports on exactly the bytes it reads, so a formatter that ran
+after it would invalidate every reported line and column. A new step that changes the file belongs
+above the diagnostics call, not below it.
+
+Diagnostics are attached to the tool result as `lsp_diagnostics` (a fresh `Data` payload, so the
+snapshot the feed already captured is untouched) and rendered under the tool call. The whole step
+is inert unless a language server is configured, and every failure mode - no server, launch
+failure, crash, malformed messages, timeout - resolves into a bounded status rather than affecting
+the tool call. See [Changed-file LSP diagnostics](./lsp-diagnostics.md).
+
 ## Parameter Mapping and Normalization
 
 Models frequently call a tool with parameter names borrowed from a different tool
