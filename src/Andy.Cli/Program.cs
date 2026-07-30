@@ -318,9 +318,17 @@ class Program
             // restores capture once the feed is back at the bottom.
             var selectionGate = new Andy.Cli.Input.ScrollSelectionGate();
 
+            // Markdown-defined slash commands (issue #281): discovered from ~/.andy/commands
+            // and <workspace>/.andy/commands. Discovery is lazy and never throws, so a broken
+            // template cannot stop startup; problems surface through /commands diagnostics.
+            var customCommandCatalog = Andy.Cli.Commands.Custom.CustomCommandCatalog.CreateDefault(
+                Directory.GetCurrentDirectory());
+            var customCommandsCommand = new Andy.Cli.Commands.Custom.CustomCommandsCommand(customCommandCatalog);
+
             // Initialize inline command help for slash commands
             var inlineCommandHelp = new InlineCommandHelp();
-            inlineCommandHelp.SetCommands(Andy.Cli.Commands.SlashCommandCatalog.CreateInlineHelpCommands());
+            inlineCommandHelp.SetCommands(
+                Andy.Cli.Commands.SlashCommandCatalog.CreateInlineHelpCommands(customCommandCatalog.Commands));
 
             // @file mentions (issue #277): the picker completes workspace paths in the composer and
             // the resolver reads their content at submission time into structured prompt parts.
@@ -868,7 +876,7 @@ class Program
             });
 
             // Setup command palette commands
-            commandPalette.SetCommands(new[]
+            var builtInPaletteCommands = new[]
             {
                 new CommandPalette.CommandItem
                 {
@@ -1182,7 +1190,71 @@ class Program
                         feed.AddMarkdownRich(Andy.Cli.Commands.HelpText.InteractiveHelpMarkdown());
                     }
                 }
-            });
+            };
+
+            // Rebuilds the two command surfaces (inline autocomplete + palette) from the
+            // built-ins plus the current Markdown commands. Called at startup and after
+            // /commands reload, so editing a template does not require restarting the TUI.
+            void RefreshCommandSurfaces()
+            {
+                var custom = customCommandCatalog.Commands;
+                inlineCommandHelp.SetCommands(
+                    Andy.Cli.Commands.SlashCommandCatalog.CreateInlineHelpCommands(custom));
+                commandPalette.SetCommands(builtInPaletteCommands.Concat(custom.Select(definition =>
+                    new CommandPalette.CommandItem
+                    {
+                        Name = "/" + definition.Name,
+                        // The source is shown in the palette so it is obvious whether a command
+                        // came from the repository or from the user's home directory.
+                        Description = $"[{definition.SourceLabel}] {definition.Description}",
+                        Category = "Markdown Commands",
+                        Aliases = new[] { definition.Name, definition.SlashPathForm },
+                        ParameterHint = definition.UsesArguments || definition.MaxPositional > 0
+                            ? "Arguments are substituted into the template"
+                            : "",
+                        AsyncAction = args =>
+                        {
+                            RunCustomCommand(definition, args.Length == 0 ? "" : string.Join(" ", args));
+                            return Task.CompletedTask;
+                        }
+                    })).ToArray());
+            }
+
+            // Expand a Markdown command and submit the result through the ordinary user-message
+            // path. Routing it here (rather than anywhere closer to the model) is what keeps the
+            // issue #281 security constraints true: the prompt is just text, so permissions,
+            // approvals, and the plan-mode overlay apply exactly as they do to typed input.
+            void RunCustomCommand(Andy.Cli.Commands.Custom.CustomCommandDefinition definition, string rawArguments)
+            {
+                var expanded = customCommandCatalog.Expand(definition, rawArguments);
+                var promptText = expanded.ToPromptText();
+
+                promptHistory.Add(promptText);
+                int customMessageNumber = promptHistory.Count;
+                feed.AddUserMessage(promptText, customMessageNumber);
+                historyIndex = -1;
+
+                foreach (var diagnostic in expanded.Diagnostics)
+                {
+                    feed.AddMarkdownRich(ConsoleColors.NotePrefix(
+                        $"[/{definition.Name}] {diagnostic.Message}"));
+                }
+
+                if (aiService == null)
+                {
+                    feed.AddMarkdownRich(ConsoleColors.WarningPrefix(
+                        "No model is configured, so the expanded command was not sent."));
+                    return;
+                }
+
+                lock (messagePumpLock)
+                {
+                    isProcessingMessage = true;
+                }
+                StartMessagePump(promptText);
+            }
+
+            RefreshCommandSurfaces();
 
             bool cursorStyledShown = false;
             var lastWidth = viewport.Width;
@@ -1803,6 +1875,13 @@ class Program
                                 var commandName = parts[0].ToLowerInvariant();
                                 var args = parts.Skip(1).ToArray();
 
+                                // Markdown commands need the argument text exactly as typed
+                                // (quotes and all); `parts` has already lost that. See
+                                // CustomCommandArguments for the documented quoting rules.
+                                var afterSlash = cmd.Substring(1);
+                                int firstSpace = afterSlash.IndexOf(' ');
+                                var rawArgs = firstSpace < 0 ? "" : afterSlash.Substring(firstSpace + 1);
+
                                 if (commandName == "model" || commandName == "m")
                                 {
                                     feed.AddUserMessage(cmd);
@@ -2088,8 +2167,33 @@ class Program
                                     }
                                     return;
                                 }
+                                else if (commandName == "commands" || commandName == "cmds")
+                                {
+                                    feed.AddUserMessage(cmd);
+                                    var result = await customCommandsCommand.ExecuteAsync(args);
+                                    // Fence the output so the aligned command list stays monospace.
+                                    feed.AddMarkdownRich("```\n" + result.Message + "\n```");
+                                    // A reload changes what the autocomplete and palette should
+                                    // offer, so refresh both without restarting the TUI.
+                                    if (args.Length > 0 &&
+                                        (args[0].Equals("reload", StringComparison.OrdinalIgnoreCase) ||
+                                         args[0].Equals("refresh", StringComparison.OrdinalIgnoreCase)))
+                                    {
+                                        RefreshCommandSurfaces();
+                                    }
+                                    return;
+                                }
                                 else
                                 {
+                                    // Markdown-defined commands are resolved last, so a built-in
+                                    // name always wins (discovery also rejects reserved names).
+                                    var customCommand = customCommandCatalog.Find(commandName);
+                                    if (customCommand != null)
+                                    {
+                                        RunCustomCommand(customCommand, rawArgs);
+                                        return;
+                                    }
+
                                     feed.AddUserMessage(cmd);
                                     feed.AddMarkdownRich(ConsoleColors.WarningPrefix($"Unknown command: /{commandName}. Type /help for available commands."));
                                     return;

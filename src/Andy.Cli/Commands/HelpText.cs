@@ -93,6 +93,17 @@ public static class HelpText
         "- **/skills enable|disable <name>**: Toggle whether the agent may load a skill\n" +
         "- **/skills diagnostics**: Show problems found during skill discovery\n" +
         "- **/skills reload**: Re-scan the skill roots\n\n" +
+        "### Markdown Slash Commands:\n" +
+        "- **/commands**: List Markdown slash commands and where each one came from\n" +
+        "- **/commands info <name>**: Show a command's file, metadata, and prompt template\n" +
+        "- **/commands reload**: Re-scan the command roots without restarting\n" +
+        "- **/commands diagnostics**: Show problems found while loading command files\n" +
+        "- Define one by adding a .md file to ~/.andy/commands or <workspace>/.andy/commands;\n" +
+        "  nested folders become colon segments (git/commit.md -> /git:commit), the YAML\n" +
+        "  frontmatter sets description/provider/model/mode, and the body is the prompt.\n" +
+        "  Templates expand $ARGUMENTS, $1..$9, and $$ for a literal dollar sign.\n" +
+        "  A Markdown command only produces a prompt: it cannot run a shell, grant a\n" +
+        "  permission, enable a tool, or bypass plan mode.\n\n" +
         "## Providers:\n" +
         "- **cerebras**: Fast Llama models\n" +
         "- **openai**: GPT-4 models\n" +
