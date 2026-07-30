@@ -17,31 +17,32 @@ public readonly record struct PlanModeGrantResult(
         new(false, message, Array.Empty<string>());
 }
 
-/// <summary>The currently effective opt-ins, split by where they came from.</summary>
-/// <param name="ProjectTools">Per-tool grants in the project's <c>.andy/modes.json</c>.</param>
-/// <param name="ProjectServers">Server-wide grants in the project's <c>.andy/modes.json</c>.</param>
-/// <param name="UserTools">Per-tool grants in the user's <c>.andy/modes.json</c>.</param>
-/// <param name="UserServers">Server-wide grants in the user's <c>.andy/modes.json</c>.</param>
+/// <summary>The currently effective opt-ins. All of them are user-scoped.</summary>
+/// <param name="Tools">Per-tool grants in the user's <c>.andy/modes.json</c>.</param>
+/// <param name="Servers">Server-wide grants in the user's <c>.andy/modes.json</c>.</param>
+/// <param name="IgnoredProjectEntries">
+/// Grant entries found in the PROJECT file, which are ignored. Listed so a committed file that is
+/// having no effect is visible rather than mysterious.
+/// </param>
 public sealed record PlanModeGrantListing(
-    IReadOnlyList<string> ProjectTools,
-    IReadOnlyList<string> ProjectServers,
-    IReadOnlyList<string> UserTools,
-    IReadOnlyList<string> UserServers)
+    IReadOnlyList<string> Tools,
+    IReadOnlyList<string> Servers,
+    IReadOnlyList<string> IgnoredProjectEntries)
 {
-    public bool IsEmpty =>
-        ProjectTools.Count == 0 && ProjectServers.Count == 0
-        && UserTools.Count == 0 && UserServers.Count == 0;
+    /// <summary>True when no grant is in force (ignored project entries do not count).</summary>
+    public bool IsEmpty => Tools.Count == 0 && Servers.Count == 0;
 }
 
 /// <summary>
-/// Read/modify/write access to the Plan-mode opt-ins in <c>.andy/modes.json</c>, plus the
-/// bookkeeping the interactive MCP offer needs.
+/// Read/modify/write access to the Plan-mode opt-ins, plus the bookkeeping the interactive MCP
+/// offer needs.
 ///
-/// Writes always land in the PROJECT file: an MCP server is configured per project
-/// (<c>.andy/mcp-servers.json</c>), so its Plan-mode grant belongs next to it and travels with the
-/// repository rather than silently applying to every workspace on the machine. The user-level file
-/// is still merged when the effective policy is computed, so a hand-written global opt-in keeps
-/// working; it simply is not what the commands and the prompt write to.
+/// Grants are PER DEVELOPER. Every read and every write goes to the USER file
+/// (<c>~/.andy/modes.json</c>). The project's <c>.andy/modes.json</c> is committed and shared, so
+/// honoring grants from it would hand Plan-mode access to every teammate who clones the repository
+/// without any of them ever seeing the opt-in prompt. Grant keys found there are ignored - which
+/// leaves the tools DENIED, the safe direction - and reported through <see cref="Diagnostics"/>
+/// rather than dropped in silence.
 ///
 /// The store never widens Plan mode by itself. It refuses to record a grant for a tool
 /// <see cref="PlanModeToolPolicy"/> classifies as mutating, and even if such an entry were written
@@ -66,11 +67,21 @@ public sealed class PlanModeGrantStore
         _policy = ModeConfigFile.LoadPolicy(_projectDirectory, _userDirectory);
     }
 
-    /// <summary>The path grants are written to.</summary>
+    /// <summary>The per-developer file grants are read from and written to.</summary>
+    public string GrantConfigPath => _userPath;
+
+    /// <summary>
+    /// The project file. It supplies NO grants; kept so diagnostics can name it and so any future
+    /// non-grant project-scoped mode setting has somewhere to live.
+    /// </summary>
     public string ProjectConfigPath => _projectPath;
 
-    /// <summary>The additional user-scoped file that is merged when reading.</summary>
-    public string UserConfigPath => _userPath;
+    /// <summary>
+    /// Warnings about project-scope grant keys that are being ignored. Empty in the normal case.
+    /// Surfaced by the interactive session at start-up and by <c>/mode grants</c>.
+    /// </summary>
+    public IReadOnlyList<string> Diagnostics =>
+        ModeConfigFile.ProjectScopeDiagnostics(_projectDirectory, _userDirectory);
 
     /// <summary>
     /// The effective policy, rebuilt after every change. <see cref="ModeToolGate"/> reads this on
@@ -203,7 +214,7 @@ public sealed class PlanModeGrantStore
             return removed;
         },
         removed => removed.Count == 0
-            ? "No matching grant found in the project config."
+            ? "No matching grant found in your user config."
             : $"Revoked {string.Join(", ", removed)}.");
 
         // A revoke that matched nothing is reported as a failure so a typo in a script surfaces
@@ -213,16 +224,23 @@ public sealed class PlanModeGrantStore
             : result;
     }
 
-    /// <summary>The effective grants from both files, for review.</summary>
+    /// <summary>
+    /// The grants in force (all user-scoped), plus any project-scope entries that are being ignored
+    /// so a committed file that is having no effect shows up in the review output.
+    /// </summary>
     public PlanModeGrantListing List()
     {
-        var project = ModeConfigFile.Load(_projectPath);
         var user = ModeConfigFile.Load(_userPath);
+        var project = ModeConfigFile.Load(_projectPath);
+        var ignored = project.PlanReadOnlyMcpServers
+            .Select(s => $"server:{s}")
+            .Concat(project.PlanReadOnlyTools)
+            .ToArray();
+
         return new PlanModeGrantListing(
-            project.PlanReadOnlyTools.ToArray(),
-            project.PlanReadOnlyMcpServers.ToArray(),
             user.PlanReadOnlyTools.ToArray(),
-            user.PlanReadOnlyMcpServers.ToArray());
+            user.PlanReadOnlyMcpServers.ToArray(),
+            ignored);
     }
 
     /// <summary>True when a server-wide grant is in force for <paramref name="serverName"/>.</summary>
@@ -259,7 +277,9 @@ public sealed class PlanModeGrantStore
             return false;
         }
 
-        var asked = ModeConfigFile.Load(_projectPath).McpPlanOptInAsked;
+        // Read from the USER file: which servers a developer has already been offered is personal, so
+        // a committed record must never suppress the prompt for a teammate who has not seen it.
+        var asked = ModeConfigFile.Load(_userPath).McpPlanOptInAsked;
         if (!asked.TryGetValue(serverName.Trim(), out var already) || already is null)
         {
             return true;
@@ -302,7 +322,7 @@ public sealed class PlanModeGrantStore
     }
 
     /// <summary>
-    /// Applies <paramref name="edit"/> to the project config, saves it, rebuilds the effective
+    /// Applies <paramref name="edit"/> to the per-developer user config, saves it, rebuilds the effective
     /// policy and notifies listeners. A write failure is reported rather than thrown: a read-only
     /// checkout must not take down the session.
     /// </summary>
@@ -313,17 +333,17 @@ public sealed class PlanModeGrantStore
         List<string> changed;
         lock (_gate)
         {
-            var config = ModeConfigFile.Load(_projectPath);
+            var config = ModeConfigFile.Load(_userPath);
             changed = edit(config);
 
             try
             {
-                config.Save(_projectPath);
+                config.Save(_userPath);
             }
             catch (Exception ex)
             {
                 return PlanModeGrantResult.Failed(
-                    $"Could not write {_projectPath}: {ex.Message}");
+                    $"Could not write {_userPath}: {ex.Message}");
             }
 
             _policy = ModeConfigFile.LoadPolicy(_projectDirectory, _userDirectory);

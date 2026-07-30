@@ -141,12 +141,13 @@ public sealed class ModeCommand : ICommand
         return sb.ToString().TrimEnd();
     }
 
-    /// <summary>The review view: which opt-ins are in force and where they are recorded.</summary>
+    /// <summary>The review view: which opt-ins are in force, where they live, and how to remove them.</summary>
     private CommandResult Grants() => RequireGrants(store =>
     {
         var listing = store.List();
         var sb = new StringBuilder();
-        sb.AppendLine("[mode] Plan-mode read-only opt-ins");
+        sb.AppendLine("[mode] Plan-mode read-only opt-ins (per developer)");
+        sb.AppendLine($"  stored in {store.GrantConfigPath}");
         sb.AppendLine();
 
         if (listing.IsEmpty)
@@ -155,40 +156,41 @@ public sealed class ModeCommand : ICommand
             sb.AppendLine("  including all MCP tools. Grant one with:");
             sb.AppendLine("    /mode allow <tool-id>");
             sb.AppendLine("    /mode allow-server <mcp-server-name>");
-            return CommandResult.CreateSuccess(sb.ToString().TrimEnd());
+        }
+        else
+        {
+            foreach (var server in listing.Servers)
+            {
+                sb.AppendLine($"    server {server}  (every tool matching {McpToolNaming.ServerToolPrefix(server)}*)");
+            }
+
+            foreach (var tool in listing.Tools)
+            {
+                sb.AppendLine($"    tool   {tool}");
+            }
+
+            sb.AppendLine();
+            sb.AppendLine("Remove one with: /mode revoke <tool-id|server-name>");
+            sb.AppendLine("Server-wide grants also cover tools that server exposes later.");
         }
 
-        AppendSection(sb, $"project ({store.ProjectConfigPath})", listing.ProjectTools, listing.ProjectServers);
-        AppendSection(sb, $"user ({store.UserConfigPath})", listing.UserTools, listing.UserServers);
-        sb.AppendLine("Remove one with: /mode revoke <tool-id|server-name>");
-        sb.AppendLine("Server-wide grants also cover tools that server exposes later.");
+        // A committed project file that is silently having no effect would be baffling, so say so.
+        if (listing.IgnoredProjectEntries.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"  IGNORED, project scope ({store.ProjectConfigPath}):");
+            foreach (var entry in listing.IgnoredProjectEntries)
+            {
+                sb.AppendLine($"    {entry}");
+            }
+
+            sb.AppendLine();
+            sb.AppendLine("  Plan-mode grants are per developer, so these grant nothing and those tools");
+            sb.AppendLine("  stay DENIED. Opt in for yourself with /mode allow / /mode allow-server.");
+        }
+
         return CommandResult.CreateSuccess(sb.ToString().TrimEnd());
     });
-
-    private static void AppendSection(
-        StringBuilder sb,
-        string title,
-        IReadOnlyList<string> tools,
-        IReadOnlyList<string> servers)
-    {
-        if (tools.Count == 0 && servers.Count == 0)
-        {
-            return;
-        }
-
-        sb.AppendLine($"  {title}:");
-        foreach (var server in servers)
-        {
-            sb.AppendLine($"    server {server}  (every tool matching {McpToolNaming.ServerToolPrefix(server)}*)");
-        }
-
-        foreach (var tool in tools)
-        {
-            sb.AppendLine($"    tool   {tool}");
-        }
-
-        sb.AppendLine();
-    }
 
     private static CommandResult Report(PlanModeGrantResult result) =>
         result.Success

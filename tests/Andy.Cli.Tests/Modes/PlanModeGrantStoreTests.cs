@@ -39,6 +39,18 @@ public sealed class PlanModeGrantStoreTests : IDisposable
 
     private PlanModeGrantStore Store() => new(_project, _user);
 
+    private void WriteUserConfig(string json)
+    {
+        Directory.CreateDirectory(Path.Combine(_user, ".andy"));
+        File.WriteAllText(ModeConfigFile.PathFor(_user), json);
+    }
+
+    private void WriteProjectConfig(string json)
+    {
+        Directory.CreateDirectory(Path.Combine(_project, ".andy"));
+        File.WriteAllText(ModeConfigFile.PathFor(_project), json);
+    }
+
     [Fact]
     public void McpToolsAreDeniedBeforeAnyOptIn()
     {
@@ -127,11 +139,9 @@ public sealed class PlanModeGrantStoreTests : IDisposable
     [Fact]
     public void AHandWrittenGrantForAMutatingToolStillHasNoEffect()
     {
-        // Defence in depth: even bypassing the store's validation by editing the file, the policy
-        // consults capability-based denials before any opt-in.
-        Directory.CreateDirectory(Path.Combine(_project, ".andy"));
-        File.WriteAllText(
-            ModeConfigFile.PathFor(_project),
+        // Defence in depth: even bypassing the store's validation by editing the user file, the
+        // policy consults capability-based denials before any opt-in.
+        WriteUserConfig(
             "{ \"planReadOnlyTools\": [\"write_file\"], \"planReadOnlyMcpServers\": [\"docs\"] }");
 
         var store = Store();
@@ -215,29 +225,129 @@ public sealed class PlanModeGrantStoreTests : IDisposable
     }
 
     [Fact]
-    public void GrantsAreWrittenToTheProjectFile()
+    public void GrantsAreWrittenToTheUserFileAndNotTheProjectFile()
     {
+        // Grants are per developer: writing them into the project would commit one developer's
+        // decision into the repository for everyone.
         var store = Store();
         store.GrantServer("docs");
+        store.GrantTools(new[] { "mcp_jira_get_issue" });
 
-        Assert.True(File.Exists(ModeConfigFile.PathFor(_project)));
+        Assert.True(File.Exists(ModeConfigFile.PathFor(_user)));
+        Assert.False(File.Exists(ModeConfigFile.PathFor(_project)));
+
         var listing = store.List();
-        Assert.Contains("docs", listing.ProjectServers);
-        Assert.Empty(listing.UserServers);
+        Assert.Contains("docs", listing.Servers);
+        Assert.Contains("mcp_jira_get_issue", listing.Tools);
+        Assert.Empty(listing.IgnoredProjectEntries);
+        Assert.Equal(ModeConfigFile.PathFor(_user), store.GrantConfigPath);
     }
 
     [Fact]
-    public void UserScopedGrantsAreMergedWhenReading()
+    public void UserScopedGrantsAreRead()
     {
-        Directory.CreateDirectory(Path.Combine(_user, ".andy"));
-        File.WriteAllText(
-            ModeConfigFile.PathFor(_user),
-            "{ \"planReadOnlyTools\": [\"mcp_global_lookup\"] }");
+        WriteUserConfig("{ \"planReadOnlyTools\": [\"mcp_global_lookup\"] }");
 
         var store = Store();
 
         Assert.True(store.CurrentPolicy.Evaluate("mcp_global_lookup", null).Allowed);
-        Assert.Contains("mcp_global_lookup", store.List().UserTools);
+        Assert.Contains("mcp_global_lookup", store.List().Tools);
+    }
+
+    [Fact]
+    public void ProjectScopeGrantsAreIgnored()
+    {
+        // The core of the per-developer rule: a committed project file must not hand Plan-mode
+        // access to a teammate who never saw the opt-in prompt.
+        WriteProjectConfig(
+            "{ \"planReadOnlyTools\": [\"mcp_docs_search\"], \"planReadOnlyMcpServers\": [\"docs\"] }");
+
+        var store = Store();
+
+        Assert.False(store.CurrentPolicy.Evaluate("mcp_docs_search", null).Allowed);
+        Assert.False(store.CurrentPolicy.Evaluate("mcp_docs_anything", null).Allowed);
+        Assert.True(store.List().IsEmpty);
+    }
+
+    [Fact]
+    public void ProjectScopeGrantsProduceADiagnostic()
+    {
+        WriteProjectConfig(
+            "{ \"planReadOnlyTools\": [\"mcp_docs_search\"], \"planReadOnlyMcpServers\": [\"docs\"] }");
+
+        var diagnostics = Store().Diagnostics;
+
+        var message = Assert.Single(diagnostics);
+        Assert.Contains("Ignoring project-scope Plan-mode grants", message);
+        Assert.Contains("per developer", message);
+        Assert.Contains("mcp_docs_search", message);
+        Assert.Contains("server:docs", message);
+        // It must point at where the grant SHOULD go.
+        Assert.Contains(ModeConfigFile.PathFor(_user), message);
+    }
+
+    [Fact]
+    public void IgnoredProjectEntriesAreListedForReview()
+    {
+        WriteProjectConfig("{ \"planReadOnlyMcpServers\": [\"docs\"] }");
+
+        var listing = Store().List();
+
+        Assert.True(listing.IsEmpty);
+        Assert.Contains("server:docs", listing.IgnoredProjectEntries);
+    }
+
+    [Fact]
+    public void AskBookkeepingIsPerDeveloperSoATeammateIsStillOffered()
+    {
+        // Developer A answered the offer; their record lives in their own user file.
+        var developerA = Store();
+        developerA.RecordOffered("docs", new[] { "mcp_docs_search" });
+        Assert.False(developerA.NeedsOffer("docs", new[] { "mcp_docs_search" }));
+
+        // Developer B clones the repo (same project directory, different home) and must still be
+        // asked - even if A's record had somehow been committed.
+        WriteProjectConfig("{ \"mcpPlanOptInAsked\": { \"docs\": [\"mcp_docs_search\"] } }");
+        var otherHome = Path.Combine(_root, "home-b");
+        Directory.CreateDirectory(otherHome);
+        var developerB = new PlanModeGrantStore(_project, otherHome);
+
+        Assert.True(developerB.NeedsOffer("docs", new[] { "mcp_docs_search" }));
+    }
+
+    [Fact]
+    public void ProjectScopeAskBookkeepingProducesItsOwnDiagnostic()
+    {
+        WriteProjectConfig("{ \"mcpPlanOptInAsked\": { \"docs\": [\"mcp_docs_search\"] } }");
+
+        var message = Assert.Single(Store().Diagnostics);
+
+        Assert.Contains("mcpPlanOptInAsked", message);
+        Assert.Contains("per developer", message);
+    }
+
+    [Fact]
+    public void ACleanProjectFileProducesNoDiagnostic()
+    {
+        Assert.Empty(Store().Diagnostics);
+
+        WriteProjectConfig("{ }");
+        Assert.Empty(Store().Diagnostics);
+    }
+
+    [Fact]
+    public void RevokeOperatesOnTheUserFile()
+    {
+        WriteProjectConfig("{ \"planReadOnlyMcpServers\": [\"docs\"] }");
+        var store = Store();
+        store.GrantServer("docs");
+        Assert.True(store.CurrentPolicy.Evaluate("mcp_docs_search", null).Allowed);
+
+        Assert.True(store.Revoke(new[] { "docs" }).Success);
+
+        Assert.False(store.CurrentPolicy.Evaluate("mcp_docs_search", null).Allowed);
+        // The project file is never rewritten by a revoke.
+        Assert.Contains("planReadOnlyMcpServers", File.ReadAllText(ModeConfigFile.PathFor(_project)));
     }
 
     [Fact]

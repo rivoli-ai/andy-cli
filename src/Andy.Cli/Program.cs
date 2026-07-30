@@ -434,6 +434,15 @@ class Program
             // The offer grants NOTHING unless the user picks one of the allow actions, and it is only
             // raised once per server unless that server later exposes a tool it has not offered.
             var mcpPlanOptIn = new Andy.Cli.Widgets.McpPlanOptInPrompt(planModeGrants);
+
+            // Plan-mode grants are per developer, so a committed project .andy/modes.json cannot
+            // supply them. When one tries to, say so rather than leaving the author wondering why
+            // their file does nothing - the tools stay denied either way.
+            foreach (var grantDiagnostic in planModeGrants.Diagnostics)
+            {
+                feed.AddMarkdownRich(ConsoleColors.WarningPrefix($"[mode] {grantDiagnostic}"));
+            }
+
             foreach (var mcpStatus in mcpToolHost.Statuses)
             {
                 if (mcpStatus.State == Andy.Cli.Mcp.McpServerConnectionState.Connected)

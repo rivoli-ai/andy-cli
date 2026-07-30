@@ -93,7 +93,12 @@ MCP tools are denied in Plan mode until opted in. When an MCP server connects,
 the TUI offers the choice (all tools from the server, or selected ones); the
 same grants are available non-interactively as `andy-cli mode allow`,
 `allow-server`, `revoke`, and `grants`. Headless and one-shot runs never prompt -
-they read the persisted grants in `.andy/modes.json`.
+they read the persisted grants.
+
+Grants are per developer and live only in `~/.andy/modes.json`. A project
+`.andy/modes.json` cannot supply them: it is committed, so it would grant access
+to teammates who never saw the prompt. Grant keys found there are ignored with a
+diagnostic, leaving those tools denied.
 
 Plan mode is enforced by a tool-permission overlay that runs ahead of the rule
 layers, so an existing allow rule (user, project, local, session, injected, or

@@ -237,6 +237,45 @@ public class ModeCommandTests
         }
 
         [Fact]
+        public void Grants_ShowsTheUserFileAsTheStorageLocation()
+        {
+            var (command, store) = Build();
+
+            var result = command.Execute(new[] { "grants" });
+
+            Assert.Contains(store.GrantConfigPath, result.Message);
+            Assert.Contains("per developer", result.Message);
+        }
+
+        [Fact]
+        public void Allow_WritesToTheUserFileOnly()
+        {
+            var (command, _) = Build();
+
+            command.Execute(new[] { "allow", "mcp_docs_search" });
+
+            Assert.True(File.Exists(ModeConfigFile.PathFor(_user)));
+            Assert.False(File.Exists(ModeConfigFile.PathFor(_project)));
+        }
+
+        [Fact]
+        public void Grants_FlagsIgnoredProjectScopeEntries()
+        {
+            Directory.CreateDirectory(Path.Combine(_project, ".andy"));
+            File.WriteAllText(
+                ModeConfigFile.PathFor(_project),
+                "{ \"planReadOnlyMcpServers\": [\"docs\"] }");
+            var (command, _) = Build();
+
+            var result = command.Execute(new[] { "grants" });
+
+            Assert.True(result.Success);
+            Assert.Contains("IGNORED, project scope", result.Message);
+            Assert.Contains("server:docs", result.Message);
+            Assert.Contains("stay DENIED", result.Message);
+        }
+
+        [Fact]
         public void Status_AdvertisesTheGrantVerbsWhenAStoreIsPresent()
         {
             var (command, _) = Build();

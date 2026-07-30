@@ -132,8 +132,11 @@ andy-cli mode allow mcp_local_files_read_note
 andy-cli mode revoke local-files
 ```
 
-Grants are stored in `.andy/modes.json` and are read-only opt-ins: they cannot
-re-enable a mutating tool, and Build mode is unaffected by them.
+Grants are per developer: they are stored in `~/.andy/modes.json` and must never
+be committed. A project `.andy/modes.json` cannot grant Plan-mode access - grant
+keys there are ignored with a diagnostic, so a teammate who never saw the prompt
+is not silently opted in on your behalf. Grants are read-only opt-ins: they
+cannot re-enable a mutating tool, and Build mode is unaffected by them.
 
 ## Commands
 

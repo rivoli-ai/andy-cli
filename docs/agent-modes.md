@@ -107,7 +107,8 @@ they read the persisted grants and otherwise stay denied.
 ### Granting without the TUI
 
 The same decisions are available as commands, for scripting or for when you already know what you
-want. They work both as slash commands in the TUI and as `andy-cli mode ...` from a shell:
+want. They work both as slash commands in the TUI and as `andy-cli mode ...` from a shell, and they
+write to your user file:
 
 ```
 andy-cli mode grants                        # review what is currently opted in
@@ -126,12 +127,15 @@ andy-cli mode revoke docs                   # remove a server-wide opt-in
   tools discovered later - that is exactly what "allow all from this server" means, and it is why
   the two are recorded separately.
 
-### The file
+### Grants are per developer
 
-Grants live in `.andy/modes.json`. The commands and the offer write the **project** file, since an
-MCP server is configured per project and its Plan-mode grant should travel with the repository. The
-same file under your home directory is also read and merged, so a hand-written global opt-in keeps
-working.
+Grants live **only** in your user file, `~/.andy/modes.json`. The offer and every `/mode` grant verb
+write there, and nothing else is read.
+
+A project `.andy/modes.json` **cannot** supply grants. This is deliberate: that file is committed, so
+honoring it would hand Plan-mode access to every teammate who clones the repository without any of
+them ever seeing the opt-in prompt. Deciding that an MCP tool is safe to run while planning is a
+judgement each developer makes for themselves.
 
 ```json
 {
@@ -141,7 +145,13 @@ working.
 }
 ```
 
-`mcpPlanOptInAsked` is bookkeeping for the "do not nag" rule above. It grants nothing.
+`mcpPlanOptInAsked` is the bookkeeping for the "do not nag" rule above. It grants nothing, and it is
+per developer too - so a teammate who has never been offered a server still gets the prompt.
+
+Never commit these keys. If a project `.andy/modes.json` does contain `planReadOnlyTools`,
+`planReadOnlyMcpServers`, or `mcpPlanOptInAsked`, they are **ignored** and Andy prints a diagnostic
+at start-up (and in `/mode grants`) naming the entries and pointing at your user file. Ignoring fails
+in the safe direction: the tools stay denied until you opt in yourself.
 
 A malformed file contributes no opt-ins - it cannot silently disable Plan mode - and never breaks
 start-up.
@@ -163,9 +173,10 @@ can never widen Plan mode past the mutation boundary.
 
 ### Reviewing and revoking
 
-`andy-cli mode grants` (or `/mode grants`) prints every opt-in in force, which file it came from,
-and how to remove it. `revoke` takes either a tool id or a server name - whichever you see in the
-listing.
+`andy-cli mode grants` (or `/mode grants`) prints every opt-in in force, the user file they are
+stored in, and how to remove one. It also lists any project-scope entries that are being ignored, so
+a committed file that is quietly doing nothing is visible rather than mysterious. `revoke` takes
+either a tool id or a server name - whichever you see in the listing - and edits your user file.
 
 ## How the enforcement is wired
 

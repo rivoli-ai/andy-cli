@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -16,8 +17,14 @@ namespace Andy.Cli.Modes;
 /// <see cref="PlanModeToolPolicy"/> classifies as mutating, and there is no switch that turns the
 /// overlay off.
 ///
-/// On-disk shape (<c>.andy/modes.json</c> in the project, and the same path under the user's home
-/// directory):
+/// Grants are PER DEVELOPER. They live only in the user file
+/// (<c>~/.andy/modes.json</c>) and are never read from the project's
+/// <c>.andy/modes.json</c>: a committed project file must not silently hand a teammate Plan-mode
+/// access to tools they were never asked about. A project file that carries grant keys is ignored
+/// with a diagnostic (see <see cref="ProjectScopeDiagnostics"/>), which fails in the safe direction -
+/// the tools stay denied until that developer opts in themselves.
+///
+/// On-disk shape of <c>~/.andy/modes.json</c>:
 /// <code>
 /// {
 ///   "planReadOnlyTools": ["mcp_docs_search"],
@@ -25,9 +32,8 @@ namespace Andy.Cli.Modes;
 ///   "mcpPlanOptInAsked": { "docs": ["mcp_docs_search", "mcp_docs_fetch"] }
 /// }
 /// </code>
-/// Both files are read and their opt-ins concatenated; a missing or malformed file contributes
-/// nothing and is never an error (a broken config must not silently disable Plan mode, and it must
-/// not break start-up either).
+/// A missing or malformed file contributes nothing and is never an error (a broken config must not
+/// silently disable Plan mode, and it must not break start-up either).
 /// </summary>
 public sealed class ModeConfigFile
 {
@@ -114,27 +120,72 @@ public sealed class ModeConfigFile
         File.WriteAllText(path, JsonSerializer.Serialize(this, WriteOptions));
     }
 
+    /// <summary>True when this config carries any per-developer grant or ask-bookkeeping key.</summary>
+    public bool HasGrantKeys =>
+        PlanReadOnlyTools.Count > 0 || PlanReadOnlyMcpServers.Count > 0 || McpPlanOptInAsked.Count > 0;
+
     /// <summary>
-    /// Builds the Plan-mode policy for a workspace by merging the project and user config files.
+    /// Builds the Plan-mode policy from the USER file only.
+    ///
+    /// <paramref name="projectDirectory"/> is accepted (and still used for
+    /// <see cref="ProjectScopeDiagnostics"/> and for any future non-grant project setting) but
+    /// contributes no grants: a project <c>.andy/modes.json</c> is committed and shared, so honoring
+    /// its grants would silently widen Plan mode for every teammate who clones the repository.
     /// </summary>
     public static PlanModeToolPolicy LoadPolicy(string projectDirectory, string? userDirectory = null)
     {
-        var tools = new List<string>();
-        var servers = new List<string>();
+        var user = Load(PathFor(userDirectory ?? DefaultUserDirectory()));
 
-        foreach (var config in new[]
-                 {
-                     Load(PathFor(projectDirectory)),
-                     Load(PathFor(userDirectory ?? DefaultUserDirectory())),
-                 })
+        return user.PlanReadOnlyTools.Count == 0 && user.PlanReadOnlyMcpServers.Count == 0
+            ? PlanModeToolPolicy.Default
+            : new PlanModeToolPolicy(user.PlanReadOnlyTools, user.PlanReadOnlyMcpServers);
+    }
+
+    /// <summary>
+    /// Diagnostics for a project <c>.andy/modes.json</c> that contains per-developer keys. Returns
+    /// an empty list when the file is absent, unreadable, or carries no such keys.
+    ///
+    /// These keys are ignored rather than honored, which is the safe direction: the affected tools
+    /// stay DENIED until this developer opts in. They are reported rather than dropped in silence so
+    /// whoever committed them finds out why they are having no effect.
+    /// </summary>
+    public static IReadOnlyList<string> ProjectScopeDiagnostics(
+        string projectDirectory,
+        string? userDirectory = null)
+    {
+        var projectPath = PathFor(projectDirectory);
+        var project = Load(projectPath);
+        if (!project.HasGrantKeys)
         {
-            tools.AddRange(config.PlanReadOnlyTools);
-            servers.AddRange(config.PlanReadOnlyMcpServers);
+            return Array.Empty<string>();
         }
 
-        return tools.Count == 0 && servers.Count == 0
-            ? PlanModeToolPolicy.Default
-            : new PlanModeToolPolicy(tools, servers);
+        var userPath = PathFor(userDirectory ?? DefaultUserDirectory());
+        var messages = new List<string>();
+
+        if (project.PlanReadOnlyTools.Count > 0 || project.PlanReadOnlyMcpServers.Count > 0)
+        {
+            var entries = project.PlanReadOnlyMcpServers
+                .Select(s => $"server:{s}")
+                .Concat(project.PlanReadOnlyTools)
+                .ToList();
+            messages.Add(
+                $"Ignoring project-scope Plan-mode grants in {projectPath} ({string.Join(", ", entries)}). "
+                + "Plan-mode grants are per developer, so a committed project file cannot grant tool "
+                + "access to a teammate who never saw the opt-in prompt. Those tools stay DENIED in "
+                + $"Plan mode. To grant them for yourself, use '/mode allow-server <name>' or "
+                + $"'/mode allow <tool-id>', which write to {userPath}.");
+        }
+
+        if (project.McpPlanOptInAsked.Count > 0)
+        {
+            messages.Add(
+                $"Ignoring project-scope 'mcpPlanOptInAsked' in {projectPath}. Which MCP servers you "
+                + "have already been offered is per developer, so a committed record must not suppress "
+                + "the opt-in prompt for a teammate who has never seen it.");
+        }
+
+        return messages;
     }
 
     /// <summary>The config path inside <paramref name="directory"/>.</summary>

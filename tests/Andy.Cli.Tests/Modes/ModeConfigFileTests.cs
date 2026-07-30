@@ -49,14 +49,16 @@ public sealed class ModeConfigFileTests : IDisposable
     }
 
     [Fact]
-    public void ProjectAndUserListsAreMerged()
+    public void OnlyTheUserListIsHonoured()
     {
+        // Grants are per developer. A project file cannot contribute, because it is committed and
+        // would grant access to teammates who never saw the opt-in prompt.
         WriteProject("{ \"planReadOnlyTools\": [\"mcp__docs__search\"] }");
         WriteUser("{ \"planReadOnlyTools\": [\"mcp__jira__get_issue\"] }");
 
         var policy = ModeConfigFile.LoadPolicy(_project, _user);
 
-        Assert.True(policy.Evaluate("mcp__docs__search", null).Allowed);
+        Assert.False(policy.Evaluate("mcp__docs__search", null).Allowed);
         Assert.True(policy.Evaluate("mcp__jira__get_issue", null).Allowed);
         Assert.False(policy.Evaluate("mcp__jira__create_issue", null).Allowed);
     }
@@ -75,12 +77,52 @@ public sealed class ModeConfigFileTests : IDisposable
     [Fact]
     public void OptInCannotOverrideTheBuiltInMutatingClassification()
     {
-        WriteProject("{ \"planReadOnlyTools\": [\"write_file\", \"execute_command\"] }");
+        WriteUser("{ \"planReadOnlyTools\": [\"write_file\", \"execute_command\"] }");
 
         var policy = ModeConfigFile.LoadPolicy(_project, _user);
 
         Assert.False(policy.Evaluate("write_file", null).Allowed);
         Assert.False(policy.Evaluate("execute_command", null).Allowed);
+    }
+
+    [Fact]
+    public void MalformedUserJson_LeavesPlanModeAtItsFailClosedDefault()
+    {
+        WriteUser("{ this is not json");
+
+        var policy = ModeConfigFile.LoadPolicy(_project, _user);
+
+        Assert.Empty(policy.AdditionalReadOnlyTools);
+        Assert.False(policy.Evaluate("mcp__docs__search", null).Allowed);
+    }
+
+    [Fact]
+    public void ProjectScopeDiagnostics_AreEmptyForAFileWithNoGrantKeys()
+    {
+        WriteProject("{ }");
+
+        Assert.Empty(ModeConfigFile.ProjectScopeDiagnostics(_project, _user));
+    }
+
+    [Fact]
+    public void ProjectScopeDiagnostics_ReportGrantKeysAndWhereTheyBelong()
+    {
+        WriteProject("{ \"planReadOnlyMcpServers\": [\"docs\"] }");
+
+        var message = Assert.Single(ModeConfigFile.ProjectScopeDiagnostics(_project, _user));
+
+        Assert.Contains("per developer", message);
+        Assert.Contains("DENIED", message);
+        Assert.Contains(ModeConfigFile.PathFor(_user), message);
+    }
+
+    [Fact]
+    public void HasGrantKeys_DetectsEachPerDeveloperKey()
+    {
+        Assert.False(new ModeConfigFile().HasGrantKeys);
+        Assert.True(new ModeConfigFile { PlanReadOnlyTools = { "a" } }.HasGrantKeys);
+        Assert.True(new ModeConfigFile { PlanReadOnlyMcpServers = { "a" } }.HasGrantKeys);
+        Assert.True(new ModeConfigFile { McpPlanOptInAsked = { ["a"] = new() } }.HasGrantKeys);
     }
 
     [Fact]
