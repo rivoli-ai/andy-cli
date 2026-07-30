@@ -308,6 +308,12 @@ class Program
             var inlineCommandHelp = new InlineCommandHelp();
             inlineCommandHelp.SetCommands(Andy.Cli.Commands.SlashCommandCatalog.CreateInlineHelpCommands());
 
+            // @file mentions (issue #277): the picker completes workspace paths in the composer and
+            // the resolver reads their content at submission time into structured prompt parts.
+            var fileMentions = new Andy.Cli.Services.FileMentions.FileMentionSession(
+                Andy.Cli.Services.WorkingDirectoryTracker.Instance.Current);
+            var fileMentionMenu = new Andy.Cli.Widgets.FileMentionMenu(fileMentions.Search);
+
             // Inline tool-approval prompt (issue #222): permission requests take over the prompt
             // area instead of a modal overlay, so the transcript stays visible while deciding.
             var inlineApproval = new Andy.Cli.Widgets.InlineApprovalPrompt();
@@ -1253,7 +1259,21 @@ class Program
                                 break;
                             }
 
-                            await service.ProcessMessageAsync(currentMessage, enableStreaming: false);
+                            // Resolve @file mentions now rather than when they were typed, so the
+                            // model sees the file as it is at send time. Attachments become extra
+                            // message parts; the prompt text itself is left exactly as typed.
+                            var resolvedPrompt = await fileMentions.ResolveAsync(currentMessage);
+                            var resolutionNote = Andy.Cli.Services.FileMentions.FileMentionSession
+                                .DescribeResolution(resolvedPrompt);
+                            if (resolutionNote is not null)
+                            {
+                                feed.AddMarkdownRich(resolutionNote);
+                            }
+
+                            await service.ProcessMessageAsync(
+                                resolvedPrompt.ComposedText,
+                                enableStreaming: false,
+                                structuredParts: resolvedPrompt.Parts);
                             undoManager?.CompleteTurn(undoTurn);
 
                             // Persist the transcript after every completed turn so the
@@ -1402,6 +1422,14 @@ class Program
 
                     if (k.Key == ConsoleKey.Escape)
                     {
+                        // Dismiss the @file picker first: Escape there means "stop suggesting",
+                        // not "leave the application".
+                        if (fileMentionMenu.IsOpen)
+                        {
+                            fileMentionMenu.Dismiss();
+                            return;
+                        }
+
                         // If command palette is open, close it first
                         if (commandPalette.IsOpen)
                         {
@@ -1550,6 +1578,29 @@ class Program
                         return;
                     }
 
+                    // The @file picker owns navigation/accept keys while it is open, so Enter
+                    // completes the mention instead of submitting and the arrows move the
+                    // highlight instead of the caret or the prompt history.
+                    if (fileMentionMenu.HandlesKey(k))
+                    {
+                        if (k.Key == ConsoleKey.UpArrow)
+                        {
+                            fileMentionMenu.MoveSelection(-1);
+                        }
+                        else if (k.Key == ConsoleKey.DownArrow)
+                        {
+                            fileMentionMenu.MoveSelection(1);
+                        }
+                        else if (fileMentionMenu.BuildCompletion() is Andy.Cli.Widgets.MentionCompletion completion)
+                        {
+                            fileMentionMenu.RecordAccepted();
+                            prompt.ReplaceRange(completion.Start, completion.Length, completion.Text, completion.NewCursor);
+                            fileMentionMenu.Update(prompt.Text, prompt.CursorPosition);
+                            feed.SnapToBottom();
+                        }
+                        return;
+                    }
+
                     // Handle prompt history navigation when in PromptHistory scroll mode
                     if (scrollMode == ScrollMode.PromptHistory && promptHistory.Count > 0)
                     {
@@ -1609,6 +1660,7 @@ class Program
                     // Avoid mapping regular alphanumeric keys to actions
                     var textBeforeKey = prompt.Text;
                     var submitted = prompt.OnKey(k);
+                    fileMentionMenu.Update(prompt.Text, prompt.CursorPosition);
                     // If the keystroke edited the prompt text (typing, paste, backspace,
                     // delete, etc.), snap the feed back to the bottom where the prompt
                     // lives. Pure navigation/scroll keys (arrows, Home/End, PgUp/PgDn,
@@ -2166,6 +2218,12 @@ class Program
                     // Slash-command help is suppressed while an inline approval is pending.
                     inlineCommandHelp.UpdateFilter(prompt.Text);
                     int helpH = inlineApproval.IsActive ? 0 : inlineCommandHelp.GetHeight();
+                    // The @file picker stacks under the slash-command help, in the same reserved
+                    // strip between the prompt and the status line. Refreshing it here as well as
+                    // in the key handler keeps it correct after paths that replace the prompt text
+                    // wholesale (history recall, queued-message editing).
+                    fileMentionMenu.Update(prompt.Text, prompt.CursorPosition);
+                    int mentionH = inlineApproval.IsActive ? 0 : fileMentionMenu.GetHeight();
 
                     // Keep the prompt's wrap width in sync with its render width so soft-wrapping,
                     // height measurement and cursor positioning all agree. Render width below is
@@ -2183,7 +2241,7 @@ class Program
 
                     // Position prompt and help from the bottom up (no gaps)
                     // Layout from bottom: status line(1) + help + prompt
-                    int promptY = Math.Max(3, viewport.Height - bottomReserved - helpH - promptH);
+                    int promptY = Math.Max(3, viewport.Height - bottomReserved - helpH - mentionH - promptH);
                     int helpY = promptY + promptH;
 
                     // Feed fills the space from header to prompt
@@ -2206,6 +2264,12 @@ class Program
                     if (helpH > 0)
                     {
                         inlineCommandHelp.Render(2, helpY, Math.Max(1, viewport.Width - 4), baseDl, wb);
+                    }
+
+                    // Render the @file picker below the prompt (and below slash help when both show)
+                    if (mentionH > 0)
+                    {
+                        fileMentionMenu.Render(2, helpY + helpH, Math.Max(1, viewport.Width - 4), baseDl, wb);
                     }
 
                     // Draw scroll mode indicators in left margin

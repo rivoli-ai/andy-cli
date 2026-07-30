@@ -51,11 +51,32 @@ namespace Andy.Cli.Widgets
         public void SetWrapWidth(int innerWidth) { _wrapWidth = innerWidth; }
         /// <summary>Current prompt text.</summary>
         public string Text => _text;
+        /// <summary>
+        /// Caret position as a character index into <see cref="Text"/>. Exposed so features that
+        /// need cursor-aware behaviour (such as the @-mention picker) can reason about the token
+        /// being edited without duplicating the buffer.
+        /// </summary>
+        public int CursorPosition => _cursor;
         /// <summary>Set the prompt text and move cursor to end.</summary>
         public void SetText(string text)
         {
             _text = text ?? string.Empty;
             _cursor = _text.Length;
+        }
+        /// <summary>
+        /// Replace <paramref name="length"/> characters starting at <paramref name="start"/> with
+        /// <paramref name="replacement"/> and place the caret at <paramref name="newCursor"/>
+        /// (default: just after the inserted text). Out-of-range arguments are clamped, and the
+        /// rest of the buffer - including text on other lines - is left untouched, so a completion
+        /// accepted mid-prompt does not disturb the surrounding multiline content.
+        /// </summary>
+        public void ReplaceRange(int start, int length, string replacement, int? newCursor = null)
+        {
+            replacement ??= string.Empty;
+            start = Math.Clamp(start, 0, _text.Length);
+            length = Math.Clamp(length, 0, _text.Length - start);
+            _text = _text.Remove(start, length).Insert(start, replacement);
+            _cursor = Math.Clamp(newCursor ?? (start + replacement.Length), 0, _text.Length);
         }
         /// <summary>Compute the terminal 1-based cursor column and row for the caret, if terminal cursor is enabled.</summary>
         public bool TryGetTerminalCursor(out int col1, out int row1)
