@@ -124,6 +124,19 @@ and built-in names cannot be redefined. See
 [Markdown slash commands](markdown-commands.md) for the frontmatter schema,
 argument quoting rules, and the security limitations (no shell interpolation, no
 permission or tool escalation, enforced size limits).
+### Shell escape
+
+| Command | Behavior |
+| --- | --- |
+| `!` (at an empty prompt) | Switch the composer to shell mode. |
+| `/attach` | List the recent shell-mode commands whose output can be attached. |
+| `/attach <n>` | Insert that command's redacted output into the prompt. |
+
+Shell-mode commands run through the same permission gate, working-directory
+tracker, timeout, redaction, and output limits as the model's `execute_command`
+tool. Output is never sent to the model unless you attach it. See
+[Interactive shell escape](shell-escape.md) for the security model and the
+`ShellEscape:Enabled` / `ANDY_SHELL_ESCAPE` disable switches.
 
 ### Themes and general commands
 
@@ -167,7 +180,10 @@ troubleshooting.
 | `Ctrl+A` / `Ctrl+E` | Move to the start/end of the current line. |
 | `Home` / `End` | Move to the line edge; with Control, move to the entire prompt edge. |
 | `Ctrl+K` / `Ctrl+U` | Delete to the end/start of the current line. |
-| `Esc` | Close the active palette/permission manager, otherwise open exit confirmation. |
+| `!` | At offset zero on an empty prompt, enter shell mode. Elsewhere it is an ordinary character. |
+| `Ctrl+C` | Cancel the running shell-mode command. With nothing running it keeps its usual meaning. |
+| `Esc` | Leave shell mode on an empty shell prompt; otherwise close the active palette/permission manager, otherwise open exit confirmation. |
+| `Backspace` | On an empty shell prompt, leave shell mode. |
 | `Ctrl+D` | Open exit confirmation. |
 | `Ctrl+X` | Edit the current prompt in the external editor (`$VISUAL`, then `$EDITOR`). |
 

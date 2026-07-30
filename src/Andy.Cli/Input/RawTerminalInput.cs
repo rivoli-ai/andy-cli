@@ -241,11 +241,25 @@ public sealed class RawTerminalInput : IDisposable, Andy.Cli.Editor.ISuspendable
         // While suspended (an external editor owns the TTY, issue #287) the saved settings
         // are already back in place and the Ctrl+C belongs to the child. Tearing down here
         // would latch _restored and permanently disable Resume, leaving the CLI alive with
-        // dead input. The suspend scope absorbs the cancel instead.
+        // dead input. The suspend scope absorbs the cancel instead. Checked FIRST: when the
+        // editor owns the terminal nothing else may claim the signal.
         lock (_lifecycle)
         {
             if (_suspended) return;
         }
+
+        // Ctrl+C while something interruptible is running (a user-invoked shell command, #286)
+        // must cancel THAT and leave the app alive. Restoring the terminal here would drop it out
+        // of raw mode for the rest of the session, so the next frame would paint into a cooked
+        // terminal - the "corrupted TUI" the feature must not cause. Suppressing termination is
+        // likewise required, or the runtime kills the process the moment the handler returns.
+        if (InterruptDispatcher.Instance.Dispatch())
+        {
+            e.Cancel = true;
+            return;
+        }
+
+
         RestoreTerminal();
     }
 

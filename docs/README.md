@@ -33,6 +33,8 @@ linked below.
   merge semantics, environment substitution, diagnostics, and secret redaction.
 - [Migrating to andy.jsonc](configuration-migration.md) - Moving appsettings,
   MCP, theme, session and environment settings into the layered configuration.
+- [Interactive shell escape](shell-escape.md) - The `!` composer mode, its security
+  model (permission gate, cancellation, redaction, auditing), and how to disable it.
 
 ## Headless runtime
 

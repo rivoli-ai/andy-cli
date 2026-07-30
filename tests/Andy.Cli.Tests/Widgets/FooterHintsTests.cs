@@ -41,6 +41,28 @@ public class FooterHintsTests
     }
 
     [Fact]
+    public void ShellMode_AdvertisesHowToLeaveAndHowToStopACommand()
+    {
+        // Issue #286: in shell mode Escape no longer means "quit" on an empty prompt, and Ctrl+C
+        // stops the command rather than the app, so both need saying.
+        var hints = FooterHints.Build(promptHistoryMode: false, toolOutputExpanded: false,
+            mouseOn: false, shellMode: true);
+
+        Assert.Contains(hints, h => h.key == "ESC" && h.action == "Leave shell mode");
+        Assert.Contains(hints, h => h.key == "Ctrl+C" && h.action == "Cancel command");
+        Assert.Contains(hints, h => h.action == "Shell mode");
+        Assert.DoesNotContain(hints, h => h.action == "Quit");
+    }
+
+    [Fact]
+    public void ShellModeDefaultsOff_SoTheOrdinaryHintsAreUnchanged()
+    {
+        var hints = FooterHints.Build(promptHistoryMode: false, toolOutputExpanded: false, mouseOn: false);
+
+        Assert.Contains(hints, h => h.key == "ESC" && h.action == "Quit");
+    }
+
+    [Fact]
     public void ToolHintReflectsExpandState()
     {
         Assert.Contains(FooterHints.Build(false, true, true), h => h.action == "Collapse output");

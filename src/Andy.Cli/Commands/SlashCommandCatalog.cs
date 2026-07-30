@@ -34,6 +34,7 @@ public static class SlashCommandCatalog
         new InlineCommandHelp.CommandInfo { Name = "session", Description = "Export, import, fork, rename, and measure saved sessions", Aliases = Array.Empty<string>() },
         new InlineCommandHelp.CommandInfo { Name = "undo", Description = "Revert the file changes made by the last turn", Aliases = Array.Empty<string>() },
         new InlineCommandHelp.CommandInfo { Name = "redo", Description = "Reapply the turn reverted by the last /undo", Aliases = Array.Empty<string>() },
+        new InlineCommandHelp.CommandInfo { Name = "attach", Description = "Attach output of a shell-mode (!) command to your next prompt", Aliases = Array.Empty<string>() },
         new InlineCommandHelp.CommandInfo { Name = "help", Description = "Show help information", Aliases = new[] { "?" } },
         new InlineCommandHelp.CommandInfo { Name = "exit", Description = "Exit the application", Aliases = new[] { "quit", "bye" } }
     };
