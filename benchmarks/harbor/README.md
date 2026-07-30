@@ -9,6 +9,7 @@ Andy's headless runtime, and leaves these artifacts in the Harbor agent logs:
 - `andy-events.jsonl` - structured Andy event stream
 - `andy-stderr.txt` - diagnostics from the CLI
 - `andy-final.txt` - final model response, when the run succeeds
+- `andy-budget.json` - resolved Harbor, CLI, and Engine deadlines
 
 The bundled smoke dataset contains two isolated .NET 8 repair tasks with hidden,
 deterministic verifiers. It is intended as a fast harness regression gate before
@@ -52,6 +53,14 @@ On 2026-07-28, Andy completed a 30-task Terminal-Bench 2 sample with 10 passes,
 timeout; `overfull-hbox` still passed its verifier from the persisted workspace.
 See the
 [full configuration and per-task results](results/terminal-bench-30-2026-07-28.md).
+
+As of 2026-07-29, scored Terminal-Bench runs resolve each task's effective
+Harbor timeout from the trial config and cached task package. The adapter
+reserves at least 5% (and 30 seconds) for Harbor cleanup, then at least 3% (and
+5 seconds) for CLI cleanup. It fails closed when that task deadline cannot be
+resolved, records all three deadlines in `andy-budget.json` and Harbor metadata,
+and defaults to 150 total turns in 50-turn continuation windows with an
+8192-token response budget.
 
 ## Prerequisites
 
@@ -117,8 +126,14 @@ PYTHONPATH="$PWD" harbor run \
 Useful adapter overrides are available through Harbor's `--agent-kwarg` option:
 
 ```bash
---agent-kwarg max_iterations=150 --agent-kwarg timeout_seconds=1200
+--agent-kwarg max_iterations=150 \
+--agent-kwarg max_output_tokens=8192 \
+--agent-kwarg continuation_window_iterations=50 \
+--agent-kwarg timeout_seconds=1200
 ```
+
+An explicit `timeout_seconds` only lowers the derived CLI deadline; it never
+extends the task's Harbor deadline.
 
 Set `ANDY_WORKSPACE_ROOT` with `--agent-env` only for task images whose Docker
 working directory is not the repository to modify. Otherwise the adapter uses
@@ -171,6 +186,14 @@ configuration.
 Start with one task and one concurrent trial while validating a new provider or
 model. Public suites can be expensive and execute untrusted model-generated code;
 keep Harbor's container isolation enabled.
+
+## Completion summary (2026-07-29)
+
+- Derived nested deadlines from Harbor's effective per-task timeout.
+- Added bounded continuation and output-token settings to generated headless
+  configs.
+- Persisted deadline metadata and required exact task timeout resolution for
+  scored Terminal-Bench runs.
 
 ## Adapter checks
 

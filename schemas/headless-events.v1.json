@@ -26,6 +26,7 @@
         "tool_call_finished",
         "tool_usage_audit",
         "required_action_verification",
+        "agent_progress",
         "output_written",
         "error",
         "finished"
@@ -145,6 +146,21 @@
         }
       }
     },
+    "agent_progress": {
+      "type": "object",
+      "description": "Bounded Engine lifecycle signal. Contains counters and machine-readable reasons only; never hidden reasoning or raw model content.",
+      "required": ["stage", "window", "total_turns"],
+      "properties": {
+        "stage": { "type": "string" },
+        "window": { "type": "integer", "minimum": 1 },
+        "total_turns": { "type": "integer", "minimum": 0 },
+        "stop_reason": { "type": "string" },
+        "finish_reason": { "type": "string" },
+        "max_output_tokens": { "type": "integer", "minimum": 1 },
+        "consecutive_output_limit_responses": { "type": "integer", "minimum": 0 },
+        "total_output_limit_responses": { "type": "integer", "minimum": 0 }
+      }
+    },
     "output_written": {
       "type": "object",
       "required": ["path", "bytes"],
@@ -167,7 +183,8 @@
       "properties": {
         "exit_code":    { "type": "integer", "minimum": 0, "maximum": 5, "description": "Mirrors the process exit code (HeadlessExitCode in src/Andy.Cli/HeadlessConfig)." },
         "duration_ms":  { "type": "integer", "minimum": 0 },
-        "iterations":   { "type": "integer", "minimum": 0, "description": "Number of LLM/tool turns executed before terminating." }
+        "iterations":   { "type": "integer", "minimum": 0, "description": "Number of LLM/tool turns executed before terminating." },
+        "stop_reason": { "type": "string", "description": "Machine-readable Engine or host stop reason when the run did not complete normally." }
       }
     }
   }

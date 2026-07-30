@@ -44,6 +44,20 @@ public static class HeadlessConfigValidator
     // field names, env-var NAMES, and schemes appear in messages.
     public static string? Validate(HeadlessRunConfig config)
     {
+        if (config.Limits.ContinuationWindowIterations is { } windowIterations &&
+            windowIterations > config.Limits.MaxIterations)
+        {
+            return "limits.continuation_window_iterations must not exceed "
+                + "limits.max_iterations.";
+        }
+
+        if (config.Limits.EngineTimeoutSeconds is { } engineTimeoutSeconds &&
+            engineTimeoutSeconds >= config.Limits.TimeoutSeconds)
+        {
+            return "limits.engine_timeout_seconds must be smaller than "
+                + "limits.timeout_seconds so the agent can finalize before CLI cleanup.";
+        }
+
         var apiKeyRef = config.Model.ApiKeyRef;
         if (!string.IsNullOrEmpty(apiKeyRef)
             && !TryParseEnvRef(apiKeyRef, out _, out var apiErr))

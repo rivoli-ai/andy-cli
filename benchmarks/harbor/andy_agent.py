@@ -16,7 +16,9 @@ from harbor.models.agent.context import AgentContext
 from .adapter_support import (
     SYSTEM_DEPENDENCY_INSTALL_COMMAND,
     build_headless_config,
+    compute_agent_budgets,
     parse_model_name,
+    resolve_harbor_agent_timeout,
 )
 
 
@@ -36,17 +38,34 @@ class AndyCli(BaseInstalledAgent):
         self,
         logs_dir: Path,
         *args: object,
-        max_iterations: int = 100,
-        timeout_seconds: int = 900,
+        max_iterations: int = 150,
+        timeout_seconds: int | None = None,
+        max_output_tokens: int = 8192,
+        continuation_window_iterations: int = 50,
+        require_harbor_timeout: bool | str = False,
         **kwargs: object,
     ) -> None:
         super().__init__(logs_dir, *args, **kwargs)
         if max_iterations < 1:
             raise ValueError("max_iterations must be at least 1")
-        if timeout_seconds < 1:
+        if timeout_seconds is not None and timeout_seconds < 1:
             raise ValueError("timeout_seconds must be at least 1")
+        if max_output_tokens < 256:
+            raise ValueError("max_output_tokens must be at least 256")
+        if not 1 <= continuation_window_iterations <= max_iterations:
+            raise ValueError(
+                "continuation_window_iterations must be between 1 and max_iterations"
+            )
         self._max_iterations = max_iterations
         self._timeout_seconds = timeout_seconds
+        self._max_output_tokens = max_output_tokens
+        self._continuation_window_iterations = continuation_window_iterations
+        self._require_harbor_timeout = (
+            require_harbor_timeout
+            if isinstance(require_harbor_timeout, bool)
+            else require_harbor_timeout.strip().lower() in {"1", "true", "yes", "on"}
+        )
+        self._budgets = None
 
     @staticmethod
     @override
@@ -97,9 +116,15 @@ class AndyCli(BaseInstalledAgent):
 
     @override
     def populate_context_post_run(self, context: AgentContext) -> None:
-        # Andy's v1 event stream does not yet expose token or cost totals.
-        # The raw event stream remains available in the Harbor trial logs.
-        return None
+        if self._budgets is not None:
+            context.metadata = {
+                **(context.metadata or {}),
+                "andy_budgets": {
+                    "harbor_timeout_seconds": self._budgets.harbor_timeout_seconds,
+                    "cli_timeout_seconds": self._budgets.cli_timeout_seconds,
+                    "engine_timeout_seconds": self._budgets.engine_timeout_seconds,
+                },
+            }
 
     async def _workspace_root(self, environment: BaseEnvironment) -> str:
         configured = self._get_env("ANDY_WORKSPACE_ROOT")
@@ -134,6 +159,17 @@ class AndyCli(BaseInstalledAgent):
             raise ValueError(f"{model.api_key_env} must be set in the environment")
 
         workspace_root = await self._workspace_root(environment)
+        harbor_timeout = resolve_harbor_agent_timeout(self.logs_dir)
+        if harbor_timeout is None:
+            if self._require_harbor_timeout:
+                raise ValueError(
+                    "Could not resolve Harbor's effective agent timeout for this scored run"
+                )
+            harbor_timeout = float((self._timeout_seconds or 900) + 60)
+        self._budgets = compute_agent_budgets(
+            harbor_timeout,
+            self._timeout_seconds,
+        )
         config = build_headless_config(
             run_id=str(uuid4()),
             task_instruction=instruction,
@@ -141,12 +177,32 @@ class AndyCli(BaseInstalledAgent):
             workspace_root=workspace_root,
             output_file=self._OUTPUT_FILE,
             max_iterations=self._max_iterations,
-            timeout_seconds=self._timeout_seconds,
+            timeout_seconds=self._budgets.cli_timeout_seconds,
+            max_output_tokens=self._max_output_tokens,
+            continuation_window_iterations=self._continuation_window_iterations,
+            engine_timeout_seconds=self._budgets.engine_timeout_seconds,
         )
 
         local_config = self.logs_dir / "andy-headless-config.json"
         local_config.parent.mkdir(parents=True, exist_ok=True)
         local_config.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+        (self.logs_dir / "andy-budget.json").write_text(
+            json.dumps(
+                {
+                    "mode": (
+                        "scored"
+                        if self._require_harbor_timeout
+                        else "diagnostic"
+                    ),
+                    "harbor_timeout_seconds": self._budgets.harbor_timeout_seconds,
+                    "cli_timeout_seconds": self._budgets.cli_timeout_seconds,
+                    "engine_timeout_seconds": self._budgets.engine_timeout_seconds,
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         await environment.upload_file(local_config, self._REMOTE_CONFIG)
 
         command_prefix = ""
@@ -174,7 +230,7 @@ class AndyCli(BaseInstalledAgent):
         await self.exec_as_agent(
             environment,
             cwd=workspace_root,
-            timeout_sec=self._timeout_seconds + 30,
+            timeout_sec=self._budgets.harbor_timeout_seconds,
             command=(
                 command_prefix
                 + "mkdir -p /logs/agent && "

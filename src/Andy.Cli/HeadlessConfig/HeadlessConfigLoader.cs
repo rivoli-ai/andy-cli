@@ -121,6 +121,8 @@ public static class HeadlessConfigLoader
             return HeadlessConfigLoadResult.Fail("Config deserialization returned null.");
         }
 
+        config = NormalizeDefaults(config);
+
         // rivoli-ai/andy-cli#180: cross-field and runtime-support checks the JSON
         // Schema cannot express (api_key_ref scheme, reserved env-var protection,
         // FIFO-requires-path). Fail fast with a clear, secret-free message.
@@ -131,6 +133,54 @@ public static class HeadlessConfigLoader
         }
 
         return HeadlessConfigLoadResult.Ok(config);
+    }
+
+    private static HeadlessRunConfig NormalizeDefaults(HeadlessRunConfig config)
+    {
+        // The source generator initializes every init-only property in one object
+        // initializer. An omitted JSON member therefore supplies default(T) and
+        // overwrites the model's property initializer. Restore schema defaults at
+        // this boundary; the schema has already rejected explicit zero/null values.
+        var transcriptDefaults = new HeadlessTranscript();
+        var transcript = config.Transcript is null
+            ? null
+            : config.Transcript with
+            {
+                MaxRecordBytes = config.Transcript.MaxRecordBytes == 0
+                    ? transcriptDefaults.MaxRecordBytes
+                    : config.Transcript.MaxRecordBytes,
+                MaxRunBytes = config.Transcript.MaxRunBytes == 0
+                    ? transcriptDefaults.MaxRunBytes
+                    : config.Transcript.MaxRunBytes,
+                MaxAgeDays = config.Transcript.MaxAgeDays == 0
+                    ? transcriptDefaults.MaxAgeDays
+                    : config.Transcript.MaxAgeDays,
+                MaxFiles = config.Transcript.MaxFiles == 0
+                    ? transcriptDefaults.MaxFiles
+                    : config.Transcript.MaxFiles,
+                MaxTotalBytes = config.Transcript.MaxTotalBytes == 0
+                    ? transcriptDefaults.MaxTotalBytes
+                    : config.Transcript.MaxTotalBytes,
+                RedactEnvVars = config.Transcript.RedactEnvVars ?? [],
+            };
+
+        var requiredActions = (config.RequiredActions ?? [])
+            .Select(requirement => requirement.AtLeast == 0
+                ? requirement with { AtLeast = 1 }
+                : requirement)
+            .ToArray();
+
+        return config with
+        {
+            Transcript = transcript,
+            Permissions = config.Permissions is null
+                ? null
+                : config.Permissions with
+                {
+                    AllowedTools = config.Permissions.AllowedTools ?? [],
+                },
+            RequiredActions = requiredActions,
+        };
     }
 
     // Fields that were part of an earlier v1 draft but are rejected now. Kept as a

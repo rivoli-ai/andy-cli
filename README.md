@@ -365,7 +365,9 @@ for exercising the published CLI in isolated containers. See
 archive publishing, retained run artifacts, and Terminal-Bench runs. The adapter
 has completed a 30-task Terminal-Bench 2 sample with `xiaomi/mimo-v2.5`,
 passing 10 for an aggregate mean reward of 0.333. The detailed report records
-the exact task set, timeout outcomes, and effective concurrency.
+the exact task set, timeout outcomes, and effective concurrency. Follow-up
+hardening derives nested Harbor/CLI/Engine deadlines, uses bounded continuation
+windows, and records progress and terminal stop reasons for timeout diagnosis.
 
 ### Building
 

@@ -42,6 +42,42 @@ public class HeadlessV1ContractTests
         Assert.Equal(50, config.Limits.MaxIterations);
     }
 
+    [Fact]
+    public void SemanticValidation_RejectsWindowAboveGlobalTurnLimit()
+    {
+        var config = new HeadlessRunConfig
+        {
+            Limits = new HeadlessLimits
+            {
+                MaxIterations = 50,
+                TimeoutSeconds = 300,
+                ContinuationWindowIterations = 51,
+            },
+        };
+
+        var error = HeadlessConfigValidator.Validate(config);
+
+        Assert.Contains("continuation_window_iterations", error);
+    }
+
+    [Fact]
+    public void SemanticValidation_RejectsEngineDeadlineWithoutCleanupMargin()
+    {
+        var config = new HeadlessRunConfig
+        {
+            Limits = new HeadlessLimits
+            {
+                MaxIterations = 50,
+                TimeoutSeconds = 300,
+                EngineTimeoutSeconds = 300,
+            },
+        };
+
+        var error = HeadlessConfigValidator.Validate(config);
+
+        Assert.Contains("engine_timeout_seconds", error);
+    }
+
     // ---- policy_id / boundaries: removed, must be rejected --------------------
 
     [Fact]
@@ -148,6 +184,7 @@ public class HeadlessV1ContractTests
         var result = await LoadJsonAsync(json);
 
         Assert.True(result.IsSuccess, result.Error);
+        Assert.Empty(result.Config!.RequiredActions);
     }
 
     // ---- env_vars reserved-name protection -----------------------------------
@@ -254,6 +291,21 @@ public class HeadlessV1ContractTests
         var requirement = Assert.Single(result.Config!.RequiredActions);
         Assert.Equal("dotnet test", requirement.CommandEquals);
         Assert.Equal(1, requirement.AtLeast);
+    }
+
+    [Fact]
+    public async Task Loader_OmittedCollectionAndActionDefaults_AreApplied()
+    {
+        var json = BaseConfig.Replace(
+            "\"tools\": [],",
+            "\"tools\": [], \"permissions\": {}, "
+                + "\"required_actions\": [{ \"tool_name\": \"read_file\" }],");
+
+        var result = await LoadJsonAsync(json);
+
+        Assert.True(result.IsSuccess, result.Error);
+        Assert.Empty(result.Config!.Permissions!.AllowedTools);
+        Assert.Equal(1, Assert.Single(result.Config.RequiredActions).AtLeast);
     }
 
     [Fact]

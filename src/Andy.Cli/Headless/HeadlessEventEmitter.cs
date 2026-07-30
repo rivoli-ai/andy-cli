@@ -162,11 +162,47 @@ public sealed class HeadlessEventEmitter : IDisposable
     public void EmitError(string message, bool fatal)
         => Write(HeadlessEventKind.Error, new JsonObject { ["message"] = message, ["fatal"] = fatal });
 
-    public void EmitFinished(int exitCode, long durationMs, int iterations)
+    public void EmitAgentProgress(
+        string stage,
+        int window,
+        int totalTurns,
+        string? stopReason = null,
+        string? finishReason = null,
+        int? maxOutputTokens = null,
+        int? consecutiveOutputLimitResponses = null,
+        int? totalOutputLimitResponses = null)
+    {
+        var data = new JsonObject
+        {
+            ["stage"] = stage,
+            ["window"] = window,
+            ["total_turns"] = totalTurns,
+        };
+        if (stopReason is not null) data["stop_reason"] = stopReason;
+        if (finishReason is not null) data["finish_reason"] = finishReason;
+        if (maxOutputTokens.HasValue) data["max_output_tokens"] = maxOutputTokens.Value;
+        if (consecutiveOutputLimitResponses.HasValue)
+            data["consecutive_output_limit_responses"] = consecutiveOutputLimitResponses.Value;
+        if (totalOutputLimitResponses.HasValue)
+            data["total_output_limit_responses"] = totalOutputLimitResponses.Value;
+        Write(HeadlessEventKind.AgentProgress, data);
+    }
+
+    public void EmitFinished(
+        int exitCode,
+        long durationMs,
+        int iterations,
+        string? stopReason = null)
     {
         var line = Serialize(
             HeadlessEventKind.Finished,
-            new { exit_code = exitCode, duration_ms = durationMs, iterations });
+            new
+            {
+                exit_code = exitCode,
+                duration_ms = durationMs,
+                iterations,
+                stop_reason = stopReason
+            });
 
         lock (_writeLock)
         {
@@ -251,6 +287,7 @@ public enum HeadlessEventKind
     ToolCallFinished,
     ToolUsageAudit,
     RequiredActionVerification,
+    AgentProgress,
     OutputWritten,
     Error,
     Finished

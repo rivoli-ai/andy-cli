@@ -69,4 +69,8 @@ PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}" \
     --agent benchmarks.harbor.andy_agent:AndyCli \
     --model "$model_name" \
     --n-concurrent "$concurrency" \
+    --agent-kwarg require_harbor_timeout=true \
+    --agent-kwarg max_iterations=150 \
+    --agent-kwarg max_output_tokens=8192 \
+    --agent-kwarg continuation_window_iterations=50 \
     "${agent_env[@]}"

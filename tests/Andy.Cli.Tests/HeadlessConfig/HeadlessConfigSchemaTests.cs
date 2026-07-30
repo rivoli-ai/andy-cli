@@ -426,6 +426,32 @@ public class HeadlessConfigSchemaTests
     }
 
     [Fact]
+    public void Limits_OptionalRunBudgets_Validate()
+    {
+        var schema = LoadSchema();
+        var config = MinimalValidConfig();
+        config["limits"]!["max_output_tokens"] = 8192;
+        config["limits"]!["continuation_window_iterations"] = 50;
+        config["limits"]!["engine_timeout_seconds"] = 280;
+
+        var result = schema.Evaluate(ToElement(config));
+
+        Assert.True(result.IsValid, FormatErrors(result));
+    }
+
+    [Fact]
+    public void Limits_OutputTokensBelowMinimum_Rejected()
+    {
+        var schema = LoadSchema();
+        var config = MinimalValidConfig();
+        config["limits"]!["max_output_tokens"] = 255;
+
+        var result = schema.Evaluate(ToElement(config));
+
+        Assert.False(result.IsValid);
+    }
+
+    [Fact]
     public void AdditionalProperties_Rejected()
     {
         var schema = LoadSchema();

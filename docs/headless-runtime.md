@@ -346,12 +346,18 @@ Required: `max_iterations`, `timeout_seconds`.
 
 | Field | Required | Range | Notes |
 | --- | --- | --- | --- |
-| `max_iterations` | Yes | 1-10000 | Hard cap on agent loop turns. Exhausting it maps to exit code `4` (Timeout). |
+| `max_iterations` | Yes | 1-10000 | Hard cap on total agent turns. Exhausting it maps to exit code `4` (Timeout). |
 | `timeout_seconds` | Yes | 1-86400 | Wall-clock timeout. Exceeding it maps to exit code `4` (Timeout). |
+| `max_output_tokens` | No | 256-131072 | Initial per-response output limit. Defaults to 4096. Engine output-limit recovery may raise it within its configured ceiling. |
+| `continuation_window_iterations` | No | 1-10000 | Turns per continuation window. Must not exceed `max_iterations`; setting it enables bounded continuation across windows. |
+| `engine_timeout_seconds` | No | 1-86399 | Engine deadline, which must be shorter than `timeout_seconds` to reserve CLI cleanup time. Setting it enables bounded continuation. |
 
-The runtime recognizes the current Engine `max_turns_exceeded` stop reason and
-the legacy `max_turns` spelling. Both map to `Timeout`; unrelated unsuccessful
-agent results remain `AgentFailure`.
+When either continuation field is present, `max_iterations` becomes the global
+turn budget instead of a single-window limit. The runtime maps global turn,
+window, Engine deadline, and output-limit exhaustion to `Timeout`. A
+deterministic no-progress stop remains `AgentFailure`. The final event records
+the exact `stop_reason`, and intermediate continuation decisions are emitted as
+`agent_progress`.
 
 ### `required_actions`
 
@@ -486,8 +492,11 @@ provider config, so `model.id` is what is used.
     "stream": "stdout"
   },
   "limits": {
-    "max_iterations": 40,
-    "timeout_seconds": 1800
+    "max_iterations": 150,
+    "timeout_seconds": 1710,
+    "max_output_tokens": 8192,
+    "continuation_window_iterations": 50,
+    "engine_timeout_seconds": 1658
   }
 }
 ```
@@ -509,6 +518,14 @@ example configs (coding, planning, triage).
 - Added concurrency, terminal outcome, permission denial, redaction, limit,
   retention, and primary-contract failure coverage.
 
+## Completion summary (2026-07-29)
+
+- Added nested Engine, CLI, and external-runner deadlines with cleanup margins.
+- Added bounded continuation windows, explicit output-token budgets, progress
+  events, and terminal stop reasons.
+- Preserved schema defaults when trimmed source-generated JSON metadata handles
+  omitted init-only properties.
+
 ## Exit codes
 
 The contract is `HeadlessExitCode` in
@@ -522,7 +539,7 @@ so the numeric values are load-bearing and must not be reordered.
 | 1 | AgentFailure | The agent loop ran but did not converge (non-timeout LLM/tool failure); also covers unmet required actions, tool-wiring, provider-resolution, and output-write failures. |
 | 2 | ConfigError | Config missing, unparseable, or invalid, or bad CLI args. |
 | 3 | Cancelled | Cooperative cancellation (e.g. SIGTERM) before completion. |
-| 4 | Timeout | Wall-clock `timeout_seconds` or `max_iterations` exceeded. |
+| 4 | Timeout | A wall-clock, turn, continuation-window, Engine-deadline, or output-limit budget was exhausted. |
 | 5 | InternalError | Unexpected internal error (bug); should be rare. |
 
 The same code is mirrored in the final `finished` event's `exit_code` field on
