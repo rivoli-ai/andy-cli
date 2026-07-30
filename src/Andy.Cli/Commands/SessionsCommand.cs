@@ -60,6 +60,11 @@ public class SessionsCommand : ICommand
                 ? ""
                 : $"  {session.Provider}/{session.Model}";
             sb.AppendLine($"  {session.SessionId}  {updated}  {session.TurnCount} turn{(session.TurnCount == 1 ? "" : "s")}{modelInfo}");
+            // Titles (issue #285) keep imported and forked sessions discoverable.
+            if (!string.IsNullOrEmpty(session.Title))
+            {
+                sb.AppendLine($"    # {session.Title}");
+            }
             if (!string.IsNullOrEmpty(session.FirstUserMessage))
             {
                 sb.AppendLine($"    > {session.FirstUserMessage}");
