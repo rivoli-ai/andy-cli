@@ -166,8 +166,15 @@ public class SimpleAssistantService : IDisposable
         // Store system prompt in instrumentation hub for dashboard display
         InstrumentationHub.Instance.SetSystemPrompt(systemPrompt);
 
-        // Wrap the tool executor to update UI when tools execute
-        var uiExecutor = new UiUpdatingToolExecutor(toolExecutor, loggerFactory?.CreateLogger<UiUpdatingToolExecutor>(), toolRegistry);
+        // Wrap the tool executor to update UI when tools execute. The post-mutation pipeline
+        // (issue #283) runs the configured formatters after a successful file mutation and makes
+        // the displayed diff come from the final on-disk bytes; a null ambient pipeline degrades to
+        // diff-only, which is the pre-formatter behaviour.
+        var uiExecutor = new UiUpdatingToolExecutor(
+            toolExecutor,
+            loggerFactory?.CreateLogger<UiUpdatingToolExecutor>(),
+            toolRegistry,
+            postMutationPipeline: Formatting.PostMutationPipelineFactory.Ambient);
 
         // Wrap the LLM provider so each round-trip's REAL token usage flows into the live turn
         // stats (thinking row) and the session token counter, replacing char/4 estimates. The same

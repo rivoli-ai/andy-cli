@@ -13,13 +13,18 @@ namespace Andy.Cli.Services
     /// <summary>
     /// Wraps IToolExecutor to update the UI when tools are executed
     /// </summary>
-    public class UiUpdatingToolExecutor : IToolExecutor
+    public partial class UiUpdatingToolExecutor : IToolExecutor
     {
         private readonly IToolExecutor _innerExecutor;
         private readonly ILogger<UiUpdatingToolExecutor>? _logger;
         private readonly IToolRegistry? _toolRegistry;
         private readonly ToolCallLoopDetector _loopDetector = new();
         private readonly WorkingDirectoryTracker _workingDirectory;
+
+        // The shared post-mutation pipeline (issue #283): runs configured formatters, then computes
+        // the displayed diff from the FINAL on-disk bytes. Null falls back to the diff-only pipeline,
+        // which behaves exactly as this executor did before formatters existed.
+        private readonly Formatting.PostMutationPipeline? _postMutationPipeline;
 
         public event EventHandler<ToolExecutionStartedEventArgs>? ExecutionStarted
         {
@@ -39,12 +44,13 @@ namespace Andy.Cli.Services
             remove { _innerExecutor.SecurityViolation -= value; }
         }
 
-        public UiUpdatingToolExecutor(IToolExecutor innerExecutor, ILogger<UiUpdatingToolExecutor>? logger = null, IToolRegistry? toolRegistry = null, WorkingDirectoryTracker? workingDirectoryTracker = null)
+        public UiUpdatingToolExecutor(IToolExecutor innerExecutor, ILogger<UiUpdatingToolExecutor>? logger = null, IToolRegistry? toolRegistry = null, WorkingDirectoryTracker? workingDirectoryTracker = null, Formatting.PostMutationPipeline? postMutationPipeline = null)
         {
             _innerExecutor = innerExecutor;
             _logger = logger;
             _toolRegistry = toolRegistry;
             _workingDirectory = workingDirectoryTracker ?? WorkingDirectoryTracker.Instance;
+            _postMutationPipeline = postMutationPipeline;
         }
 
         public async Task<ToolExecutionResult> ExecuteAsync(string toolId, Dictionary<string, object?> parameters, ToolExecutionContext? context = null)
@@ -633,9 +639,26 @@ namespace Andy.Cli.Services
                 // overwrites the file and returns neither side, so the diff only exists because
                 // the pre-call snapshot above captured "before". Attaching it to the completion
                 // keeps the change on the call that made it.
-                var fileMutation = result.IsSuccessful && diffCapture != null
-                    ? TryBuildFileMutationView(diffCapture)
+                //
+                // The single post-mutation pipeline (issue #283) owns this: it runs the configured
+                // formatters first and computes the diff from the FINAL on-disk bytes, so what the
+                // user sees is what the file actually contains.
+                var postMutation = result.IsSuccessful && diffCapture != null
+                    ? await RunPostMutationAsync(diffCapture, toolId, context, dispatchParameters)
                     : null;
+
+                // Never let a formatter failure pass as a clean write: the exit code and bounded,
+                // redacted stderr travel back to the model with the tool result.
+                var formatterReport = postMutation?.AgentReport;
+                if (!string.IsNullOrWhiteSpace(formatterReport))
+                {
+                    Formatting.FormatterResultReporter.Attach(result, formatterReport);
+                    resultMessage = string.IsNullOrWhiteSpace(resultMessage)
+                        ? formatterReport!
+                        : resultMessage + "\n\n" + formatterReport;
+                }
+
+                var fileMutation = ToFileMutationView(postMutation);
 
                 bool renderedStructurally = feedViewForStructuredCompletion?.CompleteToolCall(
                     uiToolId, new ToolResults.ToolCallCompletion
@@ -665,10 +688,11 @@ namespace Andy.Cli.Services
                 // Render a git-style diff for a successful file write/edit, right under the tool
                 // line. Only for tools still on the legacy path: a presenter-backed call already
                 // received the same change on its completion and renders it inside the call, so
-                // emitting a second item here would show the diff twice.
-                if (result.IsSuccessful && diffCapture != null && feedViewForCompletion != null && !renderedStructurally)
+                // emitting a second item here would show the diff twice. The diff comes from the
+                // same pipeline run as the structured view, so both show the final on-disk bytes.
+                if (fileMutation != null && feedViewForCompletion != null && !renderedStructurally)
                 {
-                    TryRenderFileDiff(diffCapture, feedViewForCompletion);
+                    feedViewForCompletion.AddFileDiff(fileMutation.DisplayPath, fileMutation.Kind, fileMutation.Diff);
                 }
 
                 // INSTRUMENTATION: Publish event when tool result is about to be sent back to LLM
@@ -811,7 +835,9 @@ namespace Andy.Cli.Services
 
         // --- File write/edit diff rendering -------------------------------------------------
 
-        // Single-file mutating tools mapped to the parameter that names their target file.
+        // Single-file mutating tools mapped to the parameter that names their target file. Every
+        // entry here flows through the ONE shared post-mutation pipeline (issue #283): write and
+        // create (write_file), patch (edit_file), replace (replace_text), and rename (move_file).
         // replace_text targets `target_path`, which may also be a whole directory (with
         // file_patterns) - that multi-file mode is skipped in TryCaptureBeforeWrite because a
         // single before/after diff is meaningless there.
@@ -821,6 +847,7 @@ namespace Andy.Cli.Services
                 ["write_file"] = "file_path",
                 ["edit_file"] = "file_path",
                 ["replace_text"] = "target_path",
+                ["move_file"] = "destination_path",
             };
 
         // Skip diffing files larger than this (either before or after) to keep the UI responsive.
@@ -859,6 +886,18 @@ namespace Andy.Cli.Services
                     if (before.Contains('\0')) return null;  // binary file
                 }
 
+                // A rename moves content that already exists, so its "before" is the SOURCE file,
+                // not the (usually absent) destination. Diffing against the source makes a pure
+                // rename produce an empty diff and shows only what a formatter then changed - which
+                // is exactly what the user needs to see.
+                if (string.Equals(toolId, "move_file", StringComparison.OrdinalIgnoreCase))
+                {
+                    var source = ReadRenameSource(parameters, workingDir);
+                    if (source is null) return null;
+                    before = source;
+                    existed = true;
+                }
+
                 var display = ToDisplayPath(resolved, workingDir, rawPath!);
                 return new FileMutationCapture(resolved, display, existed, before);
             }
@@ -870,58 +909,22 @@ namespace Andy.Cli.Services
         }
 
         /// <summary>
-        /// Read the file back after a successful mutation and compute the change, as structured
-        /// data for the presenter. Returns null when there is nothing meaningful to show - the
-        /// file is gone, too large, binary, or the write produced no visible change.
+        /// Read the rename source's content, so a move can be diffed against what was moved rather
+        /// than against an empty destination. Returns null when the source is missing, too large,
+        /// or binary - in which case the rename is simply not diffed.
         /// </summary>
-        private ToolResults.FileMutationView? TryBuildFileMutationView(FileMutationCapture capture)
+        private static string? ReadRenameSource(Dictionary<string, object?> parameters, string workingDir)
         {
-            try
-            {
-                if (!File.Exists(capture.ResolvedPath)) return null; // e.g. the tool deleted it
-                if (new FileInfo(capture.ResolvedPath).Length > MaxDiffFileBytes) return null;
+            if (!parameters.TryGetValue("source_path", out var srcObj) || srcObj is null) return null;
+            var raw = srcObj.ToString();
+            if (string.IsNullOrWhiteSpace(raw)) return null;
 
-                var after = File.ReadAllText(capture.ResolvedPath);
-                if (after.Contains('\0')) return null; // binary
+            var resolved = Path.IsPathRooted(raw) ? raw : Path.GetFullPath(Path.Combine(workingDir, raw));
+            if (!File.Exists(resolved)) return null;
+            if (new FileInfo(resolved).Length > MaxDiffFileBytes) return null;
 
-                var diff = UnifiedDiff.Compute(capture.BeforeText, after);
-                if (diff.IsEmpty) return null; // identical write / no-op edit
-
-                var kind = capture.Existed ? FileChangeKind.Update : FileChangeKind.Create;
-                return new ToolResults.FileMutationView(
-                    capture.DisplayPath,
-                    kind,
-                    diff,
-                    // Only a creation needs the content: an update is better read as a diff.
-                    kind == FileChangeKind.Create ? after : null);
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogWarning(ex, "[UI_EXECUTOR] Failed to compute file change for {Path}", capture.ResolvedPath);
-                return null;
-            }
-        }
-
-        private void TryRenderFileDiff(FileMutationCapture capture, FeedView feedView)
-        {
-            try
-            {
-                if (!File.Exists(capture.ResolvedPath)) return; // e.g. tool deleted it
-                if (new FileInfo(capture.ResolvedPath).Length > MaxDiffFileBytes) return;
-
-                var after = File.ReadAllText(capture.ResolvedPath);
-                if (after.Contains('\0')) return; // binary
-
-                var diff = UnifiedDiff.Compute(capture.BeforeText, after);
-                if (diff.IsEmpty) return; // no visible change (e.g. identical write / no-op edit)
-
-                var kind = capture.Existed ? FileChangeKind.Update : FileChangeKind.Create;
-                feedView.AddFileDiff(capture.DisplayPath, kind, diff);
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogWarning(ex, "[UI_EXECUTOR] Failed to render file diff for {Path}", capture.ResolvedPath);
-            }
+            var text = File.ReadAllText(resolved);
+            return text.Contains('\0') ? null : text;
         }
 
         // Show a path relative to the working directory when the file is under it; otherwise fall

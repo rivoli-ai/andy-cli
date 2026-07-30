@@ -399,6 +399,14 @@ class Program
             // Initialize tool registry and register tools
             var toolRegistry = AppCompositionRoot.InitializeToolRegistry(serviceProvider);
 
+            // Post-mutation pipeline (issue #283): configured formatters run after a successful file
+            // mutation, and the diff shown to the user is computed from the final on-disk bytes.
+            // Formatter processes are authorized through the same permission gate as any command.
+            Andy.Cli.Services.Formatting.PostMutationPipelineFactory.ConfigureAmbient(
+                serviceProvider,
+                Directory.GetCurrentDirectory(),
+                serviceProvider.GetService<ILoggerFactory>());
+
             // Load project/appsettings MCP servers before creating the agent so
             // discovered remote tools are included in its initial tool set.
             var mcpConfiguration = McpConfigurationLoader.Load(
@@ -414,6 +422,7 @@ class Program
             var toolsCommand = new ToolsCommand(serviceProvider);
             var mcpCommand = new McpCommand(mcpToolHost);
             var permissionsCommand = new PermissionsCommand(serviceProvider);
+            var formattersCommand = new FormattersCommand(Directory.GetCurrentDirectory());
             var permissionsManager = new Andy.Cli.Widgets.PermissionsManager(Directory.GetCurrentDirectory());
             var skillsCommand = new Andy.Cli.Commands.SkillsCommand(serviceProvider);
             var themeCommand = new ThemeCommand(themeMemory);
@@ -1701,6 +1710,15 @@ class Program
                                     feed.AddMarkdownRich("```\n" + result.Message + "\n```");
                                     return;
                                 }
+                                else if (commandName == "formatters" || commandName == "formatter" || commandName == "fmt")
+                                {
+                                    // Explains which formatter matched a file and why (issue #283).
+                                    feed.AddUserMessage(cmd);
+                                    var result = await formattersCommand.ExecuteAsync(args);
+                                    // Fence the output so the aligned formatter table stays monospace.
+                                    feed.AddMarkdownRich("```\n" + result.Message + "\n```");
+                                    return;
+                                }
                                 else if (commandName == "auto" || commandName == "yolo")
                                 {
                                     // Toggle session-scoped auto-approve. Low-risk requests are auto-allowed;
@@ -2608,6 +2626,11 @@ class Program
             case "perms":
             case "perm":
                 command = new PermissionsCommand(serviceProvider);
+                break;
+            case "formatters":
+            case "formatter":
+            case "fmt":
+                command = new FormattersCommand(Directory.GetCurrentDirectory());
                 break;
             case "skills":
             case "skill":

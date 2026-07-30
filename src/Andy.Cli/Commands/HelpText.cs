@@ -68,6 +68,10 @@ public static class HelpText
         "- **/permissions revoke <tool[(spec)]> [--scope S]**: Remove a persisted rule\n" +
         "- **/permissions reset**: Delete the user/project/local rule files (back to defaults)\n" +
         "- **/permissions path**: Show the rule file locations\n\n" +
+        "### Formatter Commands:\n" +
+        "- **/formatters status <file>**: Explain which formatters match a file, and why\n" +
+        "- **/formatters list**: List every configured or locally detected formatter\n" +
+        "- **/formatters path**: Show the formatter configuration file locations\n\n" +
         "### Skill Commands:\n" +
         "- **/skills**: List discovered agent skills (disabled ones are marked)\n" +
         "- **/skills info <name>**: Show a skill's details\n" +
@@ -94,6 +98,7 @@ public static class HelpText
         "  model, m       - Manage AI models\n" +
         "  tools, t       - Manage and list available tools\n" +
         "  permissions    - View and modify tool permission rules\n" +
+        "  formatters     - Show which formatters run after Andy writes a file\n" +
         "  skills         - List, inspect, and enable/disable agent skills\n" +
         "  sessions       - List saved sessions (resume with --resume <id> / --continue)\n" +
         "  session        - Export, import, fork, rename, and measure saved sessions\n" +
