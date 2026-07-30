@@ -422,6 +422,13 @@ class Program
             // main input-owning loop (which renders the modal). Same instance used by DI and the loop.
             var permissionBroker = new Andy.Cli.Services.PermissionRequestBroker();
 
+            // Issue #278: the session's primary operating mode (Build / Plan). Registered BEFORE the
+            // tool services so AddAndyCliPermissions' TryAdd keeps this instance and hands it to the
+            // permission overlay that enforces Plan mode.
+            var startupModeSelection = Andy.Cli.Modes.StartupModeSelector.Resolve(args);
+            var agentModeState = new Andy.Cli.Modes.AgentModeState(startupModeSelection.Mode);
+            services.AddSingleton(agentModeState);
+
             // Configure the core Andy.Tools service graph (interactive prompt for the TUI).
             // Shared with the ACP and one-shot command paths via AppCompositionRoot.
             AppCompositionRoot.AddCoreToolServices(services, permissionBroker);
@@ -487,7 +494,52 @@ class Program
                     Andy.Cli.Auth.AuthBootstrap.Resolver.Store,
                     Andy.Cli.Auth.AuthBootstrap.Resolver));
             var themeCommand = new ThemeCommand(themeMemory);
+            var planModeGrants = serviceProvider.GetRequiredService<Andy.Cli.Modes.PlanModeGrantStore>();
+            var modeCommand = new Andy.Cli.Commands.ModeCommand(agentModeState, planModeGrants);
             var commandPalette = new CommandPalette();
+
+            // Issue #278: offer a Plan-mode opt-in for each MCP server that just connected. Plan mode
+            // denies MCP tools by default (they carry no capability metadata), so the choice is put in
+            // front of the user at connection time instead of surfacing as a failed plan turn later.
+            // The offer grants NOTHING unless the user picks one of the allow actions, and it is only
+            // raised once per server unless that server later exposes a tool it has not offered.
+            var mcpPlanOptIn = new Andy.Cli.Widgets.McpPlanOptInPrompt(planModeGrants);
+
+            // Plan-mode grants are per developer, so a committed project .andy/modes.json cannot
+            // supply them. When one tries to, say so rather than leaving the author wondering why
+            // their file does nothing - the tools stay denied either way.
+            foreach (var grantDiagnostic in planModeGrants.Diagnostics)
+            {
+                feed.AddMarkdownRich(ConsoleColors.WarningPrefix($"[mode] {grantDiagnostic}"));
+            }
+
+            foreach (var mcpStatus in mcpToolHost.Statuses)
+            {
+                if (mcpStatus.State == Andy.Cli.Mcp.McpServerConnectionState.Connected)
+                {
+                    mcpPlanOptIn.Enqueue(mcpStatus.Name, mcpStatus.ToolIds);
+                }
+            }
+
+            // Issue #278: keep the status line's mode badge in step with the mode. Build shows no
+            // badge (it is the unrestricted default); a restricted mode is always visible.
+            void RefreshModeBadge()
+            {
+                var definition = agentModeState.CurrentDefinition;
+                contextStatusBar.SetAgentModeBadge(definition.AllowsMutation ? null : definition.Badge);
+            }
+
+            RefreshModeBadge();
+            agentModeState.ModeChanged += (_, _) => RefreshModeBadge();
+            if (startupModeSelection.Error != null)
+            {
+                feed.AddMarkdownRich(ConsoleColors.WarningPrefix($"[mode] {startupModeSelection.Error}"));
+            }
+            else if (!agentModeState.CurrentDefinition.AllowsMutation)
+            {
+                feed.AddMarkdownRich($"[mode] Starting in {agentModeState.CurrentDefinition.DisplayName} mode. "
+                    + agentModeState.CurrentDefinition.Summary);
+            }
 
             Andy.Model.Llm.ILlmProvider? llmProvider = null;
             SimpleAssistantService? aiService = null;
@@ -582,7 +634,8 @@ class Program
                     tokenCounter,
                     loggerFactory,
                     extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, currentProvider),
-                    systemPromptSuffix: ComposeSkillsPromptSection());
+                    systemPromptSuffix: ComposeSkillsPromptSection(),
+                    modeState: agentModeState);
 
                 var providerUrl = ProviderUrlResolver.Resolve(currentProvider);
 
@@ -655,7 +708,10 @@ class Program
                         service.ExportTranscript(),
                         sessionProvider,
                         sessionModel,
-                        new Andy.Cli.Services.Sessions.SessionSaveOptions { Usage = usage });
+                        new Andy.Cli.Services.Sessions.SessionSaveOptions { Usage = usage },
+                        // Issue #278: record the operating mode so a resumed planning session comes
+                        // back in Plan mode instead of silently regaining write access.
+                        agentModeState.CurrentDefinition.Id);
                 }
                 catch (Exception ex)
                 {
@@ -668,6 +724,32 @@ class Program
             // file, never in the engine transcript, so replaying a session cannot pass them off as
             // something the model did.
             var userShellLog = new Andy.Cli.Services.Sessions.UserShellLogStore();
+
+            // Issue #278: restore the mode a session was saved in. Entering a restrictive mode always
+            // succeeds; LEAVING one never does from a restore (AgentModeState requires an explicit
+            // user action), so a resumed Build session cannot silently re-enable writes for someone
+            // who is currently planning. Returns a feed message, or null when nothing to report.
+            string? ApplySessionMode(Andy.Cli.Services.Sessions.SessionSummary summary)
+            {
+                if (!Andy.Cli.Modes.AgentModeCatalog.TryParse(summary.Mode, out var saved) || saved is null)
+                {
+                    // Sessions saved before modes existed carry no mode: leave the current one alone.
+                    return null;
+                }
+
+                if (saved.Mode == agentModeState.Current)
+                {
+                    return null;
+                }
+
+                if (agentModeState.TrySet(saved.Mode, Andy.Cli.Modes.ModeChangeSource.SessionRestore, out var modeError))
+                {
+                    return $"[mode] Restored {saved.DisplayName} mode from the session. {saved.Summary}";
+                }
+
+                return ConsoleColors.WarningPrefix(
+                    $"[mode] The session was saved in {saved.DisplayName} mode, but {modeError}");
+            }
 
             void ReplaySessionIntoFeed(Andy.Engine.TranscriptSnapshot snapshot, string replaySessionId)
             {
@@ -733,6 +815,11 @@ class Program
                                 sessionId = targetId;
                                 ReplaySessionIntoFeed(record.Snapshot, targetId);
                                 feed.AddMarkdownRich($"[session] Resumed session {targetId} ({record.Summary.TurnCount} turn{(record.Summary.TurnCount == 1 ? "" : "s")} restored)");
+                                var startupModeMessage = ApplySessionMode(record.Summary);
+                                if (startupModeMessage != null)
+                                {
+                                    feed.AddMarkdownRich(startupModeMessage);
+                                }
                             }
                         }
                         catch (Exception ex)
@@ -922,7 +1009,8 @@ class Program
                     resumeProvider,
                     tokenCounter,
                     resumeLoggerFactory,
-                    extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, resumeProvider));
+                    extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, resumeProvider),
+                    modeState: agentModeState);
                 aiService.RestoreTranscript(record.Snapshot);
                 sessionId = targetId;
 
@@ -947,6 +1035,11 @@ class Program
                 feed.Clear();
                 ReplaySessionIntoFeed(record.Snapshot, targetId);
                 feed.AddMarkdownRich($"[session] Resumed session {targetId} ({record.Summary.TurnCount} turn{(record.Summary.TurnCount == 1 ? "" : "s")} restored)");
+                var resumeModeMessage = ApplySessionMode(record.Summary);
+                if (resumeModeMessage != null)
+                {
+                    feed.AddMarkdownRich(resumeModeMessage);
+                }
                 await Task.CompletedTask;
                 return null;
             }
@@ -976,7 +1069,8 @@ class Program
                         tokenCounter,
                         loggerFactory,
                         extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, provider),
-                        systemPromptSuffix: ComposeSkillsPromptSection());
+                        systemPromptSuffix: ComposeSkillsPromptSection(),
+                        modeState: agentModeState);
                 }
                 else
                 {
@@ -1077,7 +1171,8 @@ class Program
                                         tokenCounter,
                                         loggerFactory,
                                         extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, newProvider),
-                                        systemPromptSuffix: ComposeSkillsPromptSection());
+                                        systemPromptSuffix: ComposeSkillsPromptSection(),
+                                        modeState: agentModeState);
                                 }
 
                                 feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
@@ -1665,6 +1760,32 @@ class Program
                         return;
                     }
 
+                    // Issue #278: the MCP Plan-mode opt-in offer owns all keys while open. It is shown
+                    // once per server (and again only when that server exposes a NEW tool), and every
+                    // exit path other than A/Enter grants nothing.
+                    if (mcpPlanOptIn.IsOpen)
+                    {
+                        string optInMessage = string.Empty;
+                        switch (k.Key)
+                        {
+                            case ConsoleKey.Escape: optInMessage = mcpPlanOptIn.Skip(); break;
+                            case ConsoleKey.UpArrow: mcpPlanOptIn.MoveSelection(-1); return;
+                            case ConsoleKey.DownArrow: mcpPlanOptIn.MoveSelection(1); return;
+                            case ConsoleKey.Spacebar: mcpPlanOptIn.ToggleSelected(); return;
+                            case ConsoleKey.Enter: optInMessage = mcpPlanOptIn.GrantSelectedTools(); break;
+                            default:
+                                if (k.KeyChar is 'a' or 'A') { optInMessage = mcpPlanOptIn.GrantServerWide(); break; }
+                                if (k.KeyChar is 'n' or 'N') { optInMessage = mcpPlanOptIn.Skip(); break; }
+                                return; // swallow any other key while the offer is open
+                        }
+
+                        if (!string.IsNullOrEmpty(optInMessage))
+                        {
+                            feed.AddMarkdownRich(optInMessage);
+                        }
+                        return;
+                    }
+
                     // Interactive permissions manager owns all keys while open.
                     if (permissionsManager.IsOpen)
                     {
@@ -2085,7 +2206,8 @@ class Program
                                                     tokenCounter,
                                                     loggerFactory,
                                                     extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, newProvider),
-                                                    systemPromptSuffix: ComposeSkillsPromptSection());
+                                                    systemPromptSuffix: ComposeSkillsPromptSection(),
+                                                    modeState: agentModeState);
                                             }
 
                                             feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
@@ -2233,6 +2355,18 @@ class Program
                                         ? attachment
                                         : existing.TrimEnd() + "\n\n" + attachment);
                                     toast.Show("Command output added to the prompt. Edit it or press Enter to send.", 150);
+                                    return;
+                                }
+                                else if (commandName == "mode")
+                                {
+                                    // Issue #278: the only interactive way in or out of Plan mode.
+                                    // Plan mode's tool denials are enforced by the permission overlay,
+                                    // so this command changes real capability, not just prompt text.
+                                    feed.AddUserMessage(cmd);
+                                    var result = modeCommand.Execute(args);
+                                    feed.AddMarkdownRich(result.Success
+                                        ? result.Message
+                                        : ConsoleColors.WarningPrefix(result.Message));
                                     return;
                                 }
                                 else if (commandName == "skills" || commandName == "skill")
@@ -2750,6 +2884,7 @@ class Program
                 var overlayB = new DL.DisplayListBuilder();
                 commandPalette.Render(new L.Rect(0, 0, viewport.Width, viewport.Height), baseDl, overlayB);
                 permissionsManager.Render(new L.Rect(0, 0, viewport.Width, viewport.Height), baseDl, overlayB);
+                mcpPlanOptIn.Render(new L.Rect(0, 0, viewport.Width, viewport.Height), baseDl, overlayB);
 
                 var overlay = new DL.DisplayListBuilder();
                 hud.ViewportCols = viewport.Width; hud.ViewportRows = viewport.Height;
@@ -3236,6 +3371,15 @@ class Program
                 // Provider sign-in / status / sign-out (issue #284). Deliberately built
                 // without the DI graph: auth must work before any provider is configured.
                 command = new Andy.Cli.Commands.AuthCommand(serviceProvider);
+                break;
+            case "mode":
+                // Issue #278: the non-interactive path to the Plan-mode opt-ins, so automation and
+                // scripts can grant/revoke without the TUI. A fresh AgentModeState is fine here: a
+                // one-shot invocation has no session to switch, and the grant verbs act only on the
+                // persisted store. This path NEVER prompts.
+                command = new Andy.Cli.Commands.ModeCommand(
+                    new Andy.Cli.Modes.AgentModeState(),
+                    new Andy.Cli.Modes.PlanModeGrantStore(Directory.GetCurrentDirectory()));
                 break;
             case "help":
             case "?":

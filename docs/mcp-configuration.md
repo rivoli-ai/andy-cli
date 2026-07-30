@@ -123,6 +123,31 @@ For example, `read-note` from `local-files` becomes
 the original remote tool name, and protocol or transport failures return
 ordinary failed tool results.
 
+## Plan mode and MCP tools
+
+MCP tools declare no capability metadata, so [Plan mode](agent-modes.md) - which
+fails closed - denies them until you explicitly opt in. When a server connects in
+the interactive TUI, Andy lists its tools and offers the choice: allow every tool
+from that server (including ones it exposes later), allow selected tools, or skip.
+Skipping grants nothing. The offer is shown once per server, and again only if
+that server later exposes a tool it has not offered before.
+
+The same grants can be made without the TUI, which is what headless and one-shot
+runs rely on since they never prompt:
+
+```bash
+andy-cli mode grants                    # review current opt-ins
+andy-cli mode allow-server local-files  # allow every tool from a server
+andy-cli mode allow mcp_local_files_read_note
+andy-cli mode revoke local-files
+```
+
+Grants are per developer: they are stored in `~/.andy/modes.json` and must never
+be committed. A project `.andy/modes.json` cannot grant Plan-mode access - grant
+keys there are ignored with a diagnostic, so a teammate who never saw the prompt
+is not silently opted in on your behalf. Grants are read-only opt-ins: they
+cannot re-enable a mutating tool, and Build mode is unaffected by them.
+
 ## Commands
 
 | Command | Behavior |

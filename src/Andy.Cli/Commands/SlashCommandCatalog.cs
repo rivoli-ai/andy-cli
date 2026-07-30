@@ -23,6 +23,7 @@ public static class SlashCommandCatalog
         new InlineCommandHelp.CommandInfo { Name = "auth", Description = "Sign in to providers, review credential status, sign out", Aliases = Array.Empty<string>() },
         new InlineCommandHelp.CommandInfo { Name = "permissions", Description = "Review and manage tool permission rules", Aliases = new[] { "perms", "perm" } },
         new InlineCommandHelp.CommandInfo { Name = "formatters", Description = "Show which formatters run after Andy writes a file", Aliases = new[] { "formatter", "fmt" } },
+        new InlineCommandHelp.CommandInfo { Name = "mode", Description = "Show or switch the operating mode (build, plan)", Aliases = Array.Empty<string>() },
         new InlineCommandHelp.CommandInfo { Name = "skills", Description = "List, inspect, and enable/disable agent skills", Aliases = new[] { "skill" } },
         new InlineCommandHelp.CommandInfo { Name = "commands", Description = "List, inspect, and reload Markdown slash commands", Aliases = new[] { "cmds" } },
         new InlineCommandHelp.CommandInfo { Name = "theme", Description = "List, switch, or toggle transparency of the UI theme", Aliases = new[] { "themes" } },

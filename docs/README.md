@@ -35,6 +35,8 @@ linked below.
   MCP, theme, session and environment settings into the layered configuration.
 - [Interactive shell escape](shell-escape.md) - The `!` composer mode, its security
   model (permission gate, cancellation, redaction, auditing), and how to disable it.
+- [Operating modes: Build and Plan](agent-modes.md) - `/mode`, the read-only Plan
+  permission overlay, mode persistence, and why planning data is not a boundary.
 
 ## Headless runtime
 

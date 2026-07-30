@@ -76,12 +76,19 @@ public sealed class SessionStore
     /// lineage of a forked session. All of these envelope fields are ADDITIVE within
     /// schema version 1, which is what keeps sessions written before #285 readable.
     /// </summary>
+    /// <param name="mode">
+    /// The primary operating mode id (see <c>Andy.Cli.Modes.AgentModeCatalog</c>) the session was in
+    /// when it was saved, so <c>--resume</c> / <c>/resume</c> can put the user back in the same mode
+    /// instead of silently returning a planning session to a mutation-capable one (issue #278).
+    /// Null or empty writes no mode and loads back as <see cref="SessionSummary.Mode"/> = "".
+    /// </param>
     public bool Save(
         string sessionId,
         TranscriptSnapshot snapshot,
         string provider,
         string model,
-        SessionSaveOptions? options = null)
+        SessionSaveOptions? options = null,
+        string? mode = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         if (!IsValidSessionId(sessionId))
@@ -123,6 +130,7 @@ public sealed class SessionStore
             ["updatedUtc"] = updatedUtc.UtcDateTime.ToString("O"),
             ["provider"] = provider ?? string.Empty,
             ["model"] = model ?? string.Empty,
+            ["mode"] = mode ?? string.Empty,
             ["turnCount"] = snapshot.Turns.Count,
             ["firstUserMessage"] = firstUserMessage
         };
@@ -306,6 +314,9 @@ public sealed class SessionStore
         UpdatedUtc = ReadTimestamp(root, "updatedUtc"),
         Provider = root.TryGetProperty("provider", out var p) ? p.GetString() ?? "" : "",
         Model = root.TryGetProperty("model", out var m) ? m.GetString() ?? "" : "",
+        // Absent in files written before modes existed; an empty value means "no recorded mode",
+        // which the caller must treat as "leave the current mode alone" rather than as Build.
+        Mode = root.TryGetProperty("mode", out var md) ? md.GetString() ?? "" : "",
         TurnCount = root.TryGetProperty("turnCount", out var t) ? t.GetInt32() : 0,
         FirstUserMessage = root.TryGetProperty("firstUserMessage", out var f)
             ? f.GetString() ?? ""
@@ -362,6 +373,12 @@ public sealed record SessionSummary
     public DateTimeOffset UpdatedUtc { get; init; }
     public string Provider { get; init; } = "";
     public string Model { get; init; } = "";
+
+    /// <summary>
+    /// The operating-mode id recorded with the session ("build", "plan"), or "" for sessions saved
+    /// before modes existed.
+    /// </summary>
+    public string Mode { get; init; } = "";
     public int TurnCount { get; init; }
     public string FirstUserMessage { get; init; } = "";
 

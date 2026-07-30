@@ -79,6 +79,15 @@ public static class HelpText
         "- **/mcp status**: Show MCP connection state and registered tools\n" +
         "- **/lsp status**: Show configured language servers and their state\n" +
         "- **/lsp restart [id]**: Restart language servers\n\n" +
+        "- **/mcp status**: Show MCP connection state and registered tools\n\n" +
+        "### Mode Commands:\n" +
+        "- **/mode**: Show the current operating mode and the available modes\n" +
+        "- **/mode build**: Full capability; the normal permission rules apply\n" +
+        "- **/mode plan**: Read-only planning; file writes, shell commands, and unclassified tools are denied before they run, and no allow rule can override that\n" +
+        "- **/mode grants**: Review the Plan-mode read-only tool opt-ins\n" +
+        "- **/mode allow <tool-id>**: Opt specific tools into Plan mode (a mutating tool can never be opted in)\n" +
+        "- **/mode allow-server <name>**: Opt in every tool from an MCP server, including ones it exposes later\n" +
+        "- **/mode revoke <tool-id|server-name>**: Remove a Plan-mode opt-in\n\n" +
         "### Permission Commands:\n" +
         "- **/permissions**: Open the interactive permission rules manager\n" +
         "- **/permissions list**: List effective permission rules by layer\n" +
@@ -138,6 +147,8 @@ public static class HelpText
         "  session        - Export, import, fork, rename, and measure saved sessions\n" +
         "  auth           - Sign in to providers, review credential status, sign out\n" +
         "  config         - Show and validate the layered andy.jsonc configuration\n" +
+        "  mode           - Review/grant/revoke Plan-mode read-only tool opt-ins\n" +
+        "                   (grants, allow <tool-id>, allow-server <name>, revoke <id>)\n" +
         "  help, ?        - Show this help message\n" +
         "\n" +
         "Run without arguments to start the interactive TUI mode.";

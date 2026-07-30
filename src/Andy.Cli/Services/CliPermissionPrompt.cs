@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Andy.Cli.Modes;
 using Andy.Permissions.Authorization;
 using Andy.Permissions.DependencyInjection;
 using Andy.Permissions.Model;
@@ -446,7 +447,86 @@ public static class CliPermissionServiceExtensions
             // Optional caller hook (used by tests to isolate file-backed layers for determinism).
             configureStore?.Invoke(options);
         });
+
+        // Issue #278: layer the primary-mode policy OVER the permission engine. This must come after
+        // AddAndyPermissions so both decorations sit outside it - a Plan-mode denial is decided before
+        // any rule layer runs and therefore cannot be widened by a user, project, local, session, or
+        // injected Allow rule.
+        AddAgentModeOverlay(services);
         return services;
+    }
+
+    /// <summary>
+    /// Registers the shared <see cref="AgentModeState"/> / <see cref="ModeToolGate"/> and wraps the two
+    /// interception points the mode policy needs:
+    ///
+    /// <list type="bullet">
+    /// <item><see cref="IToolPermissionAuthorizer"/> - so every consumer of the permission verdict
+    /// (the packaged gate, the headless observer, the tool-usage audit) sees the mode's Deny.</item>
+    /// <item><see cref="IToolExecutor"/> - so a forbidden call is short-circuited before execution even
+    /// if some future path skips the authorizer.</item>
+    /// </list>
+    ///
+    /// Both use <c>TryAdd</c>-style guards for the state itself, so a host that pre-registers its own
+    /// <see cref="AgentModeState"/> (the interactive TUI does, to seed the start-up mode) keeps it.
+    /// </summary>
+    private static void AddAgentModeOverlay(IServiceCollection services)
+    {
+        services.TryAddSingleton(_ => new AgentModeState());
+
+        // The grant store is the live source of Plan-mode opt-ins (.andy/modes.json). The gate reads
+        // it per call, so an opt-in granted mid-session applies immediately. Headless, ACP and
+        // one-shot runs get the same store: they READ the persisted grants and never prompt.
+        services.TryAddSingleton(_ => new PlanModeGrantStore(Directory.GetCurrentDirectory()));
+        services.TryAddSingleton(sp => new ModeToolGate(
+            sp.GetRequiredService<AgentModeState>(),
+            sp.GetRequiredService<PlanModeGrantStore>()));
+
+        Decorate<IToolPermissionAuthorizer>(services, (inner, sp) =>
+            new ModeGatedPermissionAuthorizer(inner, sp.GetRequiredService<ModeToolGate>()));
+
+        Decorate<Andy.Tools.Core.IToolExecutor>(services, (inner, sp) =>
+            new ModeGatedToolExecutor(inner, sp.GetRequiredService<ModeToolGate>()));
+    }
+
+    /// <summary>
+    /// Replaces the last registration of <typeparamref name="TService"/> with one that wraps it.
+    /// The captured descriptor is materialized through its own instance/factory/type, so the inner
+    /// service is built exactly as it would have been - the decorator never resolves
+    /// <typeparamref name="TService"/> from the provider, which would recurse into itself.
+    /// No-op when the service is not registered.
+    /// </summary>
+    private static void Decorate<TService>(
+        IServiceCollection services,
+        Func<TService, IServiceProvider, TService> decorate)
+        where TService : class
+    {
+        var descriptor = services.LastOrDefault(d => d.ServiceType == typeof(TService));
+        if (descriptor is null)
+        {
+            return;
+        }
+
+        services.Remove(descriptor);
+        services.Add(new ServiceDescriptor(
+            typeof(TService),
+            sp => decorate((TService)CreateInner(descriptor, sp), sp),
+            descriptor.Lifetime));
+    }
+
+    private static object CreateInner(ServiceDescriptor descriptor, IServiceProvider sp)
+    {
+        if (descriptor.ImplementationInstance is not null)
+        {
+            return descriptor.ImplementationInstance;
+        }
+
+        if (descriptor.ImplementationFactory is not null)
+        {
+            return descriptor.ImplementationFactory(sp);
+        }
+
+        return ActivatorUtilities.CreateInstance(sp, descriptor.ImplementationType!);
     }
 
     private static IReadOnlyList<PermissionRule> AppendAskDefaults(IReadOnlyList<PermissionRule> builtin)
