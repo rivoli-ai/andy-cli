@@ -230,6 +230,10 @@ class Program
         // finally below. Remains null unless instrumentation is explicitly enabled.
         InstrumentationServer? instrumentationServer = null;
 
+        // Undo/redo transaction log (issue #276). Declared here so its shadow
+        // snapshots are cleaned up in the finally below when the session ends.
+        Andy.Cli.Services.Undo.UndoManager? undoManager = null;
+
         try
         {
             bool running = true;
@@ -573,6 +577,17 @@ class Program
             // Archive management (issue #285): export/import/fork/rename/stats. The id
             // getter lets /session default to the session currently being recorded.
             var sessionCommand = new Andy.Cli.Commands.SessionCommand(sessionStore, () => sessionId);
+
+            // Transactional undo/redo (issue #276): every interactive turn is bracketed by
+            // shadow Git snapshots stored outside the repository (~/.andy/snapshots/<workspace-id>),
+            // so /undo can restore the exact pre-turn contents of the files the turn touched
+            // without ever reading or writing the user's own index, refs, stash or branch.
+            undoManager = Andy.Cli.Services.Undo.UndoManager.Create(
+                Andy.Cli.Services.WorkingDirectoryTracker.Instance.Current,
+                sessionId,
+                logger: serviceProvider.GetService<ILoggerFactory>()?.CreateLogger("Andy.Undo"));
+            var undoCommand = new Andy.Cli.Commands.UndoCommand(undoManager, text => prompt.SetText(text));
+            var redoCommand = new Andy.Cli.Commands.RedoCommand(undoManager);
 
             void SaveSession()
             {
@@ -1224,13 +1239,22 @@ class Program
 
                     while (true)
                     {
+                        // Bracket the turn with shadow-Git snapshots so /undo can revert it
+                        // (issue #276). A turn that throws or is interrupted is aborted below
+                        // and never becomes an undoable transaction.
+                        var undoTurn = undoManager?.BeginTurn(currentMessage);
                         try
                         {
                             contextStatusBar.SetStatusText("Thinking", animated: true);
                             var service = aiService;
-                            if (service == null) break;
+                            if (service == null)
+                            {
+                                undoManager?.AbortTurn(undoTurn);
+                                break;
+                            }
 
                             await service.ProcessMessageAsync(currentMessage, enableStreaming: false);
+                            undoManager?.CompleteTurn(undoTurn);
 
                             // Persist the transcript after every completed turn so the
                             // session survives an exit or crash and can be resumed later.
@@ -1239,6 +1263,7 @@ class Program
                         }
                         catch (Exception ex)
                         {
+                            undoManager?.AbortTurn(undoTurn);
                             Andy.Cli.Services.CrashLog.Write("interactive.ProcessMessageAsync", ex);
                             feed.AddMarkdownRich(ConsoleColors.ErrorPrefix(ex.Message));
                             feed.AddMarkdownRich(ConsoleColors.ErrorPrefix(
@@ -1873,6 +1898,19 @@ class Program
                                     }
                                     return;
                                 }
+                                else if (commandName == "undo" || commandName == "redo")
+                                {
+                                    // Transactional revert/reapply of the last turn's file changes
+                                    // (issue #276); both refuse while a turn is still running.
+                                    feed.AddUserMessage(cmd);
+                                    var result = commandName == "undo"
+                                        ? await undoCommand.ExecuteAsync(args)
+                                        : await redoCommand.ExecuteAsync(args);
+                                    feed.AddMarkdownRich(result.Success
+                                        ? result.Message
+                                        : ConsoleColors.WarningPrefix(result.Message));
+                                    return;
+                                }
                                 else if (commandName == "exit" || commandName == "bye" || commandName == "quit")
                                 {
                                     // Show exit confirmation dialog
@@ -2334,6 +2372,10 @@ class Program
             // Deterministically stop the instrumentation server (releases the bound
             // port, unsubscribes from the hub, and closes active SSE streams).
             instrumentationServer?.Dispose();
+
+            // Undo history lives for the session only: drop this session's shadow
+            // snapshots and prune the objects they kept alive (issue #276).
+            undoManager?.Dispose();
 
             // Restore terminal settings + disable mouse before leaving the
             // alternate screen, then re-enable wrap/cursor and exit alt screen.

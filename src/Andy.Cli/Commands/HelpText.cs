@@ -39,6 +39,8 @@ public static class HelpText
         "- **/restart**: Restart the session (fresh conversation context, counters, and prompt history)\n" +
         "- **/sessions**: List saved sessions that can be resumed\n" +
         "- **/resume [session-id]**: Resume a saved session (most recent when no id is given)\n" +
+        "- **/undo**: Revert the file changes made by the last turn (Git workspaces only)\n" +
+        "- **/redo**: Reapply the turn reverted by the last /undo\n" +
         "- **/help**: Show this help message\n\n" +
         "### Session Archive Commands:\n" +
         "- **/session export [id] [--out path] [--markdown] [--tools] [--metadata]**: Write a portable archive (or Markdown transcript)\n" +
