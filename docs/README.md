@@ -12,6 +12,8 @@ linked below.
   headless, and ACP invocations.
 - [File mentions](file-mentions.md) - `@path` syntax, the completion picker, line
   ranges, size and binary limits, and privacy implications.
+- [External editor](external-editor.md) - `/editor` and Ctrl+X: composing prompts in
+  `$VISUAL`/`$EDITOR`, per-editor setup, quoting rules, and troubleshooting.
 - [Zed quickstart](QUICKSTART_ZED.md) - Minimal ACP setup for a local build.
 - [Zed and ACP integration](ZED_INTEGRATION.md) - Publishing, configuration,
   supported behavior, limitations, and troubleshooting.

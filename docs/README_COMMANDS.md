@@ -121,6 +121,21 @@ normally require consent unless a higher-precedence rule allows them.
 | `/help` or `/?` | Show in-application help. |
 | `/exit`, `/quit`, or `/bye` | Open the exit confirmation. The same words work without `/`. |
 
+### External editor
+
+| Command | Behavior |
+| --- | --- |
+| `/editor [text]` (alias `/edit`) | Compose the prompt in `$VISUAL`, then `$EDITOR`, and return to the TUI. The editor opens on the text that follows the command. |
+
+`Ctrl+X` runs the same round trip on whatever is currently in the composer. Both
+paths behave identically: the composer is snapshotted before submission clears it,
+and it ends up holding exactly the edited text. It is replaced only when the editor
+exits with status 0; a nonzero exit, a signal, a failed launch or an over-sized file
+leave the prompt text intact. GUI editors need their blocking flag
+(`export VISUAL='code --wait'`). See [External editor](external-editor.md) for
+per-editor examples, the quoting rules used to split the value without a shell, and
+troubleshooting.
+
 ## Keyboard shortcuts
 
 | Key | Behavior |
@@ -137,6 +152,7 @@ normally require consent unless a higher-precedence rule allows them.
 | `Ctrl+K` / `Ctrl+U` | Delete to the end/start of the current line. |
 | `Esc` | Close the active palette/permission manager, otherwise open exit confirmation. |
 | `Ctrl+D` | Open exit confirmation. |
+| `Ctrl+X` | Edit the current prompt in the external editor (`$VISUAL`, then `$EDITOR`). |
 
 Mouse capture starts off so ordinary click-drag selection and the terminal's
 copy shortcut work immediately. Press `F3` to enable capture for wheel scrolling;

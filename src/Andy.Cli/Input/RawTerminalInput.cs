@@ -29,7 +29,7 @@ namespace Andy.Cli.Input;
 /// <see cref="TryStart"/> returns <c>null</c> and the caller falls back to the
 /// legacy <c>Console.ReadKey</c> loop.
 /// </summary>
-public sealed class RawTerminalInput : IDisposable
+public sealed class RawTerminalInput : IDisposable, Andy.Cli.Editor.ISuspendableTerminalInput
 {
     private const int StdinFd = 0;
     private const short POLLIN = 0x0001;
@@ -38,13 +38,21 @@ public sealed class RawTerminalInput : IDisposable
     private const short POLLNVAL = 0x0020;
     private const int PollTimeoutMs = 150;
 
+    // cbreak: no echo, no canonical buffering, leave CR untranslated so Enter stays
+    // 0x0D (submit) and Ctrl+Enter/LF stays 0x0A (newline). min 0 / time 1 lets reads
+    // return promptly. isig stays on so Ctrl+C still works.
+    private const string CbreakStty = "-echo -icanon -icrnl min 0 time 1";
+
     private readonly TerminalInputParser _parser = new();
     private readonly ConcurrentQueue<TerminalInputEvent> _queue = new();
-    private readonly Thread _thread;
     private readonly string _savedStty;
     private readonly MouseReporting _mouse;
+    private readonly object _lifecycle = new();
+    private Thread _thread;
     private volatile bool _stop;
     private int _restored; // 0 = not yet restored, 1 = restored (guards idempotency)
+    private bool _suspended;
+    private bool _mouseBeforeSuspend;
 
     private RawTerminalInput(string savedStty, bool enableMouse)
     {
@@ -55,8 +63,83 @@ public sealed class RawTerminalInput : IDisposable
         AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
         Console.CancelKeyPress += OnCancelKeyPress;
 
-        _thread = new Thread(ReadLoop) { IsBackground = true, Name = "tty-raw-input" };
-        _thread.Start();
+        _thread = StartReadLoop();
+    }
+
+    private Thread StartReadLoop()
+    {
+        var t = new Thread(ReadLoop) { IsBackground = true, Name = "tty-raw-input" };
+        t.Start();
+        return t;
+    }
+
+    /// <summary>True while the terminal has been handed to a child process.</summary>
+    public bool IsSuspended
+    {
+        get { lock (_lifecycle) return _suspended; }
+    }
+
+    /// <summary>
+    /// Temporarily give the TTY back to a child process (the external editor, issue #287):
+    /// stop the read thread, turn mouse reporting off, and restore the terminal settings that
+    /// were saved at startup. Disposing the returned scope re-applies cbreak mode, restarts
+    /// the read thread, restores the previous mouse state and drops any queued events (the
+    /// child owned stdin, so anything still queued is stale).
+    ///
+    /// Suspending while already suspended, or after <see cref="Dispose"/>, is a no-op.
+    /// </summary>
+    public IDisposable Suspend()
+    {
+        lock (_lifecycle)
+        {
+            if (_suspended || Volatile.Read(ref _restored) != 0) return NullScope.Instance;
+            _suspended = true;
+            _mouseBeforeSuspend = _mouse.Enabled;
+
+            _stop = true;
+            var thread = _thread;
+            try { thread.Join(500); } catch { /* ignore */ }
+
+            _mouse.Set(false);
+            try { RunStty(_savedStty, out _); } catch { /* ignore */ }
+            return new SuspendScope(this);
+        }
+    }
+
+    private void Resume()
+    {
+        lock (_lifecycle)
+        {
+            if (!_suspended) return;
+            _suspended = false;
+
+            // Torn down while suspended (Ctrl+C / process exit): stay in cooked mode.
+            if (Volatile.Read(ref _restored) != 0) return;
+
+            try { RunStty(CbreakStty, out _); } catch { /* ignore */ }
+            while (_queue.TryDequeue(out _)) { }
+            _stop = false;
+            _thread = StartReadLoop();
+            _mouse.Set(_mouseBeforeSuspend);
+        }
+    }
+
+    private sealed class SuspendScope : IDisposable
+    {
+        private readonly RawTerminalInput _owner;
+        private int _disposed;
+        public SuspendScope(RawTerminalInput owner) => _owner = owner;
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            _owner.Resume();
+        }
+    }
+
+    private sealed class NullScope : IDisposable
+    {
+        public static readonly NullScope Instance = new();
+        public void Dispose() { }
     }
 
     /// <summary>
@@ -92,11 +175,8 @@ public sealed class RawTerminalInput : IDisposable
             return null;
         saved = saved.Trim();
 
-        // cbreak: no echo, no canonical buffering, leave CR untranslated so
-        // Enter stays 0x0D (submit) and Ctrl+Enter/LF stays 0x0A (newline).
-        // min 0 / time 1 lets reads return promptly. isig stays on so Ctrl+C
-        // still works.
-        if (!RunStty("-echo -icanon -icrnl min 0 time 1", out _))
+        // See CbreakStty for what these flags mean.
+        if (!RunStty(CbreakStty, out _))
         {
             // Best effort to undo anything partially applied, then bail.
             RunStty(saved, out _);
@@ -156,7 +236,18 @@ public sealed class RawTerminalInput : IDisposable
 
     private void OnProcessExit(object? sender, EventArgs e) => RestoreTerminal();
 
-    private void OnCancelKeyPress(object? sender, ConsoleCancelEventArgs e) => RestoreTerminal();
+    private void OnCancelKeyPress(object? sender, ConsoleCancelEventArgs e)
+    {
+        // While suspended (an external editor owns the TTY, issue #287) the saved settings
+        // are already back in place and the Ctrl+C belongs to the child. Tearing down here
+        // would latch _restored and permanently disable Resume, leaving the CLI alive with
+        // dead input. The suspend scope absorbs the cancel instead.
+        lock (_lifecycle)
+        {
+            if (_suspended) return;
+        }
+        RestoreTerminal();
+    }
 
     private void RestoreTerminal()
     {

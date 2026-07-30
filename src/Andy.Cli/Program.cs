@@ -1188,6 +1188,41 @@ class Program
             var lastWidth = viewport.Width;
             var lastHeight = viewport.Height;
 
+            // External editor round trip (issue #287). Both /editor and Ctrl+X funnel through
+            // OpenExternalEditorAsync so the key binding and the slash command cannot drift.
+            // Everything risky (terminal hand-off, process launch, temp file, size limit,
+            // structured-part preservation) lives in Andy.Cli.Editor and is unit-tested there;
+            // this is only the wiring.
+            var externalEditor = new Andy.Cli.Editor.ExternalEditorService(
+                new Andy.Cli.Editor.EditorResolver(),
+                new Andy.Cli.Editor.EditorProcessRunner(),
+                new Andy.Cli.Editor.TerminalSuspendController(
+                    Console.Write,
+                    rawInput,
+                    // The editor scribbled over the terminal while it owned it, so the next
+                    // frame must be a full clear + repaint and the cursor style re-applied.
+                    () => { lastReflowSig = int.MinValue; cursorStyledShown = false; }));
+            var promptComposer = new Andy.Cli.Editor.PromptLineComposer(prompt);
+            // Decides what each entry point starts from and what the composer ends up holding;
+            // Ctrl+X and /editor share it so they cannot diverge.
+            var externalEditorInvoker = new Andy.Cli.Editor.ExternalEditorInvoker(externalEditor, promptComposer);
+
+            void ReportExternalEditorResult(Andy.Cli.Editor.ExternalEditorResult result)
+            {
+                // The invoker has already updated the composer; this is only presentation.
+                if (result.Applied)
+                {
+                    feed.SnapToBottom();
+                    toast.Show("Prompt updated from your editor", 90);
+                }
+                else if (!string.IsNullOrEmpty(result.Message))
+                {
+                    feed.AddMarkdownRich("```\n" + result.Message + "\n```");
+                }
+                lastReflowSig = int.MinValue;
+                cursorStyledShown = false;
+            }
+
             // Helper method to show exit confirmation dialog
             async Task<bool> ShowExitConfirmationAsync()
             {
@@ -1504,6 +1539,15 @@ class Program
                         return;
                     }
 
+                    // Ctrl+X opens the current prompt in the external editor ($VISUAL, then
+                    // $EDITOR) - issue #287. Same code path as /editor, but this one keeps
+                    // whatever is already typed in the composer.
+                    if (k.Key == ConsoleKey.X && (k.Modifiers & ConsoleModifiers.Control) != 0)
+                    {
+                        ReportExternalEditorResult(await externalEditorInvoker.FromComposerAsync());
+                        return;
+                    }
+
                     // Ctrl+O toggles expand/collapse of tool-execution output detail.
                     //
                     // IMPORTANT: this is a PURE VIEW toggle. It only flips a shared
@@ -1693,6 +1737,15 @@ class Program
 
                     // Avoid mapping regular alphanumeric keys to actions
                     var textBeforeKey = prompt.Text;
+                    // Snapshot the composer BEFORE PromptLine consumes the key: an Enter that
+                    // submits clears it, and /editor (issue #287) has to open on the content
+                    // that was there a moment ago. Reading the composer after dispatch would
+                    // yield an empty document and, once #277 lands, would also lose the
+                    // structured parts a plain string cannot carry. Only taken on the keystroke
+                    // that can submit, so ordinary typing costs nothing.
+                    var documentBeforeKey = k.Key == ConsoleKey.Enter
+                        ? promptComposer.GetDocument()
+                        : Andy.Cli.Editor.ComposerDocument.Empty;
                     var submitted = prompt.OnKey(k);
                     fileMentionMenu.Update(prompt.Text, prompt.CursorPosition);
                     // If the keystroke edited the prompt text (typing, paste, backspace,
@@ -1821,6 +1874,18 @@ class Program
                                         var result = await toolsCommand.ExecuteAsync(args);
                                         feed.AddMarkdownRich(result.Message);
                                     }
+                                    return;
+                                }
+                                else if (commandName == "editor" || commandName == "edit")
+                                {
+                                    // Issue #287. Enter has already cleared the composer, so the
+                                    // editor is seeded from documentBeforeKey (captured above the
+                                    // OnKey call) minus the leading "/editor" token. The invoker
+                                    // writes the composer back on every outcome, so a failed edit
+                                    // restores the text instead of losing it.
+                                    feed.AddUserMessage(cmd);
+                                    ReportExternalEditorResult(
+                                        await externalEditorInvoker.FromSubmittedCommandAsync(documentBeforeKey));
                                     return;
                                 }
                                 else if (commandName == "mcp")

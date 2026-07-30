@@ -22,6 +22,7 @@ public static class SlashCommandCatalog
         new InlineCommandHelp.CommandInfo { Name = "formatters", Description = "Show which formatters run after Andy writes a file", Aliases = new[] { "formatter", "fmt" } },
         new InlineCommandHelp.CommandInfo { Name = "skills", Description = "List, inspect, and enable/disable agent skills", Aliases = new[] { "skill" } },
         new InlineCommandHelp.CommandInfo { Name = "theme", Description = "List, switch, or toggle transparency of the UI theme", Aliases = new[] { "themes" } },
+        new InlineCommandHelp.CommandInfo { Name = "editor", Description = "Compose the prompt in $VISUAL/$EDITOR; Ctrl+X does the same from the composer", Aliases = new[] { "edit" } },
         new InlineCommandHelp.CommandInfo { Name = "clear", Description = "Clear conversation history", Aliases = Array.Empty<string>() },
         new InlineCommandHelp.CommandInfo { Name = "restart", Description = "Restart the session with a fresh conversation context", Aliases = Array.Empty<string>() },
         new InlineCommandHelp.CommandInfo { Name = "sessions", Description = "List saved sessions that can be resumed", Aliases = Array.Empty<string>() },
