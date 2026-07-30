@@ -1,4 +1,3 @@
-using System.Reflection;
 using Andy.Cli.HeadlessConfig;
 using Andy.Engine;
 
@@ -40,22 +39,15 @@ internal static class HeadlessAgentBudgetFactory
             MaxTotalTurns = totalTurns,
             MaxContinuationWindows = continuedWindows,
             MaxElapsedTime = TimeSpan.FromSeconds(engineTimeoutSeconds),
+            SoftDeadline = TimeSpan.FromSeconds(
+                Math.Max(1, (int)(engineTimeoutSeconds * 0.85))),
             EquivalentCheckpointLimit = 2,
+            MaxOutputTokensCeiling = Math.Max(
+                maxOutputTokens,
+                Math.Min(131_072, maxOutputTokens * 2)),
+            RollingToolRoundWindow = 8,
+            EquivalentToolRoundLimit = 3,
         };
-
-        // These properties ship in Engine issue #54/#55. Reflection keeps this CLI
-        // source compatible with the currently published Engine package while local
-        // and future package builds activate the stronger policy automatically.
-        SetOptionalProperty(
-            policy,
-            "SoftDeadline",
-            TimeSpan.FromSeconds(Math.Max(1, (int)(engineTimeoutSeconds * 0.85))));
-        SetOptionalProperty(
-            policy,
-            "MaxOutputTokensCeiling",
-            Math.Max(maxOutputTokens, Math.Min(131_072, maxOutputTokens * 2)));
-        SetOptionalProperty(policy, "RollingToolRoundWindow", 8);
-        SetOptionalProperty(policy, "EquivalentToolRoundLimit", 3);
 
         return new HeadlessAgentBudget(windowTurns, maxOutputTokens, policy);
     }
@@ -64,16 +56,5 @@ internal static class HeadlessAgentBudgetFactory
     {
         var cleanupMargin = Math.Max(5, (int)Math.Ceiling(cliTimeoutSeconds * 0.03));
         return Math.Max(1, cliTimeoutSeconds - cleanupMargin);
-    }
-
-    private static void SetOptionalProperty(
-        AgentContinuationPolicy policy,
-        string propertyName,
-        object value)
-    {
-        var property = typeof(AgentContinuationPolicy).GetProperty(
-            propertyName,
-            BindingFlags.Instance | BindingFlags.Public);
-        property?.SetValue(policy, value);
     }
 }

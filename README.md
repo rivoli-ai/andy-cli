@@ -368,6 +368,8 @@ passing 10 for an aggregate mean reward of 0.333. The detailed report records
 the exact task set, timeout outcomes, and effective concurrency. Follow-up
 hardening derives nested Harbor/CLI/Engine deadlines, uses bounded continuation
 windows, and records progress and terminal stop reasons for timeout diagnosis.
+The hardened headless integration is compiled against Andy.Engine
+`2026.7.30-rc.94`.
 
 ### Building
 

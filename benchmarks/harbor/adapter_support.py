@@ -69,6 +69,7 @@ class AgentBudgets:
     harbor_timeout_seconds: int
     cli_timeout_seconds: int
     engine_timeout_seconds: int
+    command_timeout_seconds: int
 
 
 def compute_agent_budgets(
@@ -91,7 +92,13 @@ def compute_agent_budgets(
     )
     engine_margin = max(5, math.ceil(cli_timeout * 0.03))
     engine_timeout = max(1, cli_timeout - engine_margin)
-    return AgentBudgets(harbor_timeout, cli_timeout, engine_timeout)
+    command_timeout = min(900, engine_timeout)
+    return AgentBudgets(
+        harbor_timeout,
+        cli_timeout,
+        engine_timeout,
+        command_timeout,
+    )
 
 
 def resolve_harbor_agent_timeout(

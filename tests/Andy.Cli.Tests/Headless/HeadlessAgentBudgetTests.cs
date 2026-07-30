@@ -38,6 +38,10 @@ public class HeadlessAgentBudgetTests
         Assert.Equal(150, budget.ContinuationPolicy.MaxTotalTurns);
         Assert.Equal(2, budget.ContinuationPolicy.MaxContinuationWindows);
         Assert.Equal(TimeSpan.FromSeconds(840), budget.ContinuationPolicy.MaxElapsedTime);
+        Assert.Equal(TimeSpan.FromSeconds(714), budget.ContinuationPolicy.SoftDeadline);
+        Assert.Equal(16_384, budget.ContinuationPolicy.MaxOutputTokensCeiling);
+        Assert.Equal(8, budget.ContinuationPolicy.RollingToolRoundWindow);
+        Assert.Equal(3, budget.ContinuationPolicy.EquivalentToolRoundLimit);
     }
 
     [Theory]

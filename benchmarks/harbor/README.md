@@ -9,7 +9,7 @@ Andy's headless runtime, and leaves these artifacts in the Harbor agent logs:
 - `andy-events.jsonl` - structured Andy event stream
 - `andy-stderr.txt` - diagnostics from the CLI
 - `andy-final.txt` - final model response, when the run succeeds
-- `andy-budget.json` - resolved Harbor, CLI, and Engine deadlines
+- `andy-budget.json` - resolved Harbor, CLI, Engine, and command deadlines
 
 The bundled smoke dataset contains two isolated .NET 8 repair tasks with hidden,
 deterministic verifiers. It is intended as a fast harness regression gate before
@@ -60,7 +60,9 @@ reserves at least 5% (and 30 seconds) for Harbor cleanup, then at least 3% (and
 5 seconds) for CLI cleanup. It fails closed when that task deadline cannot be
 resolved, records all three deadlines in `andy-budget.json` and Harbor metadata,
 and defaults to 150 total turns in 50-turn continuation windows with an
-8192-token response budget.
+8192-token response budget. Individual commands are capped at the smaller of
+the Engine deadline and 900 seconds through the host-only
+`ExecuteCommand__MaximumTimeoutSeconds` setting.
 
 ## Prerequisites
 
@@ -192,8 +194,8 @@ keep Harbor's container isolation enabled.
 - Derived nested deadlines from Harbor's effective per-task timeout.
 - Added bounded continuation and output-token settings to generated headless
   configs.
-- Persisted deadline metadata and required exact task timeout resolution for
-  scored Terminal-Bench runs.
+- Persisted deadline metadata, bounded individual commands, and required exact
+  task timeout resolution for scored Terminal-Bench runs.
 
 ## Adapter checks
 

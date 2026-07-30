@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using Andy.Cli.HeadlessConfig;
@@ -298,10 +297,10 @@ public static class HeadlessAgentRunner
                 progress.WindowNumber,
                 progress.TotalTurns,
                 progress.StopReason,
-                GetOptionalProperty<string>(progress, "FinishReason"),
-                GetOptionalIntProperty(progress, "MaxOutputTokens"),
-                GetOptionalIntProperty(progress, "ConsecutiveOutputLimitResponses"),
-                GetOptionalIntProperty(progress, "TotalOutputLimitResponses"));
+                progress.FinishReason,
+                progress.MaxOutputTokens,
+                progress.ConsecutiveOutputLimitResponses,
+                progress.TotalOutputLimitResponses);
         };
 
         RequiredActionVerificationResult? requiredActionVerification = null;
@@ -513,24 +512,6 @@ public static class HeadlessAgentRunner
         stopReason.Equals("continuation_time_exceeded", StringComparison.OrdinalIgnoreCase) ||
         stopReason.Equals("deadline_exhausted", StringComparison.OrdinalIgnoreCase) ||
         stopReason.Equals("output_limit_exhausted", StringComparison.OrdinalIgnoreCase);
-
-    private static T? GetOptionalProperty<T>(object source, string propertyName)
-    {
-        var property = source.GetType().GetProperty(
-            propertyName,
-            BindingFlags.Instance | BindingFlags.Public);
-        if (property?.GetValue(source) is T value)
-            return value;
-        return default;
-    }
-
-    private static int? GetOptionalIntProperty(object source, string propertyName)
-    {
-        var property = source.GetType().GetProperty(
-            propertyName,
-            BindingFlags.Instance | BindingFlags.Public);
-        return property?.GetValue(source) is int value ? value : null;
-    }
 
     // AX.4: emit the end-of-run tool-usage audit just before `finished`, resolving
     // each invoked tool's permitted status against the live permission engine.

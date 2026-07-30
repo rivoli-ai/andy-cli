@@ -123,6 +123,7 @@ class AndyCli(BaseInstalledAgent):
                     "harbor_timeout_seconds": self._budgets.harbor_timeout_seconds,
                     "cli_timeout_seconds": self._budgets.cli_timeout_seconds,
                     "engine_timeout_seconds": self._budgets.engine_timeout_seconds,
+                    "command_timeout_seconds": self._budgets.command_timeout_seconds,
                 },
             }
 
@@ -197,6 +198,7 @@ class AndyCli(BaseInstalledAgent):
                     "harbor_timeout_seconds": self._budgets.harbor_timeout_seconds,
                     "cli_timeout_seconds": self._budgets.cli_timeout_seconds,
                     "engine_timeout_seconds": self._budgets.engine_timeout_seconds,
+                    "command_timeout_seconds": self._budgets.command_timeout_seconds,
                 },
                 indent=2,
             )
@@ -206,6 +208,10 @@ class AndyCli(BaseInstalledAgent):
         await environment.upload_file(local_config, self._REMOTE_CONFIG)
 
         command_prefix = ""
+        command_prefix += (
+            "export ExecuteCommand__MaximumTimeoutSeconds="
+            f"{self._budgets.command_timeout_seconds} && "
+        )
         if model.api_key_env is not None and api_key is not None:
             with NamedTemporaryFile(mode="w", encoding="utf-8") as secret_file:
                 secret_file.write(api_key)

@@ -117,12 +117,17 @@ class AgentBudgetTests(unittest.TestCase):
         self.assertEqual(3600, budgets.harbor_timeout_seconds)
         self.assertEqual(3420, budgets.cli_timeout_seconds)
         self.assertEqual(3317, budgets.engine_timeout_seconds)
+        self.assertEqual(900, budgets.command_timeout_seconds)
 
     def test_requested_cli_timeout_is_clamped_to_harbor_budget(self) -> None:
         budgets = compute_agent_budgets(360, requested_cli_timeout_seconds=12000)
 
         self.assertEqual(330, budgets.cli_timeout_seconds)
         self.assertLess(budgets.engine_timeout_seconds, budgets.cli_timeout_seconds)
+        self.assertEqual(
+            budgets.engine_timeout_seconds,
+            budgets.command_timeout_seconds,
+        )
 
     def test_resolves_effective_timeout_from_trial_and_task_cache(self) -> None:
         with TemporaryDirectory() as root:
