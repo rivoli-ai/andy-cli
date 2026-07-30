@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text;
 using Andy.Cli.Headless;
 using Microsoft.Extensions.Logging;
 
@@ -19,10 +20,56 @@ public static class HeadlessRunner
         TextWriter? stdout = null,
         TextWriter? stderr = null,
         ILoggerFactory? loggerFactory = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        // rivoli-ai/andy-cli#279: piped prompt material for the one-shot front
+        // end. Null means "resolve from the process" (Console.In when input is
+        // redirected, otherwise no stdin). Injectable so tests never depend on
+        // the ambient console.
+        TextReader? stdin = null,
+        bool? stdinRedirected = null)
     {
         stdout ??= Console.Out;
         stderr ??= Console.Error;
+
+        // rivoli-ai/andy-cli#279: `run` without `--headless` is the lightweight
+        // one-shot form (`andy-cli run "prompt"`, `git diff | andy-cli run ...`).
+        // The strict, config-driven contract below is selected by `--headless` and
+        // is unchanged by this branch.
+        if (!Andy.Cli.OneShot.OneShotArgParser.SelectsStrictHeadless(args))
+        {
+            // Warning threshold: a human running `andy-cli run "..."` should see
+            // the answer, not the tool-registration chatter the container runtime
+            // wants in its logs.
+            var oneShotLoggerFactory = loggerFactory ?? LoggerFactory.Create(builder => builder
+                .SetMinimumLevel(LogLevel.Warning)
+                .AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Warning));
+
+            var resolvedStdin = stdin ?? (ResolveStdinRedirected(stdinRedirected) ? OpenStandardInput() : null);
+
+            try
+            {
+                return await Andy.Cli.OneShot.OneShotRunner.RunAsync(
+                    args, stdout, stderr, oneShotLoggerFactory, resolvedStdin, ct: ct);
+            }
+            catch (OperationCanceledException)
+            {
+                stderr.WriteLine("andy-cli run: cancelled.");
+                return HeadlessExitCode.Cancelled;
+            }
+            catch (Exception ex)
+            {
+                stderr.WriteLine($"andy-cli run: internal error: {ex.GetType().Name}: {ex.Message}");
+                return HeadlessExitCode.InternalError;
+            }
+            finally
+            {
+                if (loggerFactory is null)
+                {
+                    oneShotLoggerFactory.Dispose();
+                }
+            }
+        }
+
         loggerFactory ??= LoggerFactory.Create(builder => builder.AddConsole(o =>
             o.LogToStandardErrorThreshold = LogLevel.Information));
 
@@ -96,6 +143,30 @@ public static class HeadlessRunner
             return HeadlessExitCode.InternalError;
         }
     }
+
+    // rivoli-ai/andy-cli#279: `Console.IsInputRedirected` can throw on hosts with
+    // no attached console; treat an unanswerable question as "not redirected" so
+    // the run reports a missing prompt instead of crashing.
+    private static bool ResolveStdinRedirected(bool? explicitValue)
+    {
+        if (explicitValue.HasValue)
+        {
+            return explicitValue.Value;
+        }
+        try
+        {
+            return Console.IsInputRedirected;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    // Decode piped input as UTF-8 regardless of the console's code page so a
+    // diff containing non-ASCII text survives the pipeline intact.
+    private static TextReader OpenStandardInput()
+        => new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false));
 
     // Opens a writer over the named FIFO (or file) at <paramref name="path"/> for
     // the event stream. FileMode.Open requires the FIFO to already exist - the

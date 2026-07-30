@@ -8,6 +8,12 @@ is NDJSON: one JSON object per line. The authoritative contract is
 writer is `HeadlessEventEmitter` in
 `src/Andy.Cli/Headless/HeadlessEventEmitter.cs`.
 
+The same stream is produced by the one-shot form
+(`andy-cli run --json "<prompt>"`, rivoli-ai/andy-cli#279); see
+[one-shot prompt execution](headless-runtime.md#one-shot-prompt-execution).
+Without `--json` a one-shot run renders that stream as concise human text on
+stderr instead, so the two output modes are always in sync.
+
 ## Destination
 
 Events are written to **stdout** by default (`output.stream == "stdout"`). When

@@ -1,6 +1,6 @@
 # Headless runtime
 
-Updated: 2026-07-23
+Updated: 2026-07-25
 
 ## Concept: andy-cli's dual role
 
@@ -11,6 +11,18 @@ andy-cli has two roles that share a single binary:
    by a config file. This is the mode that
    [andy-containers](https://github.com/rivoli-ai/andy-containers) spawns for the
    conductor platform.
+
+The headless runtime has two entry points that share one implementation:
+
+| Command | Contract | Audience |
+| --- | --- | --- |
+| `andy-cli run --headless --config <path>` | Strict, fully resolved config file. | Automation (andy-containers). |
+| `andy-cli run [options] "<prompt>"` | [One-shot prompt](#one-shot-prompt-execution) from argv and/or piped stdin. | Shell workflows. |
+
+Both funnel into `HeadlessAgentRunner`, so cancellation, the wall-clock timeout,
+permission evaluation, digesting/redaction, the tool-usage audit, the NDJSON
+event schema, and the `HeadlessExitCode` values are identical between them. The
+one-shot form is a front end, not a second agent host.
 
 The second role was established by the 2026-04-21 architectural decision recorded
 in [Epic AQ (rivoli-ai/andy-cli#44)](https://github.com/rivoli-ai/andy-cli/issues/44)
@@ -38,7 +50,7 @@ passes `run` as `args[0]`; the runner parses the remainder:
 
 | Flag | Required | Meaning |
 | --- | --- | --- |
-| `--headless` | Yes | Selects non-interactive execution. If omitted, the run fails with a config error: interactive `andy-cli run` without `--headless` is not supported. |
+| `--headless` | Yes | Selects the strict, config-driven contract. If omitted, `run` is the [one-shot prompt form](#one-shot-prompt-execution) instead; `--config` without `--headless` is rejected. |
 | `--config <path>` | Yes | Path to a `headless-config.v1` JSON file. `--config` with no following token is an error. |
 
 Any unrecognized token is rejected (`Unknown argument: <token>`). All argument
@@ -49,6 +61,123 @@ After parsing, `HeadlessRunner.RunAsync` loads and validates the config via
 `HeadlessConfigLoader.TryLoadAsync`. A load/validation failure also returns exit
 code `2`. On success it delegates to `HeadlessAgentRunner.ExecuteAsync`, which
 runs the agent loop and emits the [event stream](event-stream.md).
+
+## One-shot prompt execution
+
+`andy-cli run` without `--headless` is the lightweight form
+(rivoli-ai/andy-cli#279). It exists for shell workflows that do not want to
+author a config file:
+
+```sh
+andy-cli run "explain this repository"
+git diff | andy-cli run "review this diff"
+git log -20 --oneline | andy-cli run --json "summarise the recent work"
+```
+
+Parsing lives in `src/Andy.Cli/OneShot/OneShotArgs.cs`; the orchestration that
+synthesizes a `HeadlessRunConfig` and calls `HeadlessAgentRunner` lives in
+`src/Andy.Cli/OneShot/OneShotRunner.cs`. `HeadlessRunner.RunAsync` dispatches on
+the presence of `--headless`, so the strict contract above is unaffected.
+
+### Input combination
+
+Prompt material comes from two sources and they are combined **deterministically**:
+
+| Positional text | Piped stdin | Resulting prompt |
+| --- | --- | --- |
+| present | absent | the positional text, verbatim |
+| absent | present | the stdin payload, verbatim |
+| present | present | positional text, a blank line, then the stdin payload fenced by the separator below |
+| absent | absent | none: exit `2` with usage on stderr |
+
+The separator is part of the CLI contract:
+
+```
+<positional text>
+
+--- begin piped stdin ---
+<piped stdin>
+--- end piped stdin ---
+```
+
+Rules that make this reproducible:
+
+- Positional text always comes **first**: the instruction precedes the material
+  it applies to.
+- Positional tokens are joined with a single space and trimmed.
+- Trailing newlines produced by the upstream command are stripped from stdin;
+  interior blank lines and indentation are preserved byte-for-byte.
+- An all-whitespace stdin payload counts as absent.
+- stdin is decoded as UTF-8 regardless of the console code page.
+- stdin is capped at 1,048,576 characters. Beyond that it is truncated on a
+  boundary that never splits a surrogate pair and a notice is written to stderr.
+- `--no-stdin` ignores redirected input entirely.
+- The composed prompt is sent as the **user** turn; the system prompt is the
+  shared CLI prompt plus the one-shot contract note.
+
+### Default permission profile: fail-closed / read-only
+
+With no explicit permission policy, a one-shot run leaves `permissions` unset,
+which is exactly the headless fail-closed profile described in
+[Built-in tools and permission gating](#built-in-tools-and-permission-gating):
+
+- Read-only built-ins (`read_file`, `list_directory`, `search_text`, `git_diff`,
+  ...) are auto-allowed.
+- Every mutating built-in (`write_file`, `delete_file`, `move_file`,
+  `copy_file`, `replace_text`, `create_directory`) and `execute_command` is
+  **denied**.
+- The permission engine is wired with **no interactive broker**, so a denial is
+  recorded as `outcome: "denied"` on the event stream and the loop continues. A
+  one-shot run therefore **never blocks waiting for an approval**, which is what
+  makes it safe on redirected input and inside a pipeline.
+
+`--allow-tool <id>` relaxes exactly the named tools (repeatable, and a
+comma-separated list is accepted). Anything not listed stays denied. The
+end-of-run `tool_usage_audit` event reports the allow-list and, per invoked
+tool, whether the engine permitted it.
+
+### Options
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--json`, `--ndjson` | off | Write the verbatim NDJSON [event stream](event-stream.md) to stdout instead of concise text. |
+| `--provider <name>` | detected | LLM provider. Falls back to the last interactive selection, then credential detection. |
+| `--model <id>` | provider default | Model id. Falls back to the remembered model for that provider, then the registry default. |
+| `--cwd <path>` | current directory | Working directory; becomes `workspace.root`. Must exist. |
+| `--timeout <seconds>` | 300 | Wall-clock timeout, 1-86400. Exceeding it exits `4`. |
+| `--max-iterations <n>` | 25 | Agent turn budget, 1-10000. Exhausting it exits `4`. |
+| `--allow-tool <id>` | none | Permit one mutating tool (repeatable; comma-separated accepted). |
+| `--output <path>` | none | Also write the final answer to `<path>` (the config contract's durable output file). |
+| `--no-stdin` | off | Ignore redirected stdin. |
+| `--` | n/a | Every following token is prompt text, even one starting with `-`. |
+
+`--provider=x` and `--provider x` are both accepted. `--config` without
+`--headless` is rejected with a message pointing at the strict form.
+
+### Output
+
+**Text mode (default).** stdout carries **only** the model's final answer, so
+`andy-cli run "..." > answer.txt` does the obvious thing. Narration goes to
+stderr: one `[tool] <name> <outcome> (<ms> ms)` line per tool call and
+`[error] ...` / `[warn] ...` for event-stream errors. The renderer is a
+projection of the same event stream the machine mode emits
+(`OneShotTextEventWriter`), so the two modes cannot drift.
+
+**NDJSON mode (`--json`).** stdout is the byte-identical event contract the
+config-driven runtime produces: same envelope, same `schema_version: 1`, same
+kinds, same digesting. Tool arguments and results remain SHA-256 digests, never
+raw payloads.
+
+A closed read end (`andy-cli run "..." | head -1`) is tolerated: writes that
+fail with a broken pipe are swallowed rather than aborting the run or changing
+its exit code.
+
+### Exit codes
+
+Identical to the [table below](#exit-codes). In particular: `2` for a missing
+prompt, bad flags, a missing `--cwd`, or an unresolvable provider/model; `3` for
+cancellation (SIGINT/SIGTERM); `4` for `--timeout` or `--max-iterations`
+exhaustion; `1` for an agent/provider failure.
 
 ## Config schema walkthrough
 
