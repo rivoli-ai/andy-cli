@@ -47,6 +47,20 @@ public class HelpTextTests
     }
 
     [Fact]
+    public void InteractiveHelp_DocumentsShellEscapeAndHowToDisableIt()
+    {
+        // Issue #286. The disable switches are the part a locked-down deployment needs to find,
+        // so they belong in the in-app help and not only in docs/shell-escape.md.
+        var help = HelpText.InteractiveHelpMarkdown();
+
+        Assert.Contains("shell mode", help);
+        Assert.Contains("/attach", help);
+        Assert.Contains("Ctrl+C", help);
+        Assert.Contains("ShellEscape:Enabled=false", help);
+        Assert.Contains("ANDY_SHELL_ESCAPE=0", help);
+    }
+
+    [Fact]
     public void InteractiveHelp_DocumentsKeyBindings()
     {
         var help = HelpText.InteractiveHelpMarkdown();

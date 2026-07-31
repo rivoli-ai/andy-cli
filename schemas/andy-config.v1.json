@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rivoli-ai.com/schemas/andy-cli/andy-config.v1.json",
+  "title": "Andy CLI layered configuration v1",
+  "description": "Schema for andy.jsonc, the layered CLI configuration file (rivoli-ai/andy-cli#280). Sources are merged in the order packaged defaults < user (~/.andy/andy.jsonc) < project (<workspace>/andy.jsonc then <workspace>/.andy/andy.jsonc) < environment < CLI arguments. Unknown keys are rejected with source, line, column and key path. See docs/configuration.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional editor hint. Ignored by the loader."
+    },
+    "version": {
+      "const": 1,
+      "description": "Configuration schema version. Bump introduces a new schema file (andy-config.v2.json) plus an explicit compatibility layer; do not overload v1."
+    },
+    "llm": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Provider and model selection. Merged per field; 'providers' is a keyed map merged entry by entry.",
+      "properties": {
+        "defaultProvider": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Provider id or alias used when nothing overrides it (see ProviderRegistry). Empty string is rejected; omit the key instead."
+        },
+        "defaultModel": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Model id used for the default provider when nothing overrides it."
+        },
+        "providers": {
+          "type": "object",
+          "description": "Per-provider settings keyed by provider name. Keys merge across layers; a later layer only replaces the fields it declares.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "provider": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Underlying provider implementation id when the map key is an alias (e.g. key 'openai/codex' -> provider 'openai')."
+              },
+              "apiBase": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Endpoint base URL."
+              },
+              "apiKey": {
+                "type": "string",
+                "description": "API key. Prefer {env:NAME}; the resolved value is never printed."
+              },
+              "model": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Default model id for this provider entry."
+              },
+              "enabled": {
+                "type": "boolean",
+                "description": "Whether the entry is offered. Defaults to true."
+              },
+              "headers": {
+                "type": "object",
+                "description": "Extra HTTP headers. Values are always redacted in effective-config output.",
+                "additionalProperties": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "mcp": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Model Context Protocol servers for interactive mode.",
+      "properties": {
+        "servers": {
+          "type": "object",
+          "description": "Servers keyed by name. Keys merge across layers; within a server, 'args' REPLACES (it is never concatenated) while 'env' and 'headers' merge key by key.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "transport": {
+                "enum": ["stdio", "http", "sse", "streamable-http"],
+                "description": "Transport. 'sse' and 'streamable-http' are HTTP aliases."
+              },
+              "enabled": {
+                "type": "boolean",
+                "description": "Whether the server is started. Defaults to true."
+              },
+              "url": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Absolute http(s) MCP endpoint. Required for HTTP transports."
+              },
+              "command": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Executable for stdio transport. Started directly, without a shell."
+              },
+              "args": {
+                "type": "array",
+                "description": "Ordered argument list. Replaced wholesale by a higher-precedence layer.",
+                "items": { "type": "string" }
+              },
+              "workingDirectory": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Child-process working directory. A relative path is resolved against the directory of the file that declared it."
+              },
+              "env": {
+                "type": "object",
+                "description": "Environment variables for the child process.",
+                "additionalProperties": { "type": "string" }
+              },
+              "headers": {
+                "type": "object",
+                "description": "HTTP headers. Values are always redacted in effective-config output.",
+                "additionalProperties": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "ui": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Terminal UI preferences.",
+      "properties": {
+        "theme": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Theme name (see /theme). Unknown names fall back to the built-in default at render time."
+        },
+        "transparentBackground": {
+          "type": "boolean",
+          "description": "Let the terminal background show through instead of painting the theme background."
+        },
+        "diffStyle": {
+          "enum": ["auto", "unified", "split"],
+          "description": "Diff layout. 'auto' (default) picks side-by-side on wide terminals. Equivalent to ANDY_DIFF_STYLE."
+        }
+      }
+    },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Saved interactive sessions.",
+      "properties": {
+        "directory": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Directory holding saved sessions. Defaults to ~/.andy/sessions. A relative path is resolved against the directory of the file that declared it."
+        },
+        "maxTurns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000,
+          "description": "Hard cap on agent-loop turns before the run stops. Equivalent to ANDY_MAX_TURNS. Omit to keep the built-in default."
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Tool-permission behaviour. The permission RULES themselves stay in the dedicated permissions.json security format; only the mode is configurable here. The resolved rule-file locations are reported by 'andy-cli config show --effective'.",
+      "properties": {
+        "mode": {
+          "enum": ["ask", "auto"],
+          "description": "'ask' prompts for tools that need approval (default). 'auto' approves them without prompting and is equivalent to ANDY_AUTO_APPROVE / --auto / --yolo."
+        }
+      }
+    },
+    "logging": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Diagnostic logging.",
+      "properties": {
+        "level": {
+          "enum": ["trace", "debug", "information", "warning", "error", "critical", "none"],
+          "description": "Minimum level. Defaults to 'warning'."
+        },
+        "console": {
+          "type": "boolean",
+          "description": "Attach the console logger. Equivalent to ANDY_DEBUG=true. Off by default because console output corrupts the TUI."
+        }
+      }
+    }
+  }
+}

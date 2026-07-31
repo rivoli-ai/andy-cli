@@ -21,14 +21,22 @@ public static class ServiceConfiguration
     {
         var services = new ServiceCollection();
 
+        // The layered andy.jsonc configuration (rivoli-ai/andy-cli#280), loaded once
+        // per process and shared with every other entry point.
+        var effective = Andy.Cli.Configuration.AndyConfigurationService.Shared;
+        services.AddSingleton(effective);
+        services.AddSingleton(effective.Config);
+
         // Add logging
-        services.AddLogging();
+        services.AddLogging(builder =>
+            Andy.Cli.Configuration.ConfigStartup.ConfigureLogging(builder, effective));
 
         // Configure LLM services
         services.ConfigureLlmFromEnvironment();
         services.AddLlmServices(options =>
         {
             options.DefaultProvider = "cerebras";
+            Andy.Cli.Configuration.LlmOptionsBinder.Apply(options, effective.Config.Llm);
         });
 
         // Configure Tool services

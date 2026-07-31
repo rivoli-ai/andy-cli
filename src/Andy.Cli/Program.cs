@@ -189,12 +189,26 @@ class Program
                 // Fall through to the interactive TUI setup below.
                 break;
         }
-        // Apply the persisted theme (falling back to an ANDY_THEME env default,
-        // then the built-in dark theme) before the first frame is rendered.
+        // Layered configuration (rivoli-ai/andy-cli#280). Loaded once, before the
+        // first frame, and shared with every other mode through
+        // AndyConfigurationService.Shared so no two entry points can disagree.
+        // ANDY_THEME, ANDY_DIFF_STYLE, ANDY_MAX_TURNS, ANDY_AUTO_APPROVE, ANDY_DEBUG,
+        // --auto and --yolo are all folded in by the loader at their documented
+        // precedence, so their old spellings keep working unchanged.
+        var andyConfig = Andy.Cli.Configuration.AndyConfigurationService.InitializeShared(
+            new Andy.Cli.Configuration.ConfigLoadRequest
+            {
+                WorkspaceDirectory = Directory.GetCurrentDirectory(),
+                CommandLineArguments = args,
+            });
+        Andy.Cli.Configuration.ConfigStartup.Apply(andyConfig);
+
+        // Apply the persisted theme (falling back to the effective ui.theme, then the
+        // built-in dark theme) before the first frame is rendered.
         var themeMemory = new ThemeMemoryService();
-        var savedThemeName = themeMemory.LoadTheme()
-            ?? Environment.GetEnvironmentVariable("ANDY_THEME");
-        var savedTheme = Andy.Cli.Themes.Theme.Resolve(savedThemeName, themeMemory.LoadTransparentBackground());
+        var (savedThemeName, transparentBackground) =
+            Andy.Cli.Configuration.ConfigStartup.ResolveTheme(andyConfig, themeMemory);
+        var savedTheme = Andy.Cli.Themes.Theme.Resolve(savedThemeName, transparentBackground);
         if (savedTheme != null)
         {
             Andy.Cli.Themes.Theme.Current = savedTheme;
@@ -229,6 +243,10 @@ class Program
         // Declared outside the try so it can be disposed deterministically in the
         // finally below. Remains null unless instrumentation is explicitly enabled.
         InstrumentationServer? instrumentationServer = null;
+
+        // Undo/redo transaction log (issue #276). Declared here so its shadow
+        // snapshots are cleaned up in the finally below when the session ends.
+        Andy.Cli.Services.Undo.UndoManager? undoManager = null;
 
         try
         {
@@ -300,9 +318,23 @@ class Program
             // restores capture once the feed is back at the bottom.
             var selectionGate = new Andy.Cli.Input.ScrollSelectionGate();
 
+            // Markdown-defined slash commands (issue #281): discovered from ~/.andy/commands
+            // and <workspace>/.andy/commands. Discovery is lazy and never throws, so a broken
+            // template cannot stop startup; problems surface through /commands diagnostics.
+            var customCommandCatalog = Andy.Cli.Commands.Custom.CustomCommandCatalog.CreateDefault(
+                Directory.GetCurrentDirectory());
+            var customCommandsCommand = new Andy.Cli.Commands.Custom.CustomCommandsCommand(customCommandCatalog);
+
             // Initialize inline command help for slash commands
             var inlineCommandHelp = new InlineCommandHelp();
-            inlineCommandHelp.SetCommands(Andy.Cli.Commands.SlashCommandCatalog.CreateInlineHelpCommands());
+            inlineCommandHelp.SetCommands(
+                Andy.Cli.Commands.SlashCommandCatalog.CreateInlineHelpCommands(customCommandCatalog.Commands));
+
+            // @file mentions (issue #277): the picker completes workspace paths in the composer and
+            // the resolver reads their content at submission time into structured prompt parts.
+            var fileMentions = new Andy.Cli.Services.FileMentions.FileMentionSession(
+                Andy.Cli.Services.WorkingDirectoryTracker.Instance.Current);
+            var fileMentionMenu = new Andy.Cli.Widgets.FileMentionMenu(fileMentions.Search);
 
             // Inline tool-approval prompt (issue #222): permission requests take over the prompt
             // area instead of a modal overlay, so the transcript stays visible while deciding.
@@ -325,16 +357,15 @@ class Program
 
             services.AddSingleton<IConfiguration>(configuration);
 
+            // Logging comes from the effective logging.level / logging.console, which
+            // already folds in ANDY_DEBUG=true and --debug / --verbose / --quiet.
+            // Console logging stays off by default: stdout output corrupts the TUI.
             services.AddLogging(builder =>
-            {
-                // Disable console logging to avoid UI interference
-                // To enable debugging, set environment variable ANDY_DEBUG=true
-                if (Environment.GetEnvironmentVariable("ANDY_DEBUG") == "true")
-                {
-                    builder.AddConsole();
-                    builder.SetMinimumLevel(LogLevel.Information);
-                }
-            }); // Conditional logging based on environment variable
+                Andy.Cli.Configuration.ConfigStartup.ConfigureLogging(builder, andyConfig));
+
+            // The typed configuration is available to every service in the graph.
+            services.AddSingleton(andyConfig);
+            services.AddSingleton(andyConfig.Config);
 
             // Configure LLM services: env vars first (as fallback defaults), then
             // appsettings.json Llm section (takes precedence, overwrites env var defaults)
@@ -354,8 +385,21 @@ class Program
                     }
                 }
 
-                // Only auto-detect if no DefaultProvider was explicitly configured in appsettings
-                var configuredDefault = configuration.GetSection("Llm:DefaultProvider").Value;
+                // andy.jsonc llm.* on top: it has already merged user, project,
+                // environment and CLI at their documented precedence.
+                Andy.Cli.Configuration.LlmOptionsBinder.Apply(options, andyConfig.Config.Llm);
+
+                // rivoli-ai/andy-cli#284: layer in credentials stored by `andy-cli auth login`
+                // (OS credential store) and teach provider detection about them. Runs AFTER the
+                // andy.jsonc binder on purpose: LlmCredentialBinder only fills a gap, so an
+                // apiKey declared in andy.jsonc is preserved, while an environment-provided
+                // credential still wins outright. Same call in headless and ACP mode.
+                Andy.Cli.Auth.AuthBootstrap.Configure(options);
+
+                // Only auto-detect if no DefaultProvider was explicitly configured
+                var configuredDefault = string.IsNullOrEmpty(options.DefaultProvider)
+                    ? configuration.GetSection("Llm:DefaultProvider").Value
+                    : options.DefaultProvider;
                 if (string.IsNullOrEmpty(configuredDefault))
                 {
                     var detectionService = new ProviderDetectionService();
@@ -378,6 +422,13 @@ class Program
             // main input-owning loop (which renders the modal). Same instance used by DI and the loop.
             var permissionBroker = new Andy.Cli.Services.PermissionRequestBroker();
 
+            // Issue #278: the session's primary operating mode (Build / Plan). Registered BEFORE the
+            // tool services so AddAndyCliPermissions' TryAdd keeps this instance and hands it to the
+            // permission overlay that enforces Plan mode.
+            var startupModeSelection = Andy.Cli.Modes.StartupModeSelector.Resolve(args);
+            var agentModeState = new Andy.Cli.Modes.AgentModeState(startupModeSelection.Mode);
+            services.AddSingleton(agentModeState);
+
             // Configure the core Andy.Tools service graph (interactive prompt for the TUI).
             // Shared with the ACP and one-shot command paths via AppCompositionRoot.
             AppCompositionRoot.AddCoreToolServices(services, permissionBroker);
@@ -399,25 +450,96 @@ class Program
             // Initialize tool registry and register tools
             var toolRegistry = AppCompositionRoot.InitializeToolRegistry(serviceProvider);
 
+            // Post-mutation pipeline (issue #283): configured formatters run after a successful file
+            // mutation, and the diff shown to the user is computed from the final on-disk bytes.
+            // Formatter processes are authorized through the same permission gate as any command.
+            Andy.Cli.Services.Formatting.PostMutationPipelineFactory.ConfigureAmbient(
+                serviceProvider,
+                Directory.GetCurrentDirectory(),
+                serviceProvider.GetService<ILoggerFactory>());
+
             // Load project/appsettings MCP servers before creating the agent so
             // discovered remote tools are included in its initial tool set.
             var mcpConfiguration = McpConfigurationLoader.Load(
                 configuration,
-                Directory.GetCurrentDirectory());
+                Directory.GetCurrentDirectory(),
+                andyConfig.Config);
             await using var mcpToolHost = await InteractiveMcpToolHost.BuildAsync(
                 mcpConfiguration,
                 toolRegistry,
+                serviceProvider.GetService<ILoggerFactory>());
+
+            // Changed-file diagnostics from configured language servers (rivoli-ai/andy-cli#282).
+            // Inert unless .andy/lsp-servers.json (or Lsp:Servers in appsettings) names a server:
+            // Andy never downloads a toolchain, and servers start lazily on the first matching file
+            // change rather than here. Disposed with the session so no server outlives the process.
+            await using var lspSession = Andy.Cli.Lsp.LspSession.Start(
+                configuration,
+                Directory.GetCurrentDirectory(),
                 serviceProvider.GetService<ILoggerFactory>());
 
             // Initialize commands
             var modelCommand = new ModelCommand(serviceProvider);
             var toolsCommand = new ToolsCommand(serviceProvider);
             var mcpCommand = new McpCommand(mcpToolHost);
+            var lspCommand = new LspCommand();
             var permissionsCommand = new PermissionsCommand(serviceProvider);
+            var formattersCommand = new FormattersCommand(Directory.GetCurrentDirectory());
             var permissionsManager = new Andy.Cli.Widgets.PermissionsManager(Directory.GetCurrentDirectory());
             var skillsCommand = new Andy.Cli.Commands.SkillsCommand(serviceProvider);
+            // Provider sign-in / status / sign-out (issue #284). Shares the process-wide
+            // credential resolver so a login is visible to provider detection immediately.
+            var authCommand = new Andy.Cli.Commands.AuthCommand(
+                new Andy.Cli.Auth.AuthService(
+                    Andy.Cli.Auth.AuthBootstrap.Resolver.Store,
+                    Andy.Cli.Auth.AuthBootstrap.Resolver));
             var themeCommand = new ThemeCommand(themeMemory);
+            var planModeGrants = serviceProvider.GetRequiredService<Andy.Cli.Modes.PlanModeGrantStore>();
+            var modeCommand = new Andy.Cli.Commands.ModeCommand(agentModeState, planModeGrants);
             var commandPalette = new CommandPalette();
+
+            // Issue #278: offer a Plan-mode opt-in for each MCP server that just connected. Plan mode
+            // denies MCP tools by default (they carry no capability metadata), so the choice is put in
+            // front of the user at connection time instead of surfacing as a failed plan turn later.
+            // The offer grants NOTHING unless the user picks one of the allow actions, and it is only
+            // raised once per server unless that server later exposes a tool it has not offered.
+            var mcpPlanOptIn = new Andy.Cli.Widgets.McpPlanOptInPrompt(planModeGrants);
+
+            // Plan-mode grants are per developer, so a committed project .andy/modes.json cannot
+            // supply them. When one tries to, say so rather than leaving the author wondering why
+            // their file does nothing - the tools stay denied either way.
+            foreach (var grantDiagnostic in planModeGrants.Diagnostics)
+            {
+                feed.AddMarkdownRich(ConsoleColors.WarningPrefix($"[mode] {grantDiagnostic}"));
+            }
+
+            foreach (var mcpStatus in mcpToolHost.Statuses)
+            {
+                if (mcpStatus.State == Andy.Cli.Mcp.McpServerConnectionState.Connected)
+                {
+                    mcpPlanOptIn.Enqueue(mcpStatus.Name, mcpStatus.ToolIds);
+                }
+            }
+
+            // Issue #278: keep the status line's mode badge in step with the mode. Build shows no
+            // badge (it is the unrestricted default); a restricted mode is always visible.
+            void RefreshModeBadge()
+            {
+                var definition = agentModeState.CurrentDefinition;
+                contextStatusBar.SetAgentModeBadge(definition.AllowsMutation ? null : definition.Badge);
+            }
+
+            RefreshModeBadge();
+            agentModeState.ModeChanged += (_, _) => RefreshModeBadge();
+            if (startupModeSelection.Error != null)
+            {
+                feed.AddMarkdownRich(ConsoleColors.WarningPrefix($"[mode] {startupModeSelection.Error}"));
+            }
+            else if (!agentModeState.CurrentDefinition.AllowsMutation)
+            {
+                feed.AddMarkdownRich($"[mode] Starting in {agentModeState.CurrentDefinition.DisplayName} mode. "
+                    + agentModeState.CurrentDefinition.Summary);
+            }
 
             Andy.Model.Llm.ILlmProvider? llmProvider = null;
             SimpleAssistantService? aiService = null;
@@ -512,7 +634,8 @@ class Program
                     tokenCounter,
                     loggerFactory,
                     extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, currentProvider),
-                    systemPromptSuffix: ComposeSkillsPromptSection());
+                    systemPromptSuffix: ComposeSkillsPromptSection(),
+                    modeState: agentModeState);
 
                 var providerUrl = ProviderUrlResolver.Resolve(currentProvider);
 
@@ -548,9 +671,24 @@ class Program
             // to ~/.andy/sessions/<id>.json. The user can exit and later restore the full
             // conversation context with `andy-cli --resume <id>` / `--continue`, or switch
             // sessions in place with /resume. /sessions lists what can be resumed.
-            var sessionStore = new Andy.Cli.Services.Sessions.SessionStore();
+            var sessionStore = new Andy.Cli.Services.Sessions.SessionStore(
+                andyConfig.Config.Session.Directory);
             var sessionsCommand = new Andy.Cli.Commands.SessionsCommand(sessionStore);
             var sessionId = Andy.Cli.Services.Sessions.SessionStore.NewSessionId();
+            // Archive management (issue #285): export/import/fork/rename/stats. The id
+            // getter lets /session default to the session currently being recorded.
+            var sessionCommand = new Andy.Cli.Commands.SessionCommand(sessionStore, () => sessionId);
+
+            // Transactional undo/redo (issue #276): every interactive turn is bracketed by
+            // shadow Git snapshots stored outside the repository (~/.andy/snapshots/<workspace-id>),
+            // so /undo can restore the exact pre-turn contents of the files the turn touched
+            // without ever reading or writing the user's own index, refs, stash or branch.
+            undoManager = Andy.Cli.Services.Undo.UndoManager.Create(
+                Andy.Cli.Services.WorkingDirectoryTracker.Instance.Current,
+                sessionId,
+                logger: serviceProvider.GetService<ILoggerFactory>()?.CreateLogger("Andy.Undo"));
+            var undoCommand = new Andy.Cli.Commands.UndoCommand(undoManager, text => prompt.SetText(text));
+            var redoCommand = new Andy.Cli.Commands.RedoCommand(undoManager);
 
             void SaveSession()
             {
@@ -558,11 +696,22 @@ class Program
                 {
                     var service = aiService;
                     if (service == null) return;
+                    var sessionProvider = modelCommand.GetCurrentProvider();
+                    var sessionModel = modelCommand.GetCurrentModel();
+                    // Aggregate usage travels in the session envelope (issue #285) as an
+                    // optional field, so sessions written before it existed still load.
+                    var usage = Andy.Cli.Services.Sessions.SessionUsage
+                        .FromTokenCounts(tokenCounter.TotalInputTokens, tokenCounter.TotalOutputTokens)
+                        .WithEstimatedCost(sessionProvider, sessionModel);
                     sessionStore.Save(
                         sessionId,
                         service.ExportTranscript(),
-                        modelCommand.GetCurrentProvider(),
-                        modelCommand.GetCurrentModel());
+                        sessionProvider,
+                        sessionModel,
+                        new Andy.Cli.Services.Sessions.SessionSaveOptions { Usage = usage },
+                        // Issue #278: record the operating mode so a resumed planning session comes
+                        // back in Plan mode instead of silently regaining write access.
+                        agentModeState.CurrentDefinition.Id);
                 }
                 catch (Exception ex)
                 {
@@ -571,9 +720,41 @@ class Program
                 }
             }
 
-            void ReplaySessionIntoFeed(Andy.Engine.TranscriptSnapshot snapshot)
+            // Commands the user ran themselves in shell mode (#286) live in their own per-session
+            // file, never in the engine transcript, so replaying a session cannot pass them off as
+            // something the model did.
+            var userShellLog = new Andy.Cli.Services.Sessions.UserShellLogStore();
+
+            // Issue #278: restore the mode a session was saved in. Entering a restrictive mode always
+            // succeeds; LEAVING one never does from a restore (AgentModeState requires an explicit
+            // user action), so a resumed Build session cannot silently re-enable writes for someone
+            // who is currently planning. Returns a feed message, or null when nothing to report.
+            string? ApplySessionMode(Andy.Cli.Services.Sessions.SessionSummary summary)
             {
-                foreach (var entry in Andy.Cli.Services.Sessions.SessionReplayFormatter.Format(snapshot))
+                if (!Andy.Cli.Modes.AgentModeCatalog.TryParse(summary.Mode, out var saved) || saved is null)
+                {
+                    // Sessions saved before modes existed carry no mode: leave the current one alone.
+                    return null;
+                }
+
+                if (saved.Mode == agentModeState.Current)
+                {
+                    return null;
+                }
+
+                if (agentModeState.TrySet(saved.Mode, Andy.Cli.Modes.ModeChangeSource.SessionRestore, out var modeError))
+                {
+                    return $"[mode] Restored {saved.DisplayName} mode from the session. {saved.Summary}";
+                }
+
+                return ConsoleColors.WarningPrefix(
+                    $"[mode] The session was saved in {saved.DisplayName} mode, but {modeError}");
+            }
+
+            void ReplaySessionIntoFeed(Andy.Engine.TranscriptSnapshot snapshot, string replaySessionId)
+            {
+                var shellCommands = userShellLog.Load(replaySessionId);
+                foreach (var entry in Andy.Cli.Services.Sessions.SessionReplayFormatter.Format(snapshot, shellCommands))
                 {
                     switch (entry.Kind)
                     {
@@ -582,6 +763,11 @@ class Program
                             break;
                         case Andy.Cli.Services.Sessions.SessionReplayFormatter.EntryKind.Assistant:
                             feed.AddMarkdownRich(entry.Text);
+                            break;
+                        case Andy.Cli.Services.Sessions.SessionReplayFormatter.EntryKind.UserShell:
+                            // Warning-toned, like the shell prompt itself, so a replayed user
+                            // command reads as the user's own action rather than a system notice.
+                            feed.AddMarkdownRich(ConsoleColors.WarningPrefix(entry.Text));
                             break;
                         default:
                             feed.AddMarkdownRich(ConsoleColors.Dim(entry.Text));
@@ -627,8 +813,13 @@ class Program
                             {
                                 aiService.RestoreTranscript(record.Snapshot);
                                 sessionId = targetId;
-                                ReplaySessionIntoFeed(record.Snapshot);
+                                ReplaySessionIntoFeed(record.Snapshot, targetId);
                                 feed.AddMarkdownRich($"[session] Resumed session {targetId} ({record.Summary.TurnCount} turn{(record.Summary.TurnCount == 1 ? "" : "s")} restored)");
+                                var startupModeMessage = ApplySessionMode(record.Summary);
+                                if (startupModeMessage != null)
+                                {
+                                    feed.AddMarkdownRich(startupModeMessage);
+                                }
                             }
                         }
                         catch (Exception ex)
@@ -656,14 +847,124 @@ class Program
                     }
                 }
             }
-            // --auto / ANDY_AUTO_APPROVE=1: start the session with auto-approve already on.
-            if (autoApprovalMode != null &&
-                (args.Any(a => a == "--auto" || a == "--yolo") ||
-                 !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ANDY_AUTO_APPROVE"))))
+            // permissions.mode == "auto": start the session with auto-approve already
+            // on. The loader folds --auto, --yolo and ANDY_AUTO_APPROVE into that mode,
+            // so all three keep working exactly as before.
+            if (autoApprovalMode != null && andyConfig.Config.Permissions.AutoApprove)
             {
                 autoApprovalMode.Enable();
                 contextStatusBar.SetAutoMode(true);
                 feed.AddMarkdownRich("[auto] Auto-approve ON for this session. Low-risk actions run without prompting; destructive actions still ask.");
+            }
+
+            // ---- Shell escape (issue #286) ---------------------------------------------------
+            //
+            // Typing "!" at offset zero switches the composer to shell mode; submitting runs the
+            // line through the SAME permission-gated execute_command path the model's shell tool
+            // uses (see UserShellCommandRunner for the security model). Disable with
+            // ShellEscape:Enabled=false or ANDY_SHELL_ESCAPE=0.
+            var shellEscapeOptions = Andy.Cli.Configuration.ShellEscapeOptions.Resolve(configuration);
+            prompt.SetShellModeAvailable(shellEscapeOptions.Enabled);
+
+            var userShellRunner = shellEscapeOptions.Enabled
+                ? new Andy.Cli.Services.Shell.UserShellCommandRunner(
+                    serviceProvider.GetRequiredService<IToolExecutor>(),
+                    shellEscapeOptions)
+                : null;
+            var userShellAttachment = new Andy.Cli.Services.Shell.UserShellOutputAttachment();
+
+            // Cancellation for the command currently running in shell mode. Ctrl+C cancels THIS,
+            // not the app: the dispatcher claims SIGINT only while a command is in flight, so an
+            // idle prompt keeps the ordinary Ctrl+C behaviour.
+            CancellationTokenSource? activeShellCts = null;
+            var shellRunLock = new object();
+
+            // Without a raw terminal (redirected input) nothing else has claimed CancelKeyPress,
+            // so the interactive loop registers the bridge itself. With one, RawTerminalInput's own
+            // handler already consults the dispatcher and additionally keeps the tty in raw mode.
+            if (rawInput == null)
+            {
+                Console.CancelKeyPress += (_, e) =>
+                {
+                    if (Andy.Cli.Input.InterruptDispatcher.Instance.Dispatch()) e.Cancel = true;
+                };
+            }
+
+            async Task RunUserShellCommandAsync(string command)
+            {
+                if (userShellRunner == null)
+                {
+                    toast.Show("Shell escape is disabled for this session.", 120);
+                    return;
+                }
+
+                CancellationTokenSource cts;
+                lock (shellRunLock)
+                {
+                    if (activeShellCts != null)
+                    {
+                        toast.Show("A shell command is already running (Ctrl+C to cancel it).", 120);
+                        return;
+                    }
+                    cts = new CancellationTokenSource();
+                    activeShellCts = cts;
+                }
+
+                var row = Andy.Cli.Widgets.Tools.UserShellFeedRow.CreateRunning(
+                    command, Andy.Cli.Services.WorkingDirectoryTracker.Instance.Current);
+                feed.AddItem(row);
+                feed.SnapToBottom();
+
+                // Claim Ctrl+C for the duration of the command. Cancelling the token kills the
+                // child through the tool layer and, if a consent prompt is up, resolves it to
+                // deny-once - so the composer is never left waiting on a dialog nobody can answer.
+                var interrupt = Andy.Cli.Input.InterruptDispatcher.Instance.Install(() =>
+                {
+                    try { cts.Cancel(); } catch (ObjectDisposedException) { /* already finished */ }
+                    return true;
+                });
+
+                Andy.Cli.Services.Shell.UserShellCommandResult result;
+                try
+                {
+                    result = await userShellRunner.RunAsync(command, cts.Token);
+                }
+                catch (Exception ex)
+                {
+                    Andy.Cli.Services.CrashLog.Write("shell.Run", ex);
+                    result = Andy.Cli.Services.Shell.UserShellCommandResult.DisabledResult(
+                        command, Andy.Cli.Services.WorkingDirectoryTracker.Instance.Current) with
+                    {
+                        Outcome = Andy.Cli.Services.Shell.UserShellOutcome.Failed,
+                        ErrorMessage = ex.Message
+                    };
+                }
+                finally
+                {
+                    // Release the key BEFORE disposing the source it cancels, so a press landing
+                    // in the gap falls through to the ordinary Ctrl+C behaviour rather than being
+                    // swallowed by a handler that can no longer do anything.
+                    interrupt.Dispose();
+                    lock (shellRunLock) { activeShellCts = null; }
+                    cts.Dispose();
+                }
+
+                Andy.Cli.Widgets.Tools.UserShellFeedRow.Complete(row, result);
+                feed.SnapToBottom();
+
+                // Recorded for audit and replay (redacted on the way to disk) and made available to
+                // /attach. Output is NEVER handed to the model on its own.
+                userShellLog.Record(sessionId, result);
+                userShellAttachment.Record(result);
+
+                if (result.Outcome == Andy.Cli.Services.Shell.UserShellOutcome.Denied)
+                {
+                    toast.Show("Command blocked by the permission rules (/permissions to review).", 150);
+                }
+                else if (!result.HasNoOutput)
+                {
+                    toast.Show("/attach adds this output to your next prompt.", 90);
+                }
             }
 
             // In-place session switch for /resume <id>: replaces the assistant service with a
@@ -708,7 +1009,8 @@ class Program
                     resumeProvider,
                     tokenCounter,
                     resumeLoggerFactory,
-                    extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, resumeProvider));
+                    extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, resumeProvider),
+                    modeState: agentModeState);
                 aiService.RestoreTranscript(record.Snapshot);
                 sessionId = targetId;
 
@@ -731,8 +1033,13 @@ class Program
                 promptHistory.Clear();
                 historyIndex = -1;
                 feed.Clear();
-                ReplaySessionIntoFeed(record.Snapshot);
+                ReplaySessionIntoFeed(record.Snapshot, targetId);
                 feed.AddMarkdownRich($"[session] Resumed session {targetId} ({record.Summary.TurnCount} turn{(record.Summary.TurnCount == 1 ? "" : "s")} restored)");
+                var resumeModeMessage = ApplySessionMode(record.Summary);
+                if (resumeModeMessage != null)
+                {
+                    feed.AddMarkdownRich(resumeModeMessage);
+                }
                 await Task.CompletedTask;
                 return null;
             }
@@ -762,7 +1069,8 @@ class Program
                         tokenCounter,
                         loggerFactory,
                         extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, provider),
-                        systemPromptSuffix: ComposeSkillsPromptSection());
+                        systemPromptSuffix: ComposeSkillsPromptSection(),
+                        modeState: agentModeState);
                 }
                 else
                 {
@@ -783,7 +1091,7 @@ class Program
             });
 
             // Setup command palette commands
-            commandPalette.SetCommands(new[]
+            var builtInPaletteCommands = new[]
             {
                 new CommandPalette.CommandItem
                 {
@@ -863,7 +1171,8 @@ class Program
                                         tokenCounter,
                                         loggerFactory,
                                         extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, newProvider),
-                                        systemPromptSuffix: ComposeSkillsPromptSection());
+                                        systemPromptSuffix: ComposeSkillsPromptSection(),
+                                        modeState: agentModeState);
                                 }
 
                                 feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
@@ -980,6 +1289,19 @@ class Program
                 },
                 new CommandPalette.CommandItem
                 {
+                    Name = "Language Server Status",
+                    Description = "Show configured language servers, their state, and startup errors",
+                    Category = "Tools",
+                    Aliases = new[] { "lsp", "lsp status", "lsp restart" },
+                    AsyncAction = async args =>
+                    {
+                        var subcommand = args.Length == 0 ? new[] { "status" } : args;
+                        var result = await lspCommand.ExecuteAsync(subcommand);
+                        feed.AddMarkdownRich("```\n" + result.Message + "\n```");
+                    }
+                },
+                new CommandPalette.CommandItem
+                {
                     Name = "Execute Tool",
                     Description = "Run a tool with parameters",
                     Category = "Tools",
@@ -1084,11 +1406,110 @@ class Program
                         feed.AddMarkdownRich(Andy.Cli.Commands.HelpText.InteractiveHelpMarkdown());
                     }
                 }
-            });
+            };
+
+            // Rebuilds the two command surfaces (inline autocomplete + palette) from the
+            // built-ins plus the current Markdown commands. Called at startup and after
+            // /commands reload, so editing a template does not require restarting the TUI.
+            void RefreshCommandSurfaces()
+            {
+                var custom = customCommandCatalog.Commands;
+                inlineCommandHelp.SetCommands(
+                    Andy.Cli.Commands.SlashCommandCatalog.CreateInlineHelpCommands(custom));
+                commandPalette.SetCommands(builtInPaletteCommands.Concat(custom.Select(definition =>
+                    new CommandPalette.CommandItem
+                    {
+                        Name = "/" + definition.Name,
+                        // The source is shown in the palette so it is obvious whether a command
+                        // came from the repository or from the user's home directory.
+                        Description = $"[{definition.SourceLabel}] {definition.Description}",
+                        Category = "Markdown Commands",
+                        Aliases = new[] { definition.Name, definition.SlashPathForm },
+                        ParameterHint = definition.UsesArguments || definition.MaxPositional > 0
+                            ? "Arguments are substituted into the template"
+                            : "",
+                        AsyncAction = args =>
+                        {
+                            RunCustomCommand(definition, args.Length == 0 ? "" : string.Join(" ", args));
+                            return Task.CompletedTask;
+                        }
+                    })).ToArray());
+            }
+
+            // Expand a Markdown command and submit the result through the ordinary user-message
+            // path. Routing it here (rather than anywhere closer to the model) is what keeps the
+            // issue #281 security constraints true: the prompt is just text, so permissions,
+            // approvals, and the plan-mode overlay apply exactly as they do to typed input.
+            void RunCustomCommand(Andy.Cli.Commands.Custom.CustomCommandDefinition definition, string rawArguments)
+            {
+                var expanded = customCommandCatalog.Expand(definition, rawArguments);
+                var promptText = expanded.ToPromptText();
+
+                promptHistory.Add(promptText);
+                int customMessageNumber = promptHistory.Count;
+                feed.AddUserMessage(promptText, customMessageNumber);
+                historyIndex = -1;
+
+                foreach (var diagnostic in expanded.Diagnostics)
+                {
+                    feed.AddMarkdownRich(ConsoleColors.NotePrefix(
+                        $"[/{definition.Name}] {diagnostic.Message}"));
+                }
+
+                if (aiService == null)
+                {
+                    feed.AddMarkdownRich(ConsoleColors.WarningPrefix(
+                        "No model is configured, so the expanded command was not sent."));
+                    return;
+                }
+
+                lock (messagePumpLock)
+                {
+                    isProcessingMessage = true;
+                }
+                StartMessagePump(promptText);
+            }
+
+            RefreshCommandSurfaces();
 
             bool cursorStyledShown = false;
             var lastWidth = viewport.Width;
             var lastHeight = viewport.Height;
+
+            // External editor round trip (issue #287). Both /editor and Ctrl+X funnel through
+            // OpenExternalEditorAsync so the key binding and the slash command cannot drift.
+            // Everything risky (terminal hand-off, process launch, temp file, size limit,
+            // structured-part preservation) lives in Andy.Cli.Editor and is unit-tested there;
+            // this is only the wiring.
+            var externalEditor = new Andy.Cli.Editor.ExternalEditorService(
+                new Andy.Cli.Editor.EditorResolver(),
+                new Andy.Cli.Editor.EditorProcessRunner(),
+                new Andy.Cli.Editor.TerminalSuspendController(
+                    Console.Write,
+                    rawInput,
+                    // The editor scribbled over the terminal while it owned it, so the next
+                    // frame must be a full clear + repaint and the cursor style re-applied.
+                    () => { lastReflowSig = int.MinValue; cursorStyledShown = false; }));
+            var promptComposer = new Andy.Cli.Editor.PromptLineComposer(prompt);
+            // Decides what each entry point starts from and what the composer ends up holding;
+            // Ctrl+X and /editor share it so they cannot diverge.
+            var externalEditorInvoker = new Andy.Cli.Editor.ExternalEditorInvoker(externalEditor, promptComposer);
+
+            void ReportExternalEditorResult(Andy.Cli.Editor.ExternalEditorResult result)
+            {
+                // The invoker has already updated the composer; this is only presentation.
+                if (result.Applied)
+                {
+                    feed.SnapToBottom();
+                    toast.Show("Prompt updated from your editor", 90);
+                }
+                else if (!string.IsNullOrEmpty(result.Message))
+                {
+                    feed.AddMarkdownRich("```\n" + result.Message + "\n```");
+                }
+                lastReflowSig = int.MinValue;
+                cursorStyledShown = false;
+            }
 
             // Helper method to show exit confirmation dialog
             async Task<bool> ShowExitConfirmationAsync()
@@ -1181,13 +1602,36 @@ class Program
 
                     while (true)
                     {
+                        // Bracket the turn with shadow-Git snapshots so /undo can revert it
+                        // (issue #276). A turn that throws or is interrupted is aborted below
+                        // and never becomes an undoable transaction.
+                        var undoTurn = undoManager?.BeginTurn(currentMessage);
                         try
                         {
                             contextStatusBar.SetStatusText("Thinking", animated: true);
                             var service = aiService;
-                            if (service == null) break;
+                            if (service == null)
+                            {
+                                undoManager?.AbortTurn(undoTurn);
+                                break;
+                            }
 
-                            await service.ProcessMessageAsync(currentMessage, enableStreaming: false);
+                            // Resolve @file mentions now rather than when they were typed, so the
+                            // model sees the file as it is at send time. Attachments become extra
+                            // message parts; the prompt text itself is left exactly as typed.
+                            var resolvedPrompt = await fileMentions.ResolveAsync(currentMessage);
+                            var resolutionNote = Andy.Cli.Services.FileMentions.FileMentionSession
+                                .DescribeResolution(resolvedPrompt);
+                            if (resolutionNote is not null)
+                            {
+                                feed.AddMarkdownRich(resolutionNote);
+                            }
+
+                            await service.ProcessMessageAsync(
+                                resolvedPrompt.ComposedText,
+                                enableStreaming: false,
+                                structuredParts: resolvedPrompt.Parts);
+                            undoManager?.CompleteTurn(undoTurn);
 
                             // Persist the transcript after every completed turn so the
                             // session survives an exit or crash and can be resumed later.
@@ -1196,6 +1640,7 @@ class Program
                         }
                         catch (Exception ex)
                         {
+                            undoManager?.AbortTurn(undoTurn);
                             Andy.Cli.Services.CrashLog.Write("interactive.ProcessMessageAsync", ex);
                             feed.AddMarkdownRich(ConsoleColors.ErrorPrefix(ex.Message));
                             feed.AddMarkdownRich(ConsoleColors.ErrorPrefix(
@@ -1315,6 +1760,32 @@ class Program
                         return;
                     }
 
+                    // Issue #278: the MCP Plan-mode opt-in offer owns all keys while open. It is shown
+                    // once per server (and again only when that server exposes a NEW tool), and every
+                    // exit path other than A/Enter grants nothing.
+                    if (mcpPlanOptIn.IsOpen)
+                    {
+                        string optInMessage = string.Empty;
+                        switch (k.Key)
+                        {
+                            case ConsoleKey.Escape: optInMessage = mcpPlanOptIn.Skip(); break;
+                            case ConsoleKey.UpArrow: mcpPlanOptIn.MoveSelection(-1); return;
+                            case ConsoleKey.DownArrow: mcpPlanOptIn.MoveSelection(1); return;
+                            case ConsoleKey.Spacebar: mcpPlanOptIn.ToggleSelected(); return;
+                            case ConsoleKey.Enter: optInMessage = mcpPlanOptIn.GrantSelectedTools(); break;
+                            default:
+                                if (k.KeyChar is 'a' or 'A') { optInMessage = mcpPlanOptIn.GrantServerWide(); break; }
+                                if (k.KeyChar is 'n' or 'N') { optInMessage = mcpPlanOptIn.Skip(); break; }
+                                return; // swallow any other key while the offer is open
+                        }
+
+                        if (!string.IsNullOrEmpty(optInMessage))
+                        {
+                            feed.AddMarkdownRich(optInMessage);
+                        }
+                        return;
+                    }
+
                     // Interactive permissions manager owns all keys while open.
                     if (permissionsManager.IsOpen)
                     {
@@ -1334,10 +1805,26 @@ class Program
 
                     if (k.Key == ConsoleKey.Escape)
                     {
+                        // Dismiss the @file picker first: Escape there means "stop suggesting",
+                        // not "leave the application".
+                        if (fileMentionMenu.IsOpen)
+                        {
+                            fileMentionMenu.Dismiss();
+                            return;
+                        }
+
                         // If command palette is open, close it first
                         if (commandPalette.IsOpen)
                         {
                             commandPalette.Close();
+                            return;
+                        }
+
+                        // Shell escape (#286): Escape on an EMPTY shell prompt leaves shell mode.
+                        // Only when empty, so Escape never quietly stops meaning "quit" while
+                        // there is text on the line.
+                        if (prompt.TryExitShellMode())
+                        {
                             return;
                         }
 
@@ -1371,6 +1858,15 @@ class Program
                                 ? "Mouse capture ON (wheel scrolls; Option+drag to select text, Cmd+C to copy)"
                                 : "Mouse capture OFF (plain-drag native text selection enabled)", 120);
                         }
+                        return;
+                    }
+
+                    // Ctrl+X opens the current prompt in the external editor ($VISUAL, then
+                    // $EDITOR) - issue #287. Same code path as /editor, but this one keeps
+                    // whatever is already typed in the composer.
+                    if (k.Key == ConsoleKey.X && (k.Modifiers & ConsoleModifiers.Control) != 0)
+                    {
+                        ReportExternalEditorResult(await externalEditorInvoker.FromComposerAsync());
                         return;
                     }
 
@@ -1482,6 +1978,29 @@ class Program
                         return;
                     }
 
+                    // The @file picker owns navigation/accept keys while it is open, so Enter
+                    // completes the mention instead of submitting and the arrows move the
+                    // highlight instead of the caret or the prompt history.
+                    if (fileMentionMenu.HandlesKey(k))
+                    {
+                        if (k.Key == ConsoleKey.UpArrow)
+                        {
+                            fileMentionMenu.MoveSelection(-1);
+                        }
+                        else if (k.Key == ConsoleKey.DownArrow)
+                        {
+                            fileMentionMenu.MoveSelection(1);
+                        }
+                        else if (fileMentionMenu.BuildCompletion() is Andy.Cli.Widgets.MentionCompletion completion)
+                        {
+                            fileMentionMenu.RecordAccepted();
+                            prompt.ReplaceRange(completion.Start, completion.Length, completion.Text, completion.NewCursor);
+                            fileMentionMenu.Update(prompt.Text, prompt.CursorPosition);
+                            feed.SnapToBottom();
+                        }
+                        return;
+                    }
+
                     // Handle prompt history navigation when in PromptHistory scroll mode
                     if (scrollMode == ScrollMode.PromptHistory && promptHistory.Count > 0)
                     {
@@ -1540,7 +2059,22 @@ class Program
 
                     // Avoid mapping regular alphanumeric keys to actions
                     var textBeforeKey = prompt.Text;
+                    // Snapshot the composer BEFORE PromptLine consumes the key: an Enter that
+                    // submits clears it, and /editor (issue #287) has to open on the content
+                    // that was there a moment ago. Reading the composer after dispatch would
+                    // yield an empty document and would also lose the structured parts (#277)
+                    // that a plain string cannot carry. Only taken on the keystroke that can
+                    // submit, so ordinary typing costs nothing.
+                    var documentBeforeKey = k.Key == ConsoleKey.Enter
+                        ? promptComposer.GetDocument()
+                        : Andy.Cli.Editor.ComposerDocument.Empty;
+
+                    // Likewise captured before the key is consumed: submitting clears shell mode
+                    // (issue #286), so the dispatcher below can no longer tell whether the line
+                    // it is about to handle was typed as a shell command or a normal prompt.
+                    var submittedInShellMode = prompt.Mode == Andy.Cli.Widgets.PromptMode.Shell;
                     var submitted = prompt.OnKey(k);
+                    fileMentionMenu.Update(prompt.Text, prompt.CursorPosition);
                     // If the keystroke edited the prompt text (typing, paste, backspace,
                     // delete, etc.), snap the feed back to the bottom where the prompt
                     // lives. Pure navigation/scroll keys (arrows, Home/End, PgUp/PgDn,
@@ -1551,6 +2085,27 @@ class Program
                     }
                     if (submitted is string cmd && !string.IsNullOrWhiteSpace(cmd))
                     {
+                        // Shell escape (#286) is decided FIRST and independently of everything
+                        // below. A shell-mode line is a local command, so it must not be parsed as
+                        // a slash command, must not be queued behind an in-flight model turn (the
+                        // whole point is running something while the model works), and must never
+                        // be sent to the provider. The mode is read before OnKey, because Enter
+                        // clears the line but deliberately keeps shell mode armed for the next
+                        // command - a shell prompt you have to re-arm every time is a worse shell.
+                        if (submittedInShellMode)
+                        {
+                            // Deliberately NOT added to promptHistory: that list is indexed by
+                            // queued-message number (pendingByHistoryIndex), so inserting a shell
+                            // command would shift every queued message's identity. Shell commands
+                            // are still recallable with Ctrl+Up, which uses the composer's own
+                            // history.
+                            historyIndex = -1;
+                            // Fire and forget: the render loop keeps drawing while the command
+                            // runs, and the row updates itself when it finishes.
+                            _ = RunUserShellCommandAsync(cmd);
+                            return;
+                        }
+
                         bool processingNow;
                         lock (messagePumpLock) processingNow = isProcessingMessage;
                         if (processingNow)
@@ -1595,6 +2150,13 @@ class Program
                             {
                                 var commandName = parts[0].ToLowerInvariant();
                                 var args = parts.Skip(1).ToArray();
+
+                                // Markdown commands need the argument text exactly as typed
+                                // (quotes and all); `parts` has already lost that. See
+                                // CustomCommandArguments for the documented quoting rules.
+                                var afterSlash = cmd.Substring(1);
+                                int firstSpace = afterSlash.IndexOf(' ');
+                                var rawArgs = firstSpace < 0 ? "" : afterSlash.Substring(firstSpace + 1);
 
                                 if (commandName == "model" || commandName == "m")
                                 {
@@ -1644,7 +2206,8 @@ class Program
                                                     tokenCounter,
                                                     loggerFactory,
                                                     extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, newProvider),
-                                                    systemPromptSuffix: ComposeSkillsPromptSection());
+                                                    systemPromptSuffix: ComposeSkillsPromptSection(),
+                                                    modeState: agentModeState);
                                             }
 
                                             feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
@@ -1669,10 +2232,46 @@ class Program
                                     }
                                     return;
                                 }
+                                else if (commandName == "editor" || commandName == "edit")
+                                {
+                                    // Issue #287. Enter has already cleared the composer, so the
+                                    // editor is seeded from documentBeforeKey (captured above the
+                                    // OnKey call) minus the leading "/editor" token. The invoker
+                                    // writes the composer back on every outcome, so a failed edit
+                                    // restores the text instead of losing it.
+                                    feed.AddUserMessage(cmd);
+                                    ReportExternalEditorResult(
+                                        await externalEditorInvoker.FromSubmittedCommandAsync(documentBeforeKey));
+                                    return;
+                                }
                                 else if (commandName == "mcp")
                                 {
                                     feed.AddUserMessage(cmd);
                                     var result = await mcpCommand.ExecuteAsync(args);
+                                    feed.AddMarkdownRich("```\n" + result.Message + "\n```");
+                                    return;
+                                }
+                                else if (commandName == "lsp")
+                                {
+                                    feed.AddUserMessage(cmd);
+                                    var result = await lspCommand.ExecuteAsync(args);
+                                    feed.AddMarkdownRich("```\n" + result.Message + "\n```");
+                                    return;
+                                }
+                                else if (commandName == "auth")
+                                {
+                                    // Provider sign-in / status / sign-out (issue #284). The
+                                    // credential value is typed into a masked modal, so it never
+                                    // reaches the prompt line, the history, or the transcript.
+                                    feed.AddUserMessage(cmd);
+                                    DrainTypeAhead();
+                                    var authPrompt = new Andy.Cli.Widgets.AuthLoginModal(
+                                        dl => scheduler.RenderOnceAsync(dl, viewport, caps, pty, CancellationToken.None),
+                                        ReadKeyBlocking,
+                                        () => (viewport.Width, viewport.Height));
+                                    var result = await authCommand.ExecuteAsync(args, authPrompt);
+                                    // The modal painted over the whole viewport; force a repaint.
+                                    lastReflowSig = int.MinValue;
                                     feed.AddMarkdownRich("```\n" + result.Message + "\n```");
                                     return;
                                 }
@@ -1687,6 +2286,15 @@ class Program
                                     feed.AddUserMessage(cmd);
                                     var result = await permissionsCommand.ExecuteAsync(args);
                                     // Fence the output so the layered rule list stays aligned (monospace).
+                                    feed.AddMarkdownRich("```\n" + result.Message + "\n```");
+                                    return;
+                                }
+                                else if (commandName == "formatters" || commandName == "formatter" || commandName == "fmt")
+                                {
+                                    // Explains which formatter matched a file and why (issue #283).
+                                    feed.AddUserMessage(cmd);
+                                    var result = await formattersCommand.ExecuteAsync(args);
+                                    // Fence the output so the aligned formatter table stays monospace.
                                     feed.AddMarkdownRich("```\n" + result.Message + "\n```");
                                     return;
                                 }
@@ -1710,6 +2318,55 @@ class Program
                                     feed.AddMarkdownRich(on
                                         ? "[auto] Auto-approve ON for this session. Low-risk actions run without prompting; destructive actions (outside-project deletes, git/DB destruction) still ask. Toggle off with /auto off."
                                         : "[auto] Auto-approve OFF. Every action will prompt as usual.");
+                                    return;
+                                }
+                                else if (commandName == "attach")
+                                {
+                                    // The ONLY path from shell-mode output into the model's
+                                    // context (#286). Output is never forwarded automatically:
+                                    // the user picks which command's output is worth the tokens,
+                                    // and it is redacted on the way into the composer. Nothing is
+                                    // sent here - the text lands in the prompt, so the user still
+                                    // sees exactly what they are about to send and can edit it.
+                                    if (!shellEscapeOptions.Enabled)
+                                    {
+                                        feed.AddMarkdownRich(ConsoleColors.WarningPrefix("[attach] Shell escape is disabled, so there is no command output to attach."));
+                                        return;
+                                    }
+                                    if (userShellAttachment.Count == 0)
+                                    {
+                                        feed.AddMarkdownRich(ConsoleColors.NotePrefix("[attach] No shell-mode commands yet. Press ! at an empty prompt to run one."));
+                                        return;
+                                    }
+                                    if (args.Length == 0)
+                                    {
+                                        feed.AddMarkdownRich("```\n[attach] Pick a command by number, e.g. /attach 1\n"
+                                            + string.Join("\n", userShellAttachment.DescribeAvailable()) + "\n```");
+                                        return;
+                                    }
+                                    if (!int.TryParse(args[0], out var attachIndex)
+                                        || userShellAttachment.BuildAttachment(attachIndex) is not { } attachment)
+                                    {
+                                        feed.AddMarkdownRich(ConsoleColors.WarningPrefix($"[attach] No shell command '{args[0]}'. Run /attach to see what is available."));
+                                        return;
+                                    }
+                                    var existing = prompt.Text;
+                                    prompt.SetText(string.IsNullOrWhiteSpace(existing)
+                                        ? attachment
+                                        : existing.TrimEnd() + "\n\n" + attachment);
+                                    toast.Show("Command output added to the prompt. Edit it or press Enter to send.", 150);
+                                    return;
+                                }
+                                else if (commandName == "mode")
+                                {
+                                    // Issue #278: the only interactive way in or out of Plan mode.
+                                    // Plan mode's tool denials are enforced by the permission overlay,
+                                    // so this command changes real capability, not just prompt text.
+                                    feed.AddUserMessage(cmd);
+                                    var result = modeCommand.Execute(args);
+                                    feed.AddMarkdownRich(result.Success
+                                        ? result.Message
+                                        : ConsoleColors.WarningPrefix(result.Message));
                                     return;
                                 }
                                 else if (commandName == "skills" || commandName == "skill")
@@ -1759,6 +2416,21 @@ class Program
                                     feed.AddMarkdownRich("```\n" + result.Message + "\n```");
                                     return;
                                 }
+                                else if (commandName == "session")
+                                {
+                                    // Session archive management (issue #285): export,
+                                    // import, fork, rename, stats. Never resumes or
+                                    // deletes - that surface belongs to /resume.
+                                    feed.AddUserMessage(cmd);
+                                    // Persist the live transcript first so /session export
+                                    // and /session fork see the turns just typed.
+                                    SaveSession();
+                                    var result = await sessionCommand.ExecuteAsync(args);
+                                    feed.AddMarkdownRich(result.Success
+                                        ? "```\n" + result.Message + "\n```"
+                                        : ConsoleColors.WarningPrefix(result.Message));
+                                    return;
+                                }
                                 else if (commandName == "resume")
                                 {
                                     // Switch to a saved session in place (issue #231). With no
@@ -1799,6 +2471,19 @@ class Program
                                     }
                                     return;
                                 }
+                                else if (commandName == "undo" || commandName == "redo")
+                                {
+                                    // Transactional revert/reapply of the last turn's file changes
+                                    // (issue #276); both refuse while a turn is still running.
+                                    feed.AddUserMessage(cmd);
+                                    var result = commandName == "undo"
+                                        ? await undoCommand.ExecuteAsync(args)
+                                        : await redoCommand.ExecuteAsync(args);
+                                    feed.AddMarkdownRich(result.Success
+                                        ? result.Message
+                                        : ConsoleColors.WarningPrefix(result.Message));
+                                    return;
+                                }
                                 else if (commandName == "exit" || commandName == "bye" || commandName == "quit")
                                 {
                                     // Show exit confirmation dialog
@@ -1808,8 +2493,33 @@ class Program
                                     }
                                     return;
                                 }
+                                else if (commandName == "commands" || commandName == "cmds")
+                                {
+                                    feed.AddUserMessage(cmd);
+                                    var result = await customCommandsCommand.ExecuteAsync(args);
+                                    // Fence the output so the aligned command list stays monospace.
+                                    feed.AddMarkdownRich("```\n" + result.Message + "\n```");
+                                    // A reload changes what the autocomplete and palette should
+                                    // offer, so refresh both without restarting the TUI.
+                                    if (args.Length > 0 &&
+                                        (args[0].Equals("reload", StringComparison.OrdinalIgnoreCase) ||
+                                         args[0].Equals("refresh", StringComparison.OrdinalIgnoreCase)))
+                                    {
+                                        RefreshCommandSurfaces();
+                                    }
+                                    return;
+                                }
                                 else
                                 {
+                                    // Markdown-defined commands are resolved last, so a built-in
+                                    // name always wins (discovery also rejects reserved names).
+                                    var customCommand = customCommandCatalog.Find(commandName);
+                                    if (customCommand != null)
+                                    {
+                                        RunCustomCommand(customCommand, rawArgs);
+                                        return;
+                                    }
+
                                     feed.AddUserMessage(cmd);
                                     feed.AddMarkdownRich(ConsoleColors.WarningPrefix($"Unknown command: /{commandName}. Type /help for available commands."));
                                     return;
@@ -2052,8 +2762,17 @@ class Program
                 {
                     // Update inline command help filter based on current prompt text.
                     // Slash-command help is suppressed while an inline approval is pending.
-                    inlineCommandHelp.UpdateFilter(prompt.Text);
+                    // Slash-command help is meaningless in shell mode: a leading "/" there is a
+                    // path, not a command (#286).
+                    inlineCommandHelp.UpdateFilter(
+                        prompt.Mode == Andy.Cli.Widgets.PromptMode.Shell ? string.Empty : prompt.Text);
                     int helpH = inlineApproval.IsActive ? 0 : inlineCommandHelp.GetHeight();
+                    // The @file picker stacks under the slash-command help, in the same reserved
+                    // strip between the prompt and the status line. Refreshing it here as well as
+                    // in the key handler keeps it correct after paths that replace the prompt text
+                    // wholesale (history recall, queued-message editing).
+                    fileMentionMenu.Update(prompt.Text, prompt.CursorPosition);
+                    int mentionH = inlineApproval.IsActive ? 0 : fileMentionMenu.GetHeight();
 
                     // Keep the prompt's wrap width in sync with its render width so soft-wrapping,
                     // height measurement and cursor positioning all agree. Render width below is
@@ -2071,7 +2790,7 @@ class Program
 
                     // Position prompt and help from the bottom up (no gaps)
                     // Layout from bottom: status line(1) + help + prompt
-                    int promptY = Math.Max(3, viewport.Height - bottomReserved - helpH - promptH);
+                    int promptY = Math.Max(3, viewport.Height - bottomReserved - helpH - mentionH - promptH);
                     int helpY = promptY + promptH;
 
                     // Feed fills the space from header to prompt
@@ -2094,6 +2813,12 @@ class Program
                     if (helpH > 0)
                     {
                         inlineCommandHelp.Render(2, helpY, Math.Max(1, viewport.Width - 4), baseDl, wb);
+                    }
+
+                    // Render the @file picker below the prompt (and below slash help when both show)
+                    if (mentionH > 0)
+                    {
+                        fileMentionMenu.Render(2, helpY + helpH, Math.Max(1, viewport.Width - 4), baseDl, wb);
                     }
 
                     // Draw scroll mode indicators in left margin
@@ -2159,6 +2884,7 @@ class Program
                 var overlayB = new DL.DisplayListBuilder();
                 commandPalette.Render(new L.Rect(0, 0, viewport.Width, viewport.Height), baseDl, overlayB);
                 permissionsManager.Render(new L.Rect(0, 0, viewport.Width, viewport.Height), baseDl, overlayB);
+                mcpPlanOptIn.Render(new L.Rect(0, 0, viewport.Width, viewport.Height), baseDl, overlayB);
 
                 var overlay = new DL.DisplayListBuilder();
                 hud.ViewportCols = viewport.Width; hud.ViewportRows = viewport.Height;
@@ -2261,6 +2987,10 @@ class Program
             // port, unsubscribes from the hub, and closes active SSE streams).
             instrumentationServer?.Dispose();
 
+            // Undo history lives for the session only: drop this session's shadow
+            // snapshots and prune the objects they kept alive (issue #276).
+            undoManager?.Dispose();
+
             // Restore terminal settings + disable mouse before leaving the
             // alternate screen, then re-enable wrap/cursor and exit alt screen.
             rawInput?.Dispose();
@@ -2361,8 +3091,20 @@ class Program
 
     private static async Task RunAcpServerModeAsync()
     {
+        // Same layered configuration as interactive mode (rivoli-ai/andy-cli#280),
+        // loaded through the shared instance so ACP sessions see the same typed
+        // provider/model, session and logging values the TUI would.
+        var acpConfig = Andy.Cli.Configuration.AndyConfigurationService.InitializeShared(
+            new Andy.Cli.Configuration.ConfigLoadRequest
+            {
+                WorkspaceDirectory = Directory.GetCurrentDirectory(),
+            });
+        Andy.Cli.Configuration.ConfigStartup.Apply(acpConfig);
+
         // Configure logging with stderr output (to avoid polluting stdout used for ACP protocol)
         var services = new ServiceCollection();
+        services.AddSingleton(acpConfig);
+        services.AddSingleton(acpConfig.Config);
         services.AddLogging(builder =>
         {
             builder.AddConsole(options =>
@@ -2376,12 +3118,21 @@ class Program
         services.ConfigureLlmFromEnvironment();
         services.AddLlmServices(options =>
         {
-            // Auto-detect the default provider based on environment variables
+            Andy.Cli.Configuration.LlmOptionsBinder.Apply(options, acpConfig.Config.Llm);
+
+            // rivoli-ai/andy-cli#284: same credential resolution as interactive and headless
+            // mode - stored credentials fill gaps left by andy.jsonc, environment still wins.
+            Andy.Cli.Auth.AuthBootstrap.Configure(options);
+
+            // Auto-detect the default provider unless llm.defaultProvider named one
+
             var detectionService = new ProviderDetectionService();
-            var detectedProvider = detectionService.DetectDefaultProvider();
-            var defaultProvider = detectedProvider ?? "cerebras";
+            var defaultProvider = !string.IsNullOrWhiteSpace(options.DefaultProvider)
+                ? options.DefaultProvider
+                : detectionService.DetectDefaultProvider() ?? "cerebras";
             options.DefaultProvider = defaultProvider;
-            Andy.Cli.ACP.AcpModelConfiguration.EnsureProviderConfig(options, defaultProvider);
+            Andy.Cli.ACP.AcpModelConfiguration.EnsureProviderConfig(
+                options, defaultProvider, acpConfig.Config.Llm.DefaultModel);
         });
 
         // Add the provider factory
@@ -2513,27 +3264,34 @@ class Program
 
     private static async Task HandleCommandLineArgs(string[] args)
     {
+        // Same layered configuration the TUI uses (rivoli-ai/andy-cli#280), so a
+        // one-shot command reports the values an interactive session would use.
+        var commandConfig = Andy.Cli.Configuration.AndyConfigurationService.InitializeShared(
+            new Andy.Cli.Configuration.ConfigLoadRequest
+            {
+                WorkspaceDirectory = Directory.GetCurrentDirectory(),
+                CommandLineArguments = args,
+            });
+        Andy.Cli.Configuration.ConfigStartup.Apply(commandConfig);
+
         // Initialize services for command-line mode
         var services = new ServiceCollection();
+        services.AddSingleton(commandConfig);
+        services.AddSingleton(commandConfig.Config);
         services.AddLogging(builder =>
-        {
-            // Disable console logging to avoid UI interference
-            // To enable debugging, set environment variable ANDY_DEBUG=true
-            if (Environment.GetEnvironmentVariable("ANDY_DEBUG") == "true")
-            {
-                builder.AddConsole();
-                builder.SetMinimumLevel(LogLevel.Information);
-            }
-        });
+            Andy.Cli.Configuration.ConfigStartup.ConfigureLogging(builder, commandConfig));
 
         // Configure LLM services
         services.ConfigureLlmFromEnvironment();
         services.AddLlmServices(options =>
         {
-            // Auto-detect the default provider based on environment variables
+            Andy.Cli.Configuration.LlmOptionsBinder.Apply(options, commandConfig.Config.Llm);
+
+            // Auto-detect the default provider unless llm.defaultProvider named one
             var detectionService = new ProviderDetectionService();
-            var detectedProvider = detectionService.DetectDefaultProvider();
-            options.DefaultProvider = detectedProvider ?? "cerebras"; // Fallback to Cerebras if none detected
+            options.DefaultProvider = !string.IsNullOrWhiteSpace(options.DefaultProvider)
+                ? options.DefaultProvider
+                : detectionService.DetectDefaultProvider() ?? "cerebras";
         });
 
         // JSON repair still available if needed elsewhere
@@ -2583,14 +3341,45 @@ class Program
             case "perm":
                 command = new PermissionsCommand(serviceProvider);
                 break;
+            case "formatters":
+            case "formatter":
+            case "fmt":
+                command = new FormattersCommand(Directory.GetCurrentDirectory());
+                break;
             case "skills":
             case "skill":
                 command = new Andy.Cli.Commands.SkillsCommand(serviceProvider);
                 break;
+            case "config":
+                // Layered configuration inspection (rivoli-ai/andy-cli#280):
+                // `andy-cli config validate` and `config show --effective --sources`.
+                command = new ConfigCommand(Directory.GetCurrentDirectory());
+                break;
             case "sessions":
                 // List interactive sessions saved under ~/.andy/sessions that can be
                 // resumed with --resume <id> / --continue (issue #231).
-                command = new SessionsCommand(new Andy.Cli.Services.Sessions.SessionStore());
+                command = new SessionsCommand(new Andy.Cli.Services.Sessions.SessionStore(
+                    commandConfig.Config.Session.Directory));
+                break;
+            case "session":
+                // Noninteractive equivalent of the /session slash command (issue #285):
+                // export, import, fork, rename, and usage stats over ~/.andy/sessions.
+                command = new Andy.Cli.Commands.SessionCommand(
+                    new Andy.Cli.Services.Sessions.SessionStore());
+                break;
+            case "auth":
+                // Provider sign-in / status / sign-out (issue #284). Deliberately built
+                // without the DI graph: auth must work before any provider is configured.
+                command = new Andy.Cli.Commands.AuthCommand(serviceProvider);
+                break;
+            case "mode":
+                // Issue #278: the non-interactive path to the Plan-mode opt-ins, so automation and
+                // scripts can grant/revoke without the TUI. A fresh AgentModeState is fine here: a
+                // one-shot invocation has no session to switch, and the grant verbs act only on the
+                // persisted store. This path NEVER prompts.
+                command = new Andy.Cli.Commands.ModeCommand(
+                    new Andy.Cli.Modes.AgentModeState(),
+                    new Andy.Cli.Modes.PlanModeGrantStore(Directory.GetCurrentDirectory()));
                 break;
             case "help":
             case "?":

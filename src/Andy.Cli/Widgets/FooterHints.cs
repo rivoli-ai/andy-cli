@@ -9,11 +9,29 @@ namespace Andy.Cli.Widgets
     /// </summary>
     public static class FooterHints
     {
+        /// <param name="shellMode">
+        /// True while the composer is in shell escape mode (issue #286). The footer then advertises
+        /// how to LEAVE the mode and how to stop a command, because those are the two things a user
+        /// who arrived there by accident needs, and Escape no longer means "quit" on an empty
+        /// shell prompt.
+        /// </param>
         public static (string key, string action)[] Build(
-            bool promptHistoryMode, bool toolOutputExpanded, bool mouseOn)
+            bool promptHistoryMode, bool toolOutputExpanded, bool mouseOn, bool shellMode = false)
         {
             string toolHint = toolOutputExpanded ? "Collapse output" : "Expand output";
             string mouseHint = mouseOn ? "Mouse On" : "Mouse Off";
+
+            if (shellMode)
+            {
+                return new[]
+                {
+                    ("!", "Shell mode"),
+                    ("Enter", "Run command"),
+                    ("Ctrl+C", "Cancel command"),
+                    ("ESC", "Leave shell mode"),
+                    ("/attach", "Send output to model"),
+                };
+            }
 
             if (promptHistoryMode)
             {

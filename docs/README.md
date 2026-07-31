@@ -10,13 +10,33 @@ linked below.
 
 - [Commands and keyboard shortcuts](README_COMMANDS.md) - Interactive, command-line,
   headless, and ACP invocations.
+- [File mentions](file-mentions.md) - `@path` syntax, the completion picker, line
+  ranges, size and binary limits, and privacy implications.
+- [External editor](external-editor.md) - `/editor` and Ctrl+X: composing prompts in
+  `$VISUAL`/`$EDITOR`, per-editor setup, quoting rules, and troubleshooting.
 - [Zed quickstart](QUICKSTART_ZED.md) - Minimal ACP setup for a local build.
 - [Zed and ACP integration](ZED_INTEGRATION.md) - Publishing, configuration,
   supported behavior, limitations, and troubleshooting.
 - [CLI coding-agent comparison](CLI_AGENT_FEATURE_COMPARISON.md) - Current Rider/ACP
   command and feature comparison, including Andy Engine and Tools.
+- [Undo and redo](undo-redo.md) - Transactional `/undo` and `/redo` backed by
+  shadow Git snapshots, with the Git-only limitation of the first slice.
 - [Interactive MCP configuration](mcp-configuration.md) - Project/appsettings
   configuration, stdio and HTTP transports, commands, security, and troubleshooting.
+- [Session archives, forks, and usage stats](session-archives.md) - Portable export/import,
+  point-in-time forks, titles, and token/cost aggregation.
+- [Changed-file LSP diagnostics](lsp-diagnostics.md) - Language server configuration,
+  lifecycle and `/lsp` commands, output bounds, and workspace containment.
+- [Provider authentication](provider-auth.md) - Credential source precedence, OS
+  credential stores, OAuth flows, automation, rotation, and recovery.
+- [Layered configuration](configuration.md) - andy.jsonc locations, precedence,
+  merge semantics, environment substitution, diagnostics, and secret redaction.
+- [Migrating to andy.jsonc](configuration-migration.md) - Moving appsettings,
+  MCP, theme, session and environment settings into the layered configuration.
+- [Interactive shell escape](shell-escape.md) - The `!` composer mode, its security
+  model (permission gate, cancellation, redaction, auditing), and how to disable it.
+- [Operating modes: Build and Plan](agent-modes.md) - `/mode`, the read-only Plan
+  permission overlay, mode persistence, and why planning data is not a boundary.
 
 ## Headless runtime
 
@@ -36,6 +56,8 @@ linked below.
   dependency manifest, and source compatibility status.
 - [Tool execution architecture](tool-execution-architecture.md) - Engine/tool adapter,
   permission, progress, and result flow.
+- [Formatters and the post-mutation pipeline](formatters.md) - Configured formatters,
+  ordering, permission-gated execution, and diffs computed from the final on-disk bytes.
 - [Refactoring plan](REFACTORING_PLAN.md) - Current maintainability work and task
   tracking.
 - [FeedView inventory](feedview-inventory.md) - Feed item ownership and extraction
@@ -48,7 +70,10 @@ linked below.
   files, and committed NuGet lock files.
 - Provider defaults are authoritative in `src/Andy.Cli/appsettings.json`; provider
   aliases and detection priority are authoritative in
-  `src/Andy.Cli/Services/ProviderRegistry.cs`.
+  `src/Andy.Cli/Services/ProviderRegistry.cs`. Both are read as the lowest layer of
+  the merged configuration described in [Layered configuration](configuration.md);
+  `andy-cli config show --effective --sources` is authoritative for what a given
+  run actually used.
 - The live built-in tool catalog is assembled by
   `src/Andy.Cli/Services/ToolCatalog.cs` and can be inspected with
   `andy-cli tools list`.

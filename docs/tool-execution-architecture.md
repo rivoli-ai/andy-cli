@@ -185,6 +185,26 @@ flags (FileSystem, Network, Process, Environment) on the execution context so th
 lower-level capability checks do not pre-empt the permission gate; the gate remains the
 actual consent authority (allow / ask / deny per call).
 
+## Post-mutation Pipeline
+
+`UiUpdatingToolExecutor` runs an ordered pipeline after a successful `write_file` / `edit_file` /
+`replace_text`, in the block commented `POST-MUTATION PIPELINE`:
+
+1. **Formatting** (reserved for rivoli-ai/andy-cli#283) - rewrites the file on disk.
+2. **Language server diagnostics** (rivoli-ai/andy-cli#282) - reads the file BACK FROM DISK, sends
+   it to a configured language server as `didOpen`/`didChange` + `didSave`, and waits a bounded
+   time for `publishDiagnostics`.
+
+The order is load-bearing: step 2 reports on exactly the bytes it reads, so a formatter that ran
+after it would invalidate every reported line and column. A new step that changes the file belongs
+above the diagnostics call, not below it.
+
+Diagnostics are attached to the tool result as `lsp_diagnostics` (a fresh `Data` payload, so the
+snapshot the feed already captured is untouched) and rendered under the tool call. The whole step
+is inert unless a language server is configured, and every failure mode - no server, launch
+failure, crash, malformed messages, timeout - resolves into a bounded status rather than affecting
+the tool call. See [Changed-file LSP diagnostics](./lsp-diagnostics.md).
+
 ## Parameter Mapping and Normalization
 
 Models frequently call a tool with parameter names borrowed from a different tool
@@ -329,7 +349,27 @@ var timeoutSeconds = config.Limits.TimeoutSeconds > 0 ? config.Limits.TimeoutSec
 5. **Loop guard.** Repeated identical calls are short-circuited with guidance rather than
    re-run.
 
+## Post-Mutation Pipeline
+
+Every single-file mutating tool (`write_file`, `edit_file`, `replace_text`, `move_file`)
+runs through one shared post-mutation pipeline
+(`src/Andy.Cli/Services/Formatting/PostMutationPipeline.cs`) after it succeeds:
+
+1. Configured (or locally detected) formatters run, in deterministic order, each one
+   authorized through the same command-permission gate as any other command Andy runs -
+   before its process is started.
+2. The file's FINAL on-disk bytes are re-read.
+3. Reserved, ordered extension points run (snapshot finalization, LSP notification).
+4. The diff shown in the feed and attached to the tool result is computed from those
+   final bytes, so what the user sees is what the file contains.
+
+A formatter failure never passes as a clean write: the exit code and bounded, redacted
+stderr travel back to the model with the tool result under `formatter_diagnostics`. See
+[Formatters](./formatters.md) for configuration, `/formatters status`, and the failure
+taxonomy.
+
 ## Related Documentation
 
 - [Headless Runtime](./headless-runtime.md)
 - [Event Stream](./event-stream.md)
+- [Formatters and the post-mutation pipeline](./formatters.md)

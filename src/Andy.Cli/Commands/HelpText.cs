@@ -21,13 +21,16 @@ public static class HelpText
         "- **F3**: Toggle mouse capture (OFF by default = plain-drag native selection and copy; ON = mouse-wheel scroll)\n" +
         "- **Click while scrolled up**: releases mouse capture so plain click-drag selects text; capture is restored when back at the bottom\n" +
         "- **Ctrl+O**: Expand/collapse tool output detail (view-only; does not affect a running turn)\n" +
+        "- **Ctrl+X**: Edit the current prompt in your external editor ($VISUAL, then $EDITOR)\n" +
         "- **ESC**: Quit application (closes the command palette first if open)\n" +
         "- **Page Up/Down**: Scroll chat history\n" +
         "- **Up/Down**: Navigate multi-line text or prompt history (when in History mode)\n" +
         "- **Ctrl+A/E**: Jump to start/end of current line\n" +
         "- **Home/End**: Start/end of line (Ctrl: whole text)\n" +
         "- **Ctrl+K**: Delete from cursor to end of line\n" +
-        "- **Ctrl+U**: Delete from start of line to cursor\n\n" +
+        "- **Ctrl+U**: Delete from start of line to cursor\n" +
+        "- **!**: At the start of an empty prompt, enter shell mode to run a local command\n" +
+        "- **Ctrl+C**: Cancel the running shell-mode command (does not quit the app)\n\n" +
         "## Scroll Modes:\n" +
         "- **Feed Mode** (default): Blue indicator on left. PageUp/PageDown scrolls conversation.\n" +
         "- **Prompt History Mode**: Orange indicator on left. Up/Down navigates previous messages. Shows message counter (e.g., 5/12).\n\n" +
@@ -39,7 +42,26 @@ public static class HelpText
         "- **/restart**: Restart the session (fresh conversation context, counters, and prompt history)\n" +
         "- **/sessions**: List saved sessions that can be resumed\n" +
         "- **/resume [session-id]**: Resume a saved session (most recent when no id is given)\n" +
+        "- **/undo**: Revert the file changes made by the last turn (Git workspaces only)\n" +
+        "- **/redo**: Reapply the turn reverted by the last /undo\n" +
         "- **/help**: Show this help message\n\n" +
+        "### Session Archive Commands:\n" +
+        "- **/session export [id] [--out path] [--markdown] [--tools] [--metadata]**: Write a portable archive (or Markdown transcript)\n" +
+        "- **/session import <path> [--dry-run] [--title t]**: Validate and install an exported archive\n" +
+        "- **/session fork [id] [--at turn] [--title t]**: Branch a session (--at forks the history before that turn)\n" +
+        "- **/session rename [id] <title>**: Title a session so it stays discoverable\n" +
+        "- **/session stats [id] [--all]**: Token and estimated-cost totals\n\n" +
+        "### External Editor:\n" +
+        "- **/editor [text]**: Compose a prompt in your external editor, then return to Andy (the editor opens on the text after the command)\n" +
+        "- **Ctrl+X**: Same round trip, starting from whatever is currently in the composer\n" +
+        "- Andy reads **VISUAL** first, then **EDITOR**; e.g. `export VISUAL='vim'` or `export VISUAL='code --wait'`\n" +
+        "- GUI editors need a blocking flag (`--wait`); see docs/external-editor.md\n\n" +
+        "### Shell Escape:\n" +
+        "- **!**: Press at an empty prompt to switch the composer to shell mode; Esc or Backspace leaves it\n" +
+        "- **/attach**: List recent shell-mode commands whose output can be attached to your next prompt\n" +
+        "- **/attach <n>**: Insert that command's redacted output into the prompt (nothing is sent until you press Enter)\n" +
+        "- Commands run through the same permission rules, timeout, and output limits as the model's shell tool.\n" +
+        "  Disable with ShellEscape:Enabled=false or ANDY_SHELL_ESCAPE=0.\n\n" +
         "### Model Commands:\n" +
         "- **/model list**: Show available models\n" +
         "- **/model switch <provider>**: Change provider\n" +
@@ -54,7 +76,18 @@ public static class HelpText
         "- **/tools info <tool_name>**: Show tool details\n" +
         "- **/tools execute <tool_name> [params]**: Run a tool\n" +
         "- **/mcp list**: List configured MCP servers\n" +
+        "- **/mcp status**: Show MCP connection state and registered tools\n" +
+        "- **/lsp status**: Show configured language servers and their state\n" +
+        "- **/lsp restart [id]**: Restart language servers\n\n" +
         "- **/mcp status**: Show MCP connection state and registered tools\n\n" +
+        "### Mode Commands:\n" +
+        "- **/mode**: Show the current operating mode and the available modes\n" +
+        "- **/mode build**: Full capability; the normal permission rules apply\n" +
+        "- **/mode plan**: Read-only planning; file writes, shell commands, and unclassified tools are denied before they run, and no allow rule can override that\n" +
+        "- **/mode grants**: Review the Plan-mode read-only tool opt-ins\n" +
+        "- **/mode allow <tool-id>**: Opt specific tools into Plan mode (a mutating tool can never be opted in)\n" +
+        "- **/mode allow-server <name>**: Opt in every tool from an MCP server, including ones it exposes later\n" +
+        "- **/mode revoke <tool-id|server-name>**: Remove a Plan-mode opt-in\n\n" +
         "### Permission Commands:\n" +
         "- **/permissions**: Open the interactive permission rules manager\n" +
         "- **/permissions list**: List effective permission rules by layer\n" +
@@ -62,12 +95,32 @@ public static class HelpText
         "- **/permissions revoke <tool[(spec)]> [--scope S]**: Remove a persisted rule\n" +
         "- **/permissions reset**: Delete the user/project/local rule files (back to defaults)\n" +
         "- **/permissions path**: Show the rule file locations\n\n" +
+        "### Formatter Commands:\n" +
+        "- **/formatters status <file>**: Explain which formatters match a file, and why\n" +
+        "- **/formatters list**: List every configured or locally detected formatter\n" +
+        "- **/formatters path**: Show the formatter configuration file locations\n\n" +
+        "### Authentication Commands:\n" +
+        "- **/auth list**: Providers, credential status, and supported login methods\n" +
+        "- **/auth login <provider>**: Sign in (masked prompt; --method oauth or device-code)\n" +
+        "- **/auth status [provider]**: Show where each credential comes from (fully redacted)\n" +
+        "- **/auth logout <provider>**: Remove the stored credential (key and OAuth tokens)\n\n" +
         "### Skill Commands:\n" +
         "- **/skills**: List discovered agent skills (disabled ones are marked)\n" +
         "- **/skills info <name>**: Show a skill's details\n" +
         "- **/skills enable|disable <name>**: Toggle whether the agent may load a skill\n" +
         "- **/skills diagnostics**: Show problems found during skill discovery\n" +
         "- **/skills reload**: Re-scan the skill roots\n\n" +
+        "### Markdown Slash Commands:\n" +
+        "- **/commands**: List Markdown slash commands and where each one came from\n" +
+        "- **/commands info <name>**: Show a command's file, metadata, and prompt template\n" +
+        "- **/commands reload**: Re-scan the command roots without restarting\n" +
+        "- **/commands diagnostics**: Show problems found while loading command files\n" +
+        "- Define one by adding a .md file to ~/.andy/commands or <workspace>/.andy/commands;\n" +
+        "  nested folders become colon segments (git/commit.md -> /git:commit), the YAML\n" +
+        "  frontmatter sets description/provider/model/mode, and the body is the prompt.\n" +
+        "  Templates expand $ARGUMENTS, $1..$9, and $$ for a literal dollar sign.\n" +
+        "  A Markdown command only produces a prompt: it cannot run a shell, grant a\n" +
+        "  permission, enable a tool, or bypass plan mode.\n\n" +
         "## Providers:\n" +
         "- **cerebras**: Fast Llama models\n" +
         "- **openai**: GPT-4 models\n" +
@@ -88,8 +141,14 @@ public static class HelpText
         "  model, m       - Manage AI models\n" +
         "  tools, t       - Manage and list available tools\n" +
         "  permissions    - View and modify tool permission rules\n" +
+        "  formatters     - Show which formatters run after Andy writes a file\n" +
         "  skills         - List, inspect, and enable/disable agent skills\n" +
         "  sessions       - List saved sessions (resume with --resume <id> / --continue)\n" +
+        "  session        - Export, import, fork, rename, and measure saved sessions\n" +
+        "  auth           - Sign in to providers, review credential status, sign out\n" +
+        "  config         - Show and validate the layered andy.jsonc configuration\n" +
+        "  mode           - Review/grant/revoke Plan-mode read-only tool opt-ins\n" +
+        "                   (grants, allow <tool-id>, allow-server <name>, revoke <id>)\n" +
         "  help, ?        - Show this help message\n" +
         "\n" +
         "Run without arguments to start the interactive TUI mode.";

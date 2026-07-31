@@ -22,6 +22,15 @@ public class SimpleAssistantService : IDisposable
     private readonly ILogger<SimpleAssistantService>? _logger;
     private readonly string _modelName;
     private readonly string _providerName;
+
+    /// <summary>
+    /// The session's operating mode (issue #278), or null when the host does not track one. The
+    /// agent's system prompt is fixed at construction, so the mode is ALSO restated on every turn
+    /// (see <see cref="ComposeAgentMessage"/>) - that is what keeps the model correct after a
+    /// mid-session <c>/mode</c> switch. Neither is the enforcement boundary: that is the permission
+    /// overlay wrapped around the tool executor.
+    /// </summary>
+    private readonly Andy.Cli.Modes.AgentModeState? _modeState;
     // Concurrent: mutated from the agent's ToolCalled callback (background agent thread) and read/
     // removed from the end-of-turn completion loop. A plain Dictionary raced across these threads and
     // could corrupt internally, surfacing as a NullReferenceException that aborted the whole turn.
@@ -35,7 +44,19 @@ public class SimpleAssistantService : IDisposable
     /// as the tool breaking rather than a safety valve doing its job. The default is now high
     /// enough that only a genuinely runaway loop reaches it, and ANDY_MAX_TURNS overrides it.
     /// </summary>
-    private static readonly int MaxAgentTurns = ResolveMaxAgentTurns();
+    private static int MaxAgentTurns => s_maxAgentTurnsOverride ?? s_maxAgentTurnsFromEnvironment;
+
+    private static readonly int s_maxAgentTurnsFromEnvironment = ResolveMaxAgentTurns();
+    private static int? s_maxAgentTurnsOverride;
+
+    /// <summary>
+    /// Applies <c>session.maxTurns</c> from the layered configuration
+    /// (rivoli-ai/andy-cli#280), which already folded in ANDY_MAX_TURNS and
+    /// <c>--max-turns</c> at their documented precedence. Null or a non-positive
+    /// value restores the environment/default behaviour.
+    /// </summary>
+    public static void SetMaxAgentTurns(int? turns) =>
+        s_maxAgentTurnsOverride = turns is > 0 ? turns : null;
 
     private const int DefaultMaxAgentTurns = 300;
     private const string MaxTurnsStopReason = "max_turns_exceeded";
@@ -130,10 +151,12 @@ public class SimpleAssistantService : IDisposable
         TokenCounter? tokenCounter = null,
         ILoggerFactory? loggerFactory = null,
         IReadOnlyDictionary<string, object?>? extraBody = null,
-        string? systemPromptSuffix = null)
+        string? systemPromptSuffix = null,
+        Andy.Cli.Modes.AgentModeState? modeState = null)
     {
         _feed = feed;
         _tokenCounter = tokenCounter;
+        _modeState = modeState;
         // Take an ILoggerFactory so each collaborator gets a correctly-typed logger. Previously a
         // single ILogger<SimpleAssistantService> was passed and `as ILogger<SimpleAgent>` / etc.
         // were used, which always yield null (the generic types are unrelated) - so engine-, tool-,
@@ -163,11 +186,25 @@ public class SimpleAssistantService : IDisposable
             systemPrompt = systemPrompt + "\n\n" + systemPromptSuffix.Trim();
         }
 
+        // Describe the active operating mode and its constraints (issue #278).
+        if (_modeState is not null)
+        {
+            systemPrompt = systemPrompt + "\n\n"
+                + Andy.Cli.Modes.AgentModePrompt.SystemPromptSection(_modeState.CurrentDefinition);
+        }
+
         // Store system prompt in instrumentation hub for dashboard display
         InstrumentationHub.Instance.SetSystemPrompt(systemPrompt);
 
-        // Wrap the tool executor to update UI when tools execute
-        var uiExecutor = new UiUpdatingToolExecutor(toolExecutor, loggerFactory?.CreateLogger<UiUpdatingToolExecutor>(), toolRegistry);
+        // Wrap the tool executor to update UI when tools execute. The post-mutation pipeline
+        // (issue #283) runs the configured formatters after a successful file mutation and makes
+        // the displayed diff come from the final on-disk bytes; a null ambient pipeline degrades to
+        // diff-only, which is the pre-formatter behaviour.
+        var uiExecutor = new UiUpdatingToolExecutor(
+            toolExecutor,
+            loggerFactory?.CreateLogger<UiUpdatingToolExecutor>(),
+            toolRegistry,
+            postMutationPipeline: Formatting.PostMutationPipelineFactory.Ambient);
 
         // Wrap the LLM provider so each round-trip's REAL token usage flows into the live turn
         // stats (thinking row) and the session token counter, replacing char/4 estimates. The same
@@ -277,10 +314,17 @@ public class SimpleAssistantService : IDisposable
     /// <summary>
     /// Process a user message
     /// </summary>
+    /// <param name="structuredParts">
+    /// Optional multi-part content for this turn (issue #277: @file mentions resolve into a text
+    /// part per attached file). When supplied it is what the agent actually receives;
+    /// <paramref name="userMessage"/> is still used for the local shortcuts, token estimates and
+    /// instrumentation, so pass the flattened equivalent there.
+    /// </param>
     public async Task<string> ProcessMessageAsync(
         string userMessage,
         bool enableStreaming = false, // Ignored for now - streaming not yet implemented
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<Andy.Model.Model.MessagePart>? structuredParts = null)
     {
         try
         {
@@ -347,7 +391,16 @@ public class SimpleAssistantService : IDisposable
 
             // Process message through SimpleAgent
             var llmStartTime = DateTime.UtcNow;
-            var result = await _agent.ProcessMessageAsync(userMessage, cancellationToken);
+            // The mode directive (issue #278) has to reach the model on BOTH paths. The structured
+            // path (issue #277) cannot go through ComposeAgentMessage, which returns a string, so
+            // the directive is prepended as its own text part instead - otherwise a prompt that
+            // happens to contain an @file mention would silently drop the per-turn Plan-mode
+            // restatement that keeps the model honest after a mid-session /mode switch.
+            var result = structuredParts is { Count: > 0 }
+                ? await _agent.ProcessMessageAsync(
+                    PrependModeDirective(structuredParts), cancellationToken)
+                : await _agent.ProcessMessageAsync(
+                    ComposeAgentMessage(userMessage), cancellationToken);
             var llmDuration = DateTime.UtcNow - llmStartTime;
 
             // INSTRUMENTATION: Publish LLM response event
@@ -688,6 +741,52 @@ public class SimpleAssistantService : IDisposable
     /// Exports the agent's full conversation transcript (message history including tool
     /// calls/results) as the engine's versioned snapshot, for session persistence (issue #231).
     /// </summary>
+    /// <summary>
+    /// Prefixes the user's message with the active mode's constraints when the mode is restrictive.
+    /// Build mode returns the message untouched, so the normal path is byte-for-byte unchanged.
+    ///
+    /// Why per turn: <c>SimpleAgent</c> takes its system prompt once, at construction, and the
+    /// interactive loop must not rebuild the agent on <c>/mode</c> (that would discard the
+    /// conversation). Restating the constraint on each turn keeps the model aligned with whatever
+    /// mode is active right now.
+    /// </summary>
+    /// <summary>
+    /// Structured-parts counterpart of <see cref="ComposeAgentMessage"/>: returns the parts with the
+    /// active mode's turn directive prepended as a leading text part, or the list unchanged when
+    /// there is no directive (Build mode, or no mode state wired). See the call site in
+    /// ProcessMessageAsync for why both paths need this.
+    /// </summary>
+    internal IReadOnlyList<Andy.Model.Model.MessagePart> PrependModeDirective(
+        IReadOnlyList<Andy.Model.Model.MessagePart> parts)
+    {
+        var directive = _modeState is null
+            ? null
+            : Andy.Cli.Modes.AgentModePrompt.TurnDirective(_modeState.CurrentDefinition);
+
+        if (string.IsNullOrEmpty(directive))
+        {
+            return parts;
+        }
+
+        var composed = new List<Andy.Model.Model.MessagePart>(parts.Count + 1)
+        {
+            new Andy.Model.Model.TextPart(directive)
+        };
+        composed.AddRange(parts);
+        return composed;
+    }
+
+    internal string ComposeAgentMessage(string userMessage)
+    {
+        var directive = _modeState is null
+            ? null
+            : Andy.Cli.Modes.AgentModePrompt.TurnDirective(_modeState.CurrentDefinition);
+
+        return string.IsNullOrEmpty(directive)
+            ? userMessage
+            : directive + "\n\n" + userMessage;
+    }
+
     public Andy.Engine.TranscriptSnapshot ExportTranscript() => _agent.ExportTranscript();
 
     /// <summary>

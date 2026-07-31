@@ -33,6 +33,8 @@ runtime, and an Agent Client Protocol (ACP) server for editor integrations.
 - **Code Indexing** - Index a codebase for fast code-aware search
 - **Interactive MCP Tools** - Connect project-configured stdio or HTTP MCP
   servers and expose their tools in the TUI
+- **Changed-file LSP Diagnostics** - Report compiler-grade errors and warnings from a
+  configured language server right after a file is edited, managed through `/lsp`
 - **Headless Agent Runtime** - Non-interactive agent runtime with structured exit codes
 - **ACP Server Mode** - Run as an Agent Client Protocol server for editor integrations
 - **Observability** - Instrumentation and a performance HUD; crash logging for diagnostics
@@ -51,6 +53,34 @@ for macOS, Linux, and Windows on x64 and ARM64. Verify downloaded artifacts
 against the release checksums before running them.
 
 ## Configuration
+
+### andy.jsonc
+
+Andy CLI reads a layered JSONC configuration file:
+
+- user scope: `~/.andy/andy.jsonc`
+- project scope: `<workspace>/andy.jsonc` and `<workspace>/.andy/andy.jsonc`
+
+Sources are merged in the order **packaged defaults < user < project <
+environment < CLI arguments**, validated against a versioned JSON Schema
+(`schemas/andy-config.v1.json`), and merged per field: keyed maps merge entry by
+entry, arrays are replaced rather than concatenated. `{env:NAME}` pulls a value
+from the environment without ever printing it back out, and relative paths
+resolve against the file that declared them.
+
+```console
+$ andy-cli config validate
+$ andy-cli config show --effective --sources
+```
+
+`config show` reports the origin (file, line, column) of every value and redacts
+API keys, tokens, headers and substituted secrets. Every environment variable and
+command-line flag documented below still works and is folded into the same merged
+result.
+
+See [`docs/configuration.md`](docs/configuration.md) for the full schema and
+[`docs/configuration-migration.md`](docs/configuration-migration.md) for moving
+existing `appsettings.json`, MCP, theme and session settings across.
 
 ### Automatic Provider Detection
 
@@ -98,9 +128,10 @@ providers are configured, detection prefers them in this order:
 
 ### Interactive MCP servers
 
-Interactive mode loads MCP servers from `Mcp:Servers` in `appsettings.json`
-and from `<working-directory>/.andy/mcp-servers.json`, with the project file
-taking precedence. Both stdio and Streamable HTTP transports are supported.
+Interactive mode loads MCP servers from `Mcp:Servers` in `appsettings.json`,
+from `mcp.servers` in `andy.jsonc`, and from
+`<working-directory>/.andy/mcp-servers.json`, in that order of increasing
+precedence. Both stdio and Streamable HTTP transports are supported.
 Use `${VARIABLE_NAME}` placeholders for credentials; a server referencing an
 unset variable is rejected without printing the expanded value.
 
@@ -108,6 +139,18 @@ Connected tools appear in `/tools list` with IDs such as
 `mcp_filesystem_read_file`. Use `/mcp list` or `/mcp status` for server state.
 See [`docs/mcp-configuration.md`](docs/mcp-configuration.md) for the complete
 schema, examples, security guidance, and current limitations.
+
+### Changed-file language server diagnostics
+
+After a file-editing tool runs, Andy can ask a language server about the file it
+just changed and return the errors and warnings to both you and the model.
+Servers are configured explicitly in `<working-directory>/.andy/lsp-servers.json`
+(or `Lsp:Servers` in `appsettings.json`) by command, extensions, and root markers;
+Andy never downloads a language server, and nothing starts until a matching file
+changes. Use `/lsp status` and `/lsp restart`. See
+[`docs/lsp-diagnostics.md`](docs/lsp-diagnostics.md) for the schema, working
+examples for C#, TypeScript, Python, Go and Rust, output bounds, and the
+workspace containment rules.
 
 ### Examples
 
@@ -162,6 +205,8 @@ dotnet run --project src/Andy.Cli
 - `/tools info <tool_name>` - Show details for a tool
 - `/mcp list` - List configured MCP servers
 - `/mcp status` - Show MCP connection state and registered tool IDs
+- `/lsp status` - Show configured language servers, their state, and startup errors
+- `/lsp restart [id]` - Restart language servers
 - `/permissions` - View and edit tool permissions (aliases: `perms`, `perm`)
 - `/theme` - List and switch the UI theme (alias: `themes`)
 - `/theme transparent on|off` - Toggle a supported theme's transparent background
@@ -190,6 +235,31 @@ dotnet run --project src/Andy.Cli -- tools info <tool_name>
 # Print the version and exit (--version, -v, or version)
 dotnet run --project src/Andy.Cli -- --version
 ```
+
+### One-Shot Prompt
+
+Run a single prompt without writing a config file. Prompt text can come from
+the command line, from piped stdin, or both:
+
+```bash
+dotnet run --project src/Andy.Cli -- run "explain this repository"
+git diff | dotnet run --project src/Andy.Cli -- run "review this diff"
+git diff | dotnet run --project src/Andy.Cli -- run --json "review this diff"
+```
+
+When both sources are present they are combined deterministically, positional
+text first, with the piped payload fenced between `--- begin piped stdin ---`
+and `--- end piped stdin ---`.
+
+By default stdout carries only the final answer (tool narration goes to stderr)
+and `--json` switches stdout to the NDJSON event stream. `--provider`,
+`--model`, `--cwd`, `--timeout`, `--max-iterations`, `--allow-tool` and
+`--output` are supported, and the exit codes are the headless ones.
+
+With no `--allow-tool`, a one-shot run uses the **fail-closed read-only**
+permission profile: read-only tools are allowed, every mutating tool and
+`execute_command` is denied, and the run never blocks waiting for an approval.
+See [`docs/headless-runtime.md`](docs/headless-runtime.md#one-shot-prompt-execution).
 
 ### Headless Agent Runtime
 
@@ -265,8 +335,12 @@ this repository). The application is built on a set of Andy.* NuGet packages:
 
 - [`docs/README.md`](docs/README.md) - Documentation index
 - [`docs/README_COMMANDS.md`](docs/README_COMMANDS.md) - Commands and shortcuts
+- [`docs/configuration.md`](docs/configuration.md) - Layered andy.jsonc configuration
+- [`docs/configuration-migration.md`](docs/configuration-migration.md) - Migrating existing settings to andy.jsonc
+- [`docs/external-editor.md`](docs/external-editor.md) - Composing prompts in $VISUAL/$EDITOR
 - [`docs/headless-runtime.md`](docs/headless-runtime.md) - Headless config and execution contract
 - [`docs/mcp-configuration.md`](docs/mcp-configuration.md) - Interactive MCP server configuration
+- [`docs/lsp-diagnostics.md`](docs/lsp-diagnostics.md) - Changed-file LSP diagnostics and `/lsp`
 - [`docs/ZED_INTEGRATION.md`](docs/ZED_INTEGRATION.md) - ACP editor integration
 - [`docs/CLI_AGENT_FEATURE_COMPARISON.md`](docs/CLI_AGENT_FEATURE_COMPARISON.md) - Rider CLI-agent comparison
 

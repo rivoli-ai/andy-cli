@@ -12,14 +12,24 @@ Headless MCP bindings use the separate versioned configuration documented in
 
 ## Configuration sources
 
-Interactive mode merges two sources:
+Interactive mode merges three sources, in increasing order of precedence:
 
 1. `Mcp:Servers` in the packaged `appsettings.json`
-2. `<working-directory>/.andy/mcp-servers.json`
+2. `mcp.servers` in the layered [`andy.jsonc`](configuration.md) configuration
+   (user and project scope, already merged)
+3. `<working-directory>/.andy/mcp-servers.json`
 
-The project file wins when both sources define the same server name. Server
-names are compared case-insensitively. The project file is read once at
-startup; editing it does not change a running session.
+A later source wins when several define the same server name. Server names are
+compared case-insensitively. All three are read once at startup; editing them
+does not change a running session.
+
+Server fields are spelled identically in `andy.jsonc` and in
+`.andy/mcp-servers.json`, so a server definition can be moved between them
+unchanged. Two behaviours differ, both in `andy.jsonc`'s favour: a relative
+`workingDirectory` resolves against the file that declared it rather than the
+process working directory, and `args` declared by a higher scope REPLACES a lower
+one instead of being concatenated. See
+[Migrating to andy.jsonc](configuration-migration.md).
 
 ### Project file
 
@@ -112,6 +122,31 @@ For example, `read-note` from `local-files` becomes
 `[MCP: local-files]`, so `/tools list` shows the source. Calls are forwarded to
 the original remote tool name, and protocol or transport failures return
 ordinary failed tool results.
+
+## Plan mode and MCP tools
+
+MCP tools declare no capability metadata, so [Plan mode](agent-modes.md) - which
+fails closed - denies them until you explicitly opt in. When a server connects in
+the interactive TUI, Andy lists its tools and offers the choice: allow every tool
+from that server (including ones it exposes later), allow selected tools, or skip.
+Skipping grants nothing. The offer is shown once per server, and again only if
+that server later exposes a tool it has not offered before.
+
+The same grants can be made without the TUI, which is what headless and one-shot
+runs rely on since they never prompt:
+
+```bash
+andy-cli mode grants                    # review current opt-ins
+andy-cli mode allow-server local-files  # allow every tool from a server
+andy-cli mode allow mcp_local_files_read_note
+andy-cli mode revoke local-files
+```
+
+Grants are per developer: they are stored in `~/.andy/modes.json` and must never
+be committed. A project `.andy/modes.json` cannot grant Plan-mode access - grant
+keys there are ignored with a diagnostic, so a teammate who never saw the prompt
+is not silently opted in on your behalf. Grants are read-only opt-ins: they
+cannot re-enable a mutating tool, and Build mode is unaffected by them.
 
 ## Commands
 

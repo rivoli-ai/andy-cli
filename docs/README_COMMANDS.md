@@ -12,6 +12,7 @@ replace it with `dotnet run --project src/Andy.Cli --`.
 | Interactive terminal UI | `andy-cli` |
 | Print version | `andy-cli --version`, `andy-cli -v`, or `andy-cli version` |
 | Model command | `andy-cli model <subcommand>` |
+| Authentication command | `andy-cli auth <subcommand>` |
 | Tool command | `andy-cli tools <subcommand>` |
 | Headless run | `andy-cli run --headless --config <path>` |
 | ACP server | `andy-cli --acp` |
@@ -52,6 +53,21 @@ catalog contains 54 tools, including 28 dataframe and six PDF tools. The catalog
 is package-version dependent, and interactive MCP tools are added at startup, so
 the live command is authoritative.
 
+### Provider authentication
+
+| Command | Behavior |
+| --- | --- |
+| `/auth list` | List providers, credential status, and the login methods each supports. |
+| `/auth login <provider>` | Sign in with a masked prompt (`--method api-key`, `oauth`, or `device-code`). |
+| `/auth status [provider]` | Show where each credential comes from, fully redacted. |
+| `/auth logout <provider>` | Remove the stored credential (API key plus OAuth tokens). |
+
+The same verbs are available non-interactively as `andy-cli auth list|login|status|logout`.
+Environment variables are the highest-priority source and are never persisted; stored
+credentials live in the OS credential service. See
+[Provider authentication](provider-auth.md) for precedence, OS behavior, automation,
+rotation, and recovery.
+
 ### MCP servers
 
 | Command | Behavior |
@@ -65,6 +81,21 @@ project-local `.andy/mcp-servers.json`. See
 [Interactive MCP configuration](mcp-configuration.md) for schemas, environment
 interpolation, supported transports, and current management limitations.
 
+### Sessions
+
+| Command | Behavior |
+| --- | --- |
+| `/session export [id] [--out path] [--markdown] [--tools] [--metadata]` | Write a portable archive, or a readable Markdown transcript. |
+| `/session import <path> [--dry-run] [--title t]` | Validate and install an exported archive. |
+| `/session fork [id] [--at turn] [--title t]` | Branch a session; `--at N` keeps the history before turn N. |
+| `/session rename [id] <title>` | Title a session so it stays discoverable. |
+| `/session stats [id] [--all]` | Token and estimated-cost totals. |
+
+The same subcommands are available noninteractively as `andy-cli session ...`.
+See [Session archives, forks, and usage stats](session-archives.md) for the archive
+format, validation rules, fork boundary semantics, and the unknown-versus-zero cost
+distinction.
+
 ### Permissions
 
 | Command | Behavior |
@@ -77,6 +108,65 @@ interpolation, supported transports, and current management limitations.
 `perms` and `perm` are aliases. Mutating file tools and `execute_command`
 normally require consent unless a higher-precedence rule allows them.
 
+### Markdown slash commands
+
+| Command | Behavior |
+| --- | --- |
+| `/commands` | List Markdown slash commands with their `[user]`/`[project]` source. |
+| `/commands info <name>` | Show a command's file, metadata, placeholders, and template. |
+| `/commands reload` | Re-scan the command roots without restarting the TUI. |
+| `/commands diagnostics` | Show problems found while loading command files. |
+
+`/cmds` is an alias. Commands are Markdown files under `~/.andy/commands` and
+`<workspace>/.andy/commands`; nested folders become colon segments
+(`git/commit.md` becomes `/git:commit`). Project commands win over user commands
+and built-in names cannot be redefined. See
+[Markdown slash commands](markdown-commands.md) for the frontmatter schema,
+argument quoting rules, and the security limitations (no shell interpolation, no
+permission or tool escalation, enforced size limits).
+### Shell escape
+
+| Command | Behavior |
+| --- | --- |
+| `!` (at an empty prompt) | Switch the composer to shell mode. |
+| `/attach` | List the recent shell-mode commands whose output can be attached. |
+| `/attach <n>` | Insert that command's redacted output into the prompt. |
+
+Shell-mode commands run through the same permission gate, working-directory
+tracker, timeout, redaction, and output limits as the model's `execute_command`
+tool. Output is never sent to the model unless you attach it. See
+[Interactive shell escape](shell-escape.md) for the security model and the
+`ShellEscape:Enabled` / `ANDY_SHELL_ESCAPE` disable switches.
+### Operating modes
+
+| Command | Behavior |
+| --- | --- |
+| `/mode` | Show the current mode and the available modes. |
+| `/mode build` | Full capability; the normal permission rules apply. |
+| `/mode plan` | Read-only planning; mutating and unclassified tools are denied before they run. |
+| `/mode grants` | Review the Plan-mode read-only tool opt-ins. |
+| `/mode allow <tool-id>` | Opt specific tools into Plan mode. A mutating tool can never be opted in. |
+| `/mode allow-server <name>` | Opt in every tool from an MCP server, including ones it exposes later. |
+| `/mode revoke <tool-id\|server-name>` | Remove a Plan-mode opt-in. |
+
+MCP tools are denied in Plan mode until opted in. When an MCP server connects,
+the TUI offers the choice (all tools from the server, or selected ones); the
+same grants are available non-interactively as `andy-cli mode allow`,
+`allow-server`, `revoke`, and `grants`. Headless and one-shot runs never prompt -
+they read the persisted grants.
+
+Grants are per developer and live only in `~/.andy/modes.json`. A project
+`.andy/modes.json` cannot supply them: it is committed, so it would grant access
+to teammates who never saw the prompt. Grant keys found there are ignored with a
+diagnostic, leaving those tools denied.
+
+Plan mode is enforced by a tool-permission overlay that runs ahead of the rule
+layers, so an existing allow rule (user, project, local, session, injected, or
+auto-approve) cannot re-enable a denied tool. `--mode <build/plan>` selects the
+start-up mode, and `andy-cli run --headless ... --mode <id>` selects it for a
+headless run; an unknown mode is rejected rather than defaulted. See
+[Operating modes: Build and Plan](agent-modes.md).
+
 ### Themes and general commands
 
 | Command | Behavior |
@@ -85,8 +175,25 @@ normally require consent unless a higher-precedence rule allows them.
 | `/theme <name>` | Switch theme and persist the choice. |
 | `/theme transparent <on/off>` | Toggle transparency when the selected theme supports it. |
 | `/clear` | Clear the current feed/conversation history. |
+| `/undo` | Revert the file changes made by the last completed turn and restore its prompt to the composer. Git workspaces only; see [Undo and redo](undo-redo.md). |
+| `/redo` | Reapply the turn reverted by the last `/undo`. Unavailable once a new turn starts. |
 | `/help` or `/?` | Show in-application help. |
 | `/exit`, `/quit`, or `/bye` | Open the exit confirmation. The same words work without `/`. |
+
+### External editor
+
+| Command | Behavior |
+| --- | --- |
+| `/editor [text]` (alias `/edit`) | Compose the prompt in `$VISUAL`, then `$EDITOR`, and return to the TUI. The editor opens on the text that follows the command. |
+
+`Ctrl+X` runs the same round trip on whatever is currently in the composer. Both
+paths behave identically: the composer is snapshotted before submission clears it,
+and it ends up holding exactly the edited text. It is replaced only when the editor
+exits with status 0; a nonzero exit, a signal, a failed launch or an over-sized file
+leave the prompt text intact. GUI editors need their blocking flag
+(`export VISUAL='code --wait'`). See [External editor](external-editor.md) for
+per-editor examples, the quoting rules used to split the value without a shell, and
+troubleshooting.
 
 ## Keyboard shortcuts
 
@@ -102,8 +209,12 @@ normally require consent unless a higher-precedence rule allows them.
 | `Ctrl+A` / `Ctrl+E` | Move to the start/end of the current line. |
 | `Home` / `End` | Move to the line edge; with Control, move to the entire prompt edge. |
 | `Ctrl+K` / `Ctrl+U` | Delete to the end/start of the current line. |
-| `Esc` | Close the active palette/permission manager, otherwise open exit confirmation. |
+| `!` | At offset zero on an empty prompt, enter shell mode. Elsewhere it is an ordinary character. |
+| `Ctrl+C` | Cancel the running shell-mode command. With nothing running it keeps its usual meaning. |
+| `Esc` | Leave shell mode on an empty shell prompt; otherwise close the active palette/permission manager, otherwise open exit confirmation. |
+| `Backspace` | On an empty shell prompt, leave shell mode. |
 | `Ctrl+D` | Open exit confirmation. |
+| `Ctrl+X` | Edit the current prompt in the external editor (`$VISUAL`, then `$EDITOR`). |
 
 Mouse capture starts off so ordinary click-drag selection and the terminal's
 copy shortcut work immediately. Press `F3` to enable capture for wheel scrolling;

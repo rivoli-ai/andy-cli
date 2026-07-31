@@ -52,7 +52,14 @@ public static class HeadlessAgentRunner
         ILoggerFactory loggerFactory,
         ILlmProvider? llmProviderOverride = null,
         CancellationToken ct = default,
-        Func<string, string?>? currentBranchResolver = null)
+        Func<string, string?>? currentBranchResolver = null,
+        // rivoli-ai/andy-cli#279: the one-shot front end (`andy-cli run "<prompt>"`)
+        // carries the operator's prompt as the USER turn instead of baking it into
+        // the system prompt. Absent/blank keeps the config-driven contract's
+        // "Begin." kickoff exactly as before.
+        string? kickoffMessage = null,
+        Andy.Cli.Configuration.AndyConfiguration? layeredConfiguration = null,
+        Andy.Cli.Modes.AgentMode mode = Andy.Cli.Modes.AgentMode.Build)
     {
         var transcriptCreation = HeadlessTranscriptSession.TryCreate(config);
         using var emitter = new HeadlessEventEmitter(
@@ -100,7 +107,10 @@ public static class HeadlessAgentRunner
                 llmProviderOverride,
                 ct,
                 currentBranchResolver,
-                Finish);
+                Finish,
+                kickoffMessage,
+                layeredConfiguration,
+                mode);
         }
         catch (OperationCanceledException)
         {
@@ -132,7 +142,10 @@ public static class HeadlessAgentRunner
         ILlmProvider? llmProviderOverride,
         CancellationToken ct,
         Func<string, string?>? currentBranchResolver,
-        Action<HeadlessExitCode, int> finish)
+        Action<HeadlessExitCode, int> finish,
+        string? kickoffMessage,
+        Andy.Cli.Configuration.AndyConfiguration? layeredConfiguration,
+        Andy.Cli.Modes.AgentMode mode)
     {
         var iterations = 0;
         var exitCode = HeadlessExitCode.Success;
@@ -143,7 +156,7 @@ public static class HeadlessAgentRunner
         // rejected at config-load time, so this can never shadow a runtime secret.
         ApplyEnvVars(config.EnvVars);
 
-        await using var services = BuildServiceProvider(config, loggerFactory);
+        await using var services = BuildServiceProvider(config, loggerFactory, layeredConfiguration, mode);
 
         // AX.3 (rivoli-ai/conductor#2090): register the assistant's built-in
         // tools into the SAME IToolRegistry the agent uses, so a headless
@@ -256,11 +269,19 @@ public static class HeadlessAgentRunner
         var workingDirectory = !string.IsNullOrWhiteSpace(config.Workspace.Root)
             ? config.Workspace.Root
             : null;
+        // Issue #278: tell the model which mode it is in. This is context, not the boundary - the
+        // boundary is the overlay wrapped around the executor and the authorizer above.
+        var modeSection = Andy.Cli.Modes.AgentModePrompt.SystemPromptSection(
+            Andy.Cli.Modes.AgentModeCatalog.Get(mode));
+        var systemPrompt = string.IsNullOrWhiteSpace(config.Agent.Instructions)
+            ? modeSection
+            : config.Agent.Instructions + "\n\n" + modeSection;
+
         using var agent = new SimpleAgent(
             llmProvider,
             toolHost.Registry,
             toolExecutor,
-            systemPrompt: config.Agent.Instructions,
+            systemPrompt: systemPrompt,
             maxTurns: maxTurns,
             workingDirectory: workingDirectory,
             logger: loggerFactory.CreateLogger<SimpleAgent>());
@@ -317,7 +338,8 @@ public static class HeadlessAgentRunner
         SimpleAgentResult? result = null;
         try
         {
-            result = await agent.ProcessMessageAsync(KickoffMessage, linkedCts.Token);
+            var kickoff = string.IsNullOrWhiteSpace(kickoffMessage) ? KickoffMessage : kickoffMessage;
+            result = await agent.ProcessMessageAsync(kickoff, linkedCts.Token);
             iterations = result?.TurnCount ?? 0;
         }
         catch (OperationCanceledException)
@@ -573,11 +595,20 @@ public static class HeadlessAgentRunner
 
     // Internal for testing: lets a test exercise the real DI wiring (built-in
     // tool catalog included) instead of reimplementing it in a parallel path.
-    internal static ServiceProvider BuildServiceProvider(HeadlessRunConfig config, ILoggerFactory loggerFactory)
+    internal static ServiceProvider BuildServiceProvider(
+        HeadlessRunConfig config,
+        ILoggerFactory loggerFactory,
+        Andy.Cli.Configuration.AndyConfiguration? layeredConfiguration = null,
+        Andy.Cli.Modes.AgentMode mode = Andy.Cli.Modes.AgentMode.Build)
     {
         var services = new ServiceCollection();
         services.AddSingleton(loggerFactory);
         services.AddLogging();
+
+        // Issue #278: seed the run's primary mode BEFORE AddAndyCliPermissions, whose TryAdd keeps
+        // this instance and hands it to the mode overlay. A headless run's mode is fixed for its
+        // lifetime - there is no interactive path that could switch it.
+        services.AddSingleton(new Andy.Cli.Modes.AgentModeState(mode));
 
         // Andy.Llm: factory + per-provider configuration from environment
         // variables (CEREBRAS_API_KEY, ANTHROPIC_API_KEY, etc.). Default
@@ -589,6 +620,18 @@ public static class HeadlessAgentRunner
             options.DefaultProvider = config.Model.Provider;
         });
 
+        // Layered andy.jsonc llm.* (rivoli-ai/andy-cli#280) between the environment
+        // and the run config. This is what lets a workspace pin an endpoint - an
+        // internal gateway, say - for every session that runs in it. It is applied
+        // BEFORE the two Configure calls below, so the run config's own model and
+        // api_key_ref still win: an explicit per-run instruction outranks a
+        // workspace default.
+        if (layeredConfiguration is not null)
+        {
+            services.Configure<LlmOptions>(options =>
+                Andy.Cli.Configuration.LlmOptionsBinder.Apply(options, layeredConfiguration.Llm));
+        }
+
         // The headless config names the model explicitly (config.Model.Id), but
         // ConfigureLlmFromEnvironment only populates each provider's Model from
         // env vars (e.g. OPENROUTER_MODEL). Some providers — OpenRouter among
@@ -596,6 +639,11 @@ public static class HeadlessAgentRunner
         // into the provider entry the factory will resolve for this run.
         services.Configure<LlmOptions>(options =>
             ApplyConfiguredModel(options, config.Model.Provider, config.Model.Id));
+
+        // rivoli-ai/andy-cli#284: layer in credentials stored by `andy-cli auth login` so a
+        // headless run resolves them exactly like interactive and ACP mode. Environment
+        // variables (including model.api_key_ref below) still win and are never persisted.
+        services.Configure<LlmOptions>(Andy.Cli.Auth.AuthBootstrap.Configure);
 
         // rivoli-ai/andy-cli#180: honor model.api_key_ref. Only the 'env:NAME' form
         // is supported (validated at load time); load that env var's value into the
@@ -622,6 +670,13 @@ public static class HeadlessAgentRunner
         services.AddSingleton<Andy.Tools.Framework.IToolLifecycleManager, Andy.Tools.Framework.ToolLifecycleManager>();
         // Gate tool execution through the permission engine. Headless is non-interactive: anything that
         // would prompt is denied (fail-closed) unless ANDY_PERMISSION_MODE=bypass or rules/injection allow it.
+        //
+        // The layered andy.jsonc configuration is DELIBERATELY not consulted here.
+        // Its permissions section carries only a prompting mode, and a file checked
+        // into a workspace must never be able to loosen a containerised run: the
+        // per-run allow-list in the run config is the sole relaxation mechanism.
+        // HeadlessConfigLayer pins permissions.mode to "ask" so the merged view
+        // agrees with what is enforced.
         Andy.Cli.Services.CliPermissionServiceExtensions.AddAndyCliPermissions(services, null);
         services.AddSingleton(new Andy.Tools.Framework.ToolFrameworkOptions
         {
