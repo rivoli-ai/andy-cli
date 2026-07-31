@@ -370,7 +370,7 @@ records the exact task set, exit classification, nested deadlines, and effective
 concurrency. The hardening derives nested Harbor/CLI/Engine deadlines, uses
 bounded continuation windows, and records progress and terminal stop reasons
 for timeout diagnosis. The hardened headless integration is compiled against
-Andy.Engine `2026.7.30-rc.94`.
+Andy.Engine `2026.7.31-rc.98`.
 
 ### Building
 
