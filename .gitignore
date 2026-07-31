@@ -41,6 +41,10 @@ ScaffoldingReadMe.txt
 *~
 CodeCoverage/
 
+# Python test and adapter caches
+__pycache__/
+*.py[cod]
+
 # Test coverage and results
 coverage/
 coveragereport/
@@ -63,6 +67,9 @@ test-results-*/
 
 # Benchmarks (removed from repo)
 benchmarks/Andy.Tui.Benchmarks/
+
+# Harbor benchmark run output
+jobs/
 
 # Container build artifacts
 container/bin-safe/

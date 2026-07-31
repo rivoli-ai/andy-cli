@@ -4,6 +4,7 @@
 // boundary: schema (contract library), the loader, and the semantic validator.
 
 using System.IO;
+using System.Text.Json;
 using Andy.Cli.Headless.Contract;
 using Andy.Cli.HeadlessConfig;
 using Xunit;
@@ -25,6 +26,57 @@ public class HeadlessV1ContractTests
       "limits": { "max_iterations": 50, "timeout_seconds": 300 }
     }
     """;
+
+    [Fact]
+    public void GeneratedJsonMetadata_CoversHeadlessConfigGraph()
+    {
+        var config = JsonSerializer.Deserialize(
+            BaseConfig,
+            HeadlessConfigJsonContext.Default.HeadlessRunConfig);
+
+        Assert.NotNull(config);
+        Assert.Equal(1, config.SchemaVersion);
+        Assert.Equal("triage-agent", config.Agent.Slug);
+        Assert.Equal("anthropic", config.Model.Provider);
+        Assert.Equal("/workspace", config.Workspace.Root);
+        Assert.Equal(50, config.Limits.MaxIterations);
+    }
+
+    [Fact]
+    public void SemanticValidation_RejectsWindowAboveGlobalTurnLimit()
+    {
+        var config = new HeadlessRunConfig
+        {
+            Limits = new HeadlessLimits
+            {
+                MaxIterations = 50,
+                TimeoutSeconds = 300,
+                ContinuationWindowIterations = 51,
+            },
+        };
+
+        var error = HeadlessConfigValidator.Validate(config);
+
+        Assert.Contains("continuation_window_iterations", error);
+    }
+
+    [Fact]
+    public void SemanticValidation_RejectsEngineDeadlineWithoutCleanupMargin()
+    {
+        var config = new HeadlessRunConfig
+        {
+            Limits = new HeadlessLimits
+            {
+                MaxIterations = 50,
+                TimeoutSeconds = 300,
+                EngineTimeoutSeconds = 300,
+            },
+        };
+
+        var error = HeadlessConfigValidator.Validate(config);
+
+        Assert.Contains("engine_timeout_seconds", error);
+    }
 
     // ---- policy_id / boundaries: removed, must be rejected --------------------
 
@@ -132,6 +184,7 @@ public class HeadlessV1ContractTests
         var result = await LoadJsonAsync(json);
 
         Assert.True(result.IsSuccess, result.Error);
+        Assert.Empty(result.Config!.RequiredActions);
     }
 
     // ---- env_vars reserved-name protection -----------------------------------
@@ -238,6 +291,21 @@ public class HeadlessV1ContractTests
         var requirement = Assert.Single(result.Config!.RequiredActions);
         Assert.Equal("dotnet test", requirement.CommandEquals);
         Assert.Equal(1, requirement.AtLeast);
+    }
+
+    [Fact]
+    public async Task Loader_OmittedCollectionAndActionDefaults_AreApplied()
+    {
+        var json = BaseConfig.Replace(
+            "\"tools\": [],",
+            "\"tools\": [], \"permissions\": {}, "
+                + "\"required_actions\": [{ \"tool_name\": \"read_file\" }],");
+
+        var result = await LoadJsonAsync(json);
+
+        Assert.True(result.IsSuccess, result.Error);
+        Assert.Empty(result.Config!.Permissions!.AllowedTools);
+        Assert.Equal(1, Assert.Single(result.Config.RequiredActions).AtLeast);
     }
 
     [Fact]

@@ -1,5 +1,4 @@
 using System.IO;
-using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -50,20 +49,32 @@ public sealed class HeadlessEventEmitter : IDisposable
     }
 
     public void EmitStarted(Guid runId, string agentSlug, string modelProvider, string modelId, int toolCount)
-        => Write(HeadlessEventKind.Started, new
+        => Write(HeadlessEventKind.Started, new JsonObject
         {
-            run_id = runId,
-            agent_slug = agentSlug,
-            model_provider = modelProvider,
-            model_id = modelId,
-            tool_count = toolCount
+            ["run_id"] = runId.ToString(),
+            ["agent_slug"] = agentSlug,
+            ["model_provider"] = modelProvider,
+            ["model_id"] = modelId,
+            ["tool_count"] = toolCount
         });
 
     public void EmitLlmChunk(string text, int? turn = null)
-        => Write(HeadlessEventKind.LlmChunk, new { text, turn });
+    {
+        var data = new JsonObject { ["text"] = text };
+        if (turn.HasValue) data["turn"] = turn.Value;
+        Write(HeadlessEventKind.LlmChunk, data);
+    }
 
     public void EmitToolCallStarted(string callId, string toolName, string? argsDigest = null)
-        => Write(HeadlessEventKind.ToolCallStarted, new { call_id = callId, tool_name = toolName, args_digest = argsDigest });
+    {
+        var data = new JsonObject
+        {
+            ["call_id"] = callId,
+            ["tool_name"] = toolName
+        };
+        if (argsDigest is not null) data["args_digest"] = argsDigest;
+        Write(HeadlessEventKind.ToolCallStarted, data);
+    }
 
     // #179: `outcome` distinguishes the terminal state of the ACTUAL execution
     // (success / failed / denied / cancelled / timed_out). `ok` stays as the
@@ -79,16 +90,19 @@ public sealed class HeadlessEventEmitter : IDisposable
         string? resultDigest = null,
         string? error = null,
         string? outcome = null)
-        => Write(HeadlessEventKind.ToolCallFinished, new
+    {
+        var data = new JsonObject
         {
-            call_id = callId,
-            tool_name = toolName,
-            ok,
-            outcome,
-            duration_ms = durationMs,
-            result_digest = resultDigest,
-            error
-        });
+            ["call_id"] = callId,
+            ["tool_name"] = toolName,
+            ["ok"] = ok,
+            ["duration_ms"] = durationMs
+        };
+        if (outcome is not null) data["outcome"] = outcome;
+        if (resultDigest is not null) data["result_digest"] = resultDigest;
+        if (error is not null) data["error"] = error;
+        Write(HeadlessEventKind.ToolCallFinished, data);
+    }
 
     // AX.4 (rivoli-ai/conductor#2091): end-of-run tool-usage audit. One event listing
     // the injected allow-list and, per distinct tool the agent invoked, the invocation
@@ -97,51 +111,116 @@ public sealed class HeadlessEventEmitter : IDisposable
     public void EmitToolUsageAudit(
         IReadOnlyList<string> allowedTools,
         IReadOnlyList<ToolUsageAuditEntry> tools)
-        => Write(HeadlessEventKind.ToolUsageAudit, new
+    {
+        var allowed = new JsonArray();
+        foreach (var tool in allowedTools) allowed.Add(JsonValue.Create(tool));
+
+        var entries = new JsonArray();
+        foreach (var tool in tools)
         {
-            allowed_tools = allowedTools,
-            tools = tools.Select(t => new
+            entries.Add((JsonNode)new JsonObject
             {
-                tool_name = t.ToolName,
-                invocations = t.Invocations,
-                permitted = t.Permitted
-            })
+                ["tool_name"] = tool.ToolName,
+                ["invocations"] = tool.Invocations,
+                ["permitted"] = tool.Permitted
+            });
+        }
+
+        Write(HeadlessEventKind.ToolUsageAudit, new JsonObject
+        {
+            ["allowed_tools"] = allowed,
+            ["tools"] = entries
         });
+    }
 
     public void EmitRequiredActionVerification(RequiredActionVerificationResult result)
-        => Write(HeadlessEventKind.RequiredActionVerification, new
+    {
+        var requirements = new JsonArray();
+        foreach (var requirement in result.Requirements)
         {
-            satisfied = result.Satisfied,
-            requirements = result.Requirements.Select(requirement => new
+            var calls = new JsonArray();
+            foreach (var call in requirement.Calls)
             {
-                index = requirement.Index,
-                tool_name = requirement.ToolName,
-                command_digest = requirement.CommandEquals is null
-                    ? null
-                    : ComputeDigest(requirement.CommandEquals),
-                at_least = requirement.AtLeast,
-                observed_matches = requirement.ObservedMatches,
-                successful_matches = requirement.SuccessfulMatches,
-                satisfied = requirement.Satisfied,
-                calls = requirement.Calls.Select(call => new
+                calls.Add((JsonNode)new JsonObject
                 {
-                    call_id = call.CallId,
-                    outcome = call.Outcome
-                })
-            })
+                    ["call_id"] = call.CallId,
+                    ["outcome"] = JsonNamingPolicy.SnakeCaseLower.ConvertName(call.Outcome.ToString())
+                });
+            }
+
+            var entry = new JsonObject
+            {
+                ["index"] = requirement.Index,
+                ["tool_name"] = requirement.ToolName,
+                ["at_least"] = requirement.AtLeast,
+                ["observed_matches"] = requirement.ObservedMatches,
+                ["successful_matches"] = requirement.SuccessfulMatches,
+                ["satisfied"] = requirement.Satisfied,
+                ["calls"] = calls
+            };
+            if (requirement.CommandEquals is not null)
+            {
+                entry["command_digest"] = ComputeDigest(requirement.CommandEquals);
+            }
+            requirements.Add((JsonNode)entry);
+        }
+
+        Write(HeadlessEventKind.RequiredActionVerification, new JsonObject
+        {
+            ["satisfied"] = result.Satisfied,
+            ["requirements"] = requirements
         });
+    }
 
     public void EmitOutputWritten(string path, long bytes)
-        => Write(HeadlessEventKind.OutputWritten, new { path, bytes });
+        => Write(HeadlessEventKind.OutputWritten, new JsonObject { ["path"] = path, ["bytes"] = bytes });
 
     public void EmitError(string message, bool fatal)
-        => Write(HeadlessEventKind.Error, new { message, fatal });
+        => Write(HeadlessEventKind.Error, new JsonObject { ["message"] = message, ["fatal"] = fatal });
 
-    public void EmitFinished(int exitCode, long durationMs, int iterations)
+    public void EmitAgentProgress(
+        string stage,
+        int window,
+        int totalTurns,
+        string? stopReason = null,
+        string? finishReason = null,
+        int? maxOutputTokens = null,
+        int? consecutiveOutputLimitResponses = null,
+        int? totalOutputLimitResponses = null)
     {
+        var data = new JsonObject
+        {
+            ["stage"] = stage,
+            ["window"] = window,
+            ["total_turns"] = totalTurns,
+        };
+        if (stopReason is not null) data["stop_reason"] = stopReason;
+        if (finishReason is not null) data["finish_reason"] = finishReason;
+        if (maxOutputTokens.HasValue) data["max_output_tokens"] = maxOutputTokens.Value;
+        if (consecutiveOutputLimitResponses.HasValue)
+            data["consecutive_output_limit_responses"] = consecutiveOutputLimitResponses.Value;
+        if (totalOutputLimitResponses.HasValue)
+            data["total_output_limit_responses"] = totalOutputLimitResponses.Value;
+        Write(HeadlessEventKind.AgentProgress, data);
+    }
+
+    public void EmitFinished(
+        int exitCode,
+        long durationMs,
+        int iterations,
+        string? stopReason = null)
+    {
+        var data = new JsonObject
+        {
+            ["exit_code"] = exitCode,
+            ["duration_ms"] = durationMs,
+            ["iterations"] = iterations
+        };
+        if (stopReason is not null) data["stop_reason"] = stopReason;
+
         var line = Serialize(
             HeadlessEventKind.Finished,
-            new { exit_code = exitCode, duration_ms = durationMs, iterations });
+            data);
 
         lock (_writeLock)
         {
@@ -152,10 +231,10 @@ public sealed class HeadlessEventEmitter : IDisposable
             {
                 WritePrimary(Serialize(
                     HeadlessEventKind.Error,
-                    new
+                    new JsonObject
                     {
-                        message = transcriptError,
-                        fatal = false
+                        ["message"] = transcriptError,
+                        ["fatal"] = false
                     }));
             }
 
@@ -176,7 +255,7 @@ public sealed class HeadlessEventEmitter : IDisposable
         return "sha256:" + Convert.ToHexString(hash).ToLowerInvariant();
     }
 
-    private void Write(HeadlessEventKind kind, object data)
+    private void Write(HeadlessEventKind kind, JsonObject data)
     {
         var line = Serialize(kind, data);
 
@@ -189,19 +268,17 @@ public sealed class HeadlessEventEmitter : IDisposable
         }
     }
 
-    private string Serialize(HeadlessEventKind kind, object data)
+    private string Serialize(HeadlessEventKind kind, JsonObject data)
     {
-        // Keep the envelope shape explicit at the serializer call site rather
-        // than sprinkling it into every Emit* method.
-        var envelope = new
-        {
-            schema_version = SchemaVersion,
-            ts = _clock.GetUtcNow(),
-            kind,
-            data
-        };
+        var envelope = new HeadlessEventEnvelope(
+            SchemaVersion,
+            _clock.GetUtcNow(),
+            JsonNamingPolicy.SnakeCaseLower.ConvertName(kind.ToString()),
+            data);
 
-        return JsonSerializer.Serialize(envelope, s_jsonOptions);
+        return JsonSerializer.Serialize(
+            envelope,
+            HeadlessEventJsonContext.Default.HeadlessEventEnvelope);
     }
 
     private void WritePrimary(string line) => _writer.WriteLine(line);
@@ -226,6 +303,7 @@ public enum HeadlessEventKind
     ToolCallFinished,
     ToolUsageAudit,
     RequiredActionVerification,
+    AgentProgress,
     OutputWritten,
     Error,
     Finished

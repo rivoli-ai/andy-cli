@@ -138,4 +138,7 @@ public sealed record HeadlessLimits
 {
     public int MaxIterations { get; init; }
     public int TimeoutSeconds { get; init; }
+    public int? MaxOutputTokens { get; init; }
+    public int? ContinuationWindowIterations { get; init; }
+    public int? EngineTimeoutSeconds { get; init; }
 }

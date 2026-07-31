@@ -59,6 +59,43 @@ public class HeadlessEventEmitterTests
     }
 
     [Fact]
+    public void EmitAgentProgress_CarriesOnlyStructuredBudgetMetadata()
+    {
+        var (sw, emitter) = NewEmitter();
+
+        emitter.EmitAgentProgress(
+            "output_limit_reached",
+            window: 2,
+            totalTurns: 17,
+            finishReason: "length",
+            maxOutputTokens: 8192,
+            consecutiveOutputLimitResponses: 2,
+            totalOutputLimitResponses: 3);
+
+        var doc = ParseSingleLine(sw.ToString());
+        Assert.Equal("agent_progress", doc.RootElement.GetProperty("kind").GetString());
+        var data = doc.RootElement.GetProperty("data");
+        Assert.Equal("output_limit_reached", data.GetProperty("stage").GetString());
+        Assert.Equal(2, data.GetProperty("window").GetInt32());
+        Assert.Equal(17, data.GetProperty("total_turns").GetInt32());
+        Assert.Equal("length", data.GetProperty("finish_reason").GetString());
+        Assert.False(data.TryGetProperty("text", out _));
+    }
+
+    [Fact]
+    public void EmitFinished_CarriesMachineReadableStopReason()
+    {
+        var (sw, emitter) = NewEmitter();
+
+        emitter.EmitFinished(4, 1234, 17, "output_limit_exhausted");
+
+        var doc = ParseSingleLine(sw.ToString());
+        Assert.Equal(
+            "output_limit_exhausted",
+            doc.RootElement.GetProperty("data").GetProperty("stop_reason").GetString());
+    }
+
+    [Fact]
     public void Emit_MultipleEvents_OneJsonPerLine()
     {
         var (sw, emitter) = NewEmitter();
@@ -79,8 +116,9 @@ public class HeadlessEventEmitterTests
     [Fact]
     public void ComputeDigest_IsDeterministic_AndHandlesNull()
     {
-        var d1 = HeadlessEventEmitter.ComputeDigest(new { a = 1, b = "x" });
-        var d2 = HeadlessEventEmitter.ComputeDigest(new { a = 1, b = "x" });
+        var payload = new Dictionary<string, object?> { ["a"] = 1, ["b"] = "x" };
+        var d1 = HeadlessEventEmitter.ComputeDigest(payload);
+        var d2 = HeadlessEventEmitter.ComputeDigest(payload);
         Assert.Equal(d1, d2);
         Assert.StartsWith("sha256:", d1);
 

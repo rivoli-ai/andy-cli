@@ -161,6 +161,22 @@ before `finished`.
 An unmet requirement produces a fatal `error`, exit code 1, and no
 `output_written` event. Absent/empty requirements do not add this event.
 
+### `agent_progress`
+
+Emitted when the Engine crosses a continuation boundary, approaches its soft
+deadline, recovers from a truncated response, or stops on a run budget.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `stage` | string | Snake-case Engine progress kind. |
+| `window` | integer >= 0 | Current continuation-window number. |
+| `total_turns` | integer >= 0 | Agent turns consumed across all windows. |
+| `stop_reason` | string | Optional terminal or boundary reason. |
+| `finish_reason` | string | Optional provider finish reason. |
+| `max_output_tokens` | integer >= 1 | Optional output-token limit active after recovery. |
+| `consecutive_output_limit_responses` | integer >= 0 | Optional consecutive truncation count. |
+| `total_output_limit_responses` | integer >= 0 | Optional total truncation count. |
+
 ### `output_written`
 
 Emitted after the final output file is written atomically.
@@ -192,6 +208,7 @@ Emitted once, last, on every run.
 | `exit_code` | integer 0-5 | Mirrors the process exit code; see the [exit codes table](headless-runtime.md#exit-codes). |
 | `duration_ms` | integer >= 0 | Total run duration. |
 | `iterations` | integer >= 0 | Optional. Number of LLM/tool turns executed before terminating. |
+| `stop_reason` | string | Optional machine-readable Engine or setup stop reason. |
 
 ## Digests
 

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using Andy.Cli.HeadlessConfig;
 using Andy.Engine;
 using Andy.Llm;
@@ -68,14 +69,14 @@ public static class HeadlessAgentRunner
         var stopwatch = Stopwatch.StartNew();
         var finished = false;
 
-        void Finish(HeadlessExitCode code, int iterations)
+        void Finish(HeadlessExitCode code, int iterations, string? stopReason)
         {
             if (finished)
             {
                 return;
             }
 
-            EmitFinished(emitter, stopwatch, iterations, code);
+            EmitFinished(emitter, stopwatch, iterations, code, stopReason);
             finished = true;
         }
 
@@ -117,7 +118,7 @@ public static class HeadlessAgentRunner
             if (!finished)
             {
                 emitter.EmitError("Headless runtime setup cancelled.", fatal: true);
-                Finish(HeadlessExitCode.Cancelled, 0);
+                Finish(HeadlessExitCode.Cancelled, 0, "setup_cancelled");
             }
             return HeadlessExitCode.Cancelled;
         }
@@ -127,7 +128,7 @@ public static class HeadlessAgentRunner
             if (!finished)
             {
                 emitter.EmitError($"Headless runtime failed: {ex.GetType().Name}: {ex.Message}", fatal: true);
-                Finish(HeadlessExitCode.InternalError, 0);
+                Finish(HeadlessExitCode.InternalError, 0, "internal_error");
             }
             return HeadlessExitCode.InternalError;
         }
@@ -142,7 +143,7 @@ public static class HeadlessAgentRunner
         ILlmProvider? llmProviderOverride,
         CancellationToken ct,
         Func<string, string?>? currentBranchResolver,
-        Action<HeadlessExitCode, int> finish,
+        Action<HeadlessExitCode, int, string?> finish,
         string? kickoffMessage,
         Andy.Cli.Configuration.AndyConfiguration? layeredConfiguration,
         Andy.Cli.Modes.AgentMode mode)
@@ -184,7 +185,7 @@ public static class HeadlessAgentRunner
         {
             // TryBuildToolHostAsync already emitted an error event and
             // logged. Surface the matching exit code without further chatter.
-            finish(HeadlessExitCode.AgentFailure, iterations);
+            finish(HeadlessExitCode.AgentFailure, iterations, "tool_host_setup_failed");
             return HeadlessExitCode.AgentFailure;
         }
 
@@ -198,7 +199,7 @@ public static class HeadlessAgentRunner
         {
             logger.LogError("Workspace branch verification failed: {Error}", branchError);
             emitter.EmitError(branchError, fatal: true);
-            finish(HeadlessExitCode.AgentFailure, iterations);
+            finish(HeadlessExitCode.AgentFailure, iterations, "workspace_branch_invalid");
             return HeadlessExitCode.AgentFailure;
         }
 
@@ -213,7 +214,7 @@ public static class HeadlessAgentRunner
             {
                 logger.LogError(ex, "Failed to resolve LLM provider {Provider}", config.Model.Provider);
                 emitter.EmitError($"Failed to resolve LLM provider '{config.Model.Provider}': {ex.Message}", fatal: true);
-                finish(HeadlessExitCode.AgentFailure, iterations);
+                finish(HeadlessExitCode.AgentFailure, iterations, "provider_resolution_failed");
                 return HeadlessExitCode.AgentFailure;
             }
         }
@@ -245,7 +246,7 @@ public static class HeadlessAgentRunner
         // reflects a synthesized deny. Resolved here (before the agent is built) so
         // the same auditor feeds the end-of-run tool-usage audit.
         var auditor = new ToolUsageAuditor();
-        var requiredActionVerifier = new RequiredActionVerifier(config.RequiredActions);
+        var requiredActionVerifier = new RequiredActionVerifier(config.RequiredActions ?? []);
         var toolAuthorizer = services
             .GetService(typeof(Andy.Permissions.Authorization.IToolPermissionAuthorizer))
             as Andy.Permissions.Authorization.IToolPermissionAuthorizer;
@@ -258,7 +259,8 @@ public static class HeadlessAgentRunner
             workingDirectory: !string.IsNullOrWhiteSpace(config.Workspace.Root) ? config.Workspace.Root : null,
             requiredActionVerifier: requiredActionVerifier);
 
-        var maxTurns = config.Limits.MaxIterations > 0 ? config.Limits.MaxIterations : 10;
+        var budget = HeadlessAgentBudgetFactory.Create(config.Limits);
+        var maxTurns = budget.WindowTurns;
 
         // Operate in the configured workspace root, not the process cwd. SimpleAgent
         // threads this into every ToolExecutionContext.WorkingDirectory, so relative
@@ -284,7 +286,22 @@ public static class HeadlessAgentRunner
             systemPrompt: systemPrompt,
             maxTurns: maxTurns,
             workingDirectory: workingDirectory,
-            logger: loggerFactory.CreateLogger<SimpleAgent>());
+            logger: loggerFactory.CreateLogger<SimpleAgent>(),
+            maxOutputTokens: budget.MaxOutputTokens,
+            continuationPolicy: budget.ContinuationPolicy);
+
+        agent.ContinuationProgress += (_, progress) =>
+        {
+            emitter.EmitAgentProgress(
+                JsonNamingPolicy.SnakeCaseLower.ConvertName(progress.Kind.ToString()),
+                progress.WindowNumber,
+                progress.TotalTurns,
+                progress.StopReason,
+                progress.FinishReason,
+                progress.MaxOutputTokens,
+                progress.ConsecutiveOutputLimitResponses,
+                progress.TotalOutputLimitResponses);
+        };
 
         RequiredActionVerificationResult? requiredActionVerification = null;
         var modelHistoryEmitted = false;
@@ -320,12 +337,12 @@ public static class HeadlessAgentRunner
 
         // Finalize a run that has reached the agent loop: emit the AX.4 tool-usage
         // audit, required-action evidence when configured, then the terminal event.
-        void Finalize(HeadlessExitCode code, int iters)
+        void Finalize(HeadlessExitCode code, int iters, string? stopReason = null)
         {
             EmitModelHistory();
             EmitToolUsageAudit(emitter, auditor, services, toolHost.Registry, allowedTools);
             EmitRequiredActionVerification();
-            finish(code, iters);
+            finish(code, iters, stopReason);
         }
 
         // Two cancellation sources: the caller's outer ct (SIGTERM, etc.)
@@ -357,14 +374,16 @@ public static class HeadlessAgentRunner
                 emitter.EmitError("Agent loop cancelled.", fatal: true);
                 exitCode = HeadlessExitCode.Cancelled;
             }
-            Finalize(exitCode, iterations);
+            Finalize(exitCode, iterations, timeoutCts.IsCancellationRequested
+                ? "timeout_seconds_exceeded"
+                : "cancelled");
             return exitCode;
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Agent loop threw");
             emitter.EmitError($"Agent loop failed: {ex.GetType().Name}: {ex.Message}", fatal: true);
-            Finalize(HeadlessExitCode.AgentFailure, iterations);
+            Finalize(HeadlessExitCode.AgentFailure, iterations, "agent_exception");
             return HeadlessExitCode.AgentFailure;
         }
 
@@ -389,7 +408,9 @@ public static class HeadlessAgentRunner
                 emitter.EmitError("Agent loop cancelled.", fatal: true);
                 exitCode = HeadlessExitCode.Cancelled;
             }
-            Finalize(exitCode, iterations);
+            Finalize(exitCode, iterations, timeoutCts.IsCancellationRequested
+                ? "timeout_seconds_exceeded"
+                : "cancelled");
             return exitCode;
         }
 
@@ -399,10 +420,11 @@ public static class HeadlessAgentRunner
         if (result is null || !result.Success)
         {
             var stopReason = result?.StopReason ?? "unknown";
-            if (IsTurnLimitStopReason(stopReason))
+            if (IsBudgetStopReason(stopReason))
             {
                 emitter.EmitError(
-                    $"Agent loop exhausted max_iterations={maxTurns}.",
+                    $"Agent loop exhausted max_iterations={config.Limits.MaxIterations}: "
+                        + $"{stopReason}.",
                     fatal: true);
                 exitCode = HeadlessExitCode.Timeout;
             }
@@ -411,7 +433,7 @@ public static class HeadlessAgentRunner
                 emitter.EmitError($"Agent loop did not converge: {stopReason}", fatal: true);
                 exitCode = HeadlessExitCode.AgentFailure;
             }
-            Finalize(exitCode, iterations);
+            Finalize(exitCode, iterations, stopReason);
             return exitCode;
         }
 
@@ -441,7 +463,7 @@ public static class HeadlessAgentRunner
         {
             logger.LogError("Output-format enforcement failed: {Error}", formatError);
             emitter.EmitError(formatError, fatal: true);
-            Finalize(HeadlessExitCode.AgentFailure, iterations);
+            Finalize(HeadlessExitCode.AgentFailure, iterations, "invalid_output_format");
             return HeadlessExitCode.AgentFailure;
         }
 
@@ -456,7 +478,7 @@ public static class HeadlessAgentRunner
             emitter.EmitError(
                 $"Failed to write output file '{config.Output.File}': {ex.Message}",
                 fatal: true);
-            Finalize(HeadlessExitCode.AgentFailure, iterations);
+            Finalize(HeadlessExitCode.AgentFailure, iterations, "output_write_failed");
             return HeadlessExitCode.AgentFailure;
         }
 
@@ -472,10 +494,24 @@ public static class HeadlessAgentRunner
         HeadlessEventEmitter emitter,
         Stopwatch stopwatch,
         int iterations,
-        HeadlessExitCode code)
+        HeadlessExitCode code,
+        string? stopReason = null)
     {
-        emitter.EmitFinished((int)code, stopwatch.ElapsedMilliseconds, iterations);
+        emitter.EmitFinished(
+            (int)code,
+            stopwatch.ElapsedMilliseconds,
+            iterations,
+            stopReason);
     }
+
+    internal static bool IsBudgetStopReason(string stopReason) =>
+        stopReason.Equals("max_turns", StringComparison.OrdinalIgnoreCase) ||
+        stopReason.Equals("max_turns_exceeded", StringComparison.OrdinalIgnoreCase) ||
+        stopReason.Equals("continuation_total_turns_exceeded", StringComparison.OrdinalIgnoreCase) ||
+        stopReason.Equals("continuation_windows_exceeded", StringComparison.OrdinalIgnoreCase) ||
+        stopReason.Equals("continuation_time_exceeded", StringComparison.OrdinalIgnoreCase) ||
+        stopReason.Equals("deadline_exhausted", StringComparison.OrdinalIgnoreCase) ||
+        stopReason.Equals("output_limit_exhausted", StringComparison.OrdinalIgnoreCase);
 
     // AX.4: emit the end-of-run tool-usage audit just before `finished`, resolving
     // each invoked tool's permitted status against the live permission engine.

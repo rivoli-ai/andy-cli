@@ -11,7 +11,7 @@
   },
   "targetFramework": "net10.0",
   "engine": {
-    "Andy.Engine": "2026.7.25-rc.92"
+    "Andy.Engine": "2026.7.30-rc.94"
   },
   "tui": {
     "Andy.Tui": "2026.7.21-rc.162"
