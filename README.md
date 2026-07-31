@@ -364,12 +364,13 @@ for exercising the published CLI in isolated containers. See
 [`benchmarks/harbor/README.md`](benchmarks/harbor/README.md) for setup, local
 archive publishing, retained run artifacts, and Terminal-Bench runs. The adapter
 has completed a 30-task Terminal-Bench 2 sample with `xiaomi/mimo-v2.5`,
-passing 10 for an aggregate mean reward of 0.333. The detailed report records
-the exact task set, timeout outcomes, and effective concurrency. Follow-up
-hardening derives nested Harbor/CLI/Engine deadlines, uses bounded continuation
-windows, and records progress and terminal stop reasons for timeout diagnosis.
-The hardened headless integration is compiled against Andy.Engine
-`2026.7.30-rc.94`.
+passing 12 for an aggregate mean reward of 0.400 with no Harbor agent timeouts.
+The [detailed report](benchmarks/harbor/results/terminal-bench-30-2026-07-31.md)
+records the exact task set, exit classification, nested deadlines, and effective
+concurrency. The hardening derives nested Harbor/CLI/Engine deadlines, uses
+bounded continuation windows, and records progress and terminal stop reasons
+for timeout diagnosis. The hardened headless integration is compiled against
+Andy.Engine `2026.7.30-rc.94`.
 
 ### Building
 

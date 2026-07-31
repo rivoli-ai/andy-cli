@@ -64,6 +64,14 @@ and defaults to 150 total turns in 50-turn continuation windows with an
 the Engine deadline and 900 seconds through the host-only
 `ExecuteCommand__MaximumTimeoutSeconds` setting.
 
+On 2026-07-31, the corrected 30-task sample completed all trials in 1 hour 26
+minutes with 12 passes, 18 failures, and a mean reward of 0.400. Harbor reported
+zero `AgentTimeoutError` instances, down from 16 in the previous sample. The
+remaining non-zero exits separated into internal provider cancellation paths,
+bounded turn/time exhaustion, no-progress detection, and one malformed model
+response stream. See the
+[full configuration, classification, and per-task results](results/terminal-bench-30-2026-07-31.md).
+
 ## Prerequisites
 
 - Docker running locally
@@ -213,6 +221,15 @@ keep Harbor's container isolation enabled.
   configs.
 - Persisted deadline metadata, bounded individual commands, and required exact
   task timeout resolution for scored Terminal-Bench runs.
+
+## Completion summary (2026-07-31)
+
+- Raised Harbor's normalized Terminal-Bench agent phase and pinned nested CLI
+  and Engine cleanup budgets.
+- Added a trimmed-publish headless smoke gate and reflection-free event
+  serialization.
+- Completed and classified a valid 30-task run with 12 passes and no Harbor
+  agent timeouts.
 
 ## Adapter checks
 
