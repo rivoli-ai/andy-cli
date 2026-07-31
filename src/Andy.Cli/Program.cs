@@ -223,7 +223,12 @@ class Program
         var scheduler = new Andy.Tui.Core.FrameScheduler(targetFps: 30);
         var hud = new Andy.Tui.Observability.HudOverlay { Enabled = false };
         scheduler.SetMetricsSink(hud);
-        var pty = new LocalStdoutPty();
+        // The renderer drags the terminal cursor over every cell it repaints, so each painted
+        // frame is written as one synchronized update that also carries the caret back to the
+        // prompt. Going through the PTY keeps it off the frames the diff renderer skips, which
+        // is what lets an idle caret blink normally instead of being rewritten 30 times a second.
+        var cursor = new Andy.Cli.Rendering.TerminalCursorController(Console.Write);
+        var pty = new LocalStdoutPty(cursor.DecorateFrame);
         Console.Write("\u001b[?1049h\u001b[?25l\u001b[?7l");
 
         // Use the terminal's own background (do not force black) so a transparent
@@ -1472,7 +1477,6 @@ class Program
 
             RefreshCommandSurfaces();
 
-            bool cursorStyledShown = false;
             var lastWidth = viewport.Width;
             var lastHeight = viewport.Height;
 
@@ -1489,7 +1493,7 @@ class Program
                     rawInput,
                     // The editor scribbled over the terminal while it owned it, so the next
                     // frame must be a full clear + repaint and the cursor style re-applied.
-                    () => { lastReflowSig = int.MinValue; cursorStyledShown = false; }));
+                    () => { lastReflowSig = int.MinValue; cursor.Invalidate(); }));
             var promptComposer = new Andy.Cli.Editor.PromptLineComposer(prompt);
             // Decides what each entry point starts from and what the composer ends up holding;
             // Ctrl+X and /editor share it so they cannot diverge.
@@ -1508,7 +1512,7 @@ class Program
                     feed.AddMarkdownRich("```\n" + result.Message + "\n```");
                 }
                 lastReflowSig = int.MinValue;
-                cursorStyledShown = false;
+                cursor.Invalidate();
             }
 
             // Helper method to show exit confirmation dialog
@@ -1517,6 +1521,10 @@ class Program
                 bool confirmExit = false;
                 bool dialogOpen = true;
                 bool yesSelected = false; // Default to No
+
+                // The dialog owns the screen; leave the caret out of it. The main loop re-targets
+                // the composer on its next frame.
+                cursor.TargetHidden();
 
                 while (dialogOpen)
                 {
@@ -2265,6 +2273,9 @@ class Program
                                     // reaches the prompt line, the history, or the transcript.
                                     feed.AddUserMessage(cmd);
                                     DrainTypeAhead();
+                                    // The modal draws its own masked input; the terminal caret has
+                                    // no business sitting on the composer behind it.
+                                    cursor.TargetHidden();
                                     var authPrompt = new Andy.Cli.Widgets.AuthLoginModal(
                                         dl => scheduler.RenderOnceAsync(dl, viewport, caps, pty, CancellationToken.None),
                                         ReadKeyBlocking,
@@ -2918,33 +2929,32 @@ class Program
                     scheduler = new Andy.Tui.Core.FrameScheduler(targetFps: 30);
                     scheduler.SetMetricsSink(hud);
                 }
-                await scheduler.RenderOnceAsync(builder.Build(), viewport, caps, pty, CancellationToken.None);
-                // Position the terminal cursor inside the prompt. Input remains available while
-                // processing so additional messages can be queued and edited.
-                // NOTE: We're using direct Console.Write here instead of going through the TUI library (PTY).
-                // This works because cursor positioning happens after frame rendering and doesn't modify
-                // the display buffer. However, this creates mixed output paths which is not ideal
-                // architecturally. Consider refactoring to route cursor operations through the TUI
-                // library's PTY interface or checking if Andy.Tui has built-in cursor support.
+                // Decide where the caret belongs BEFORE painting, so the frame and the cursor
+                // placement leave the host as one synchronized update. The prompt widget already
+                // rendered into the display list above, so its geometry is current.
+                //
+                // Input remains available while a turn is running, so the caret stays visible and
+                // editable throughout it (#243); only an approval panel taking over the input area
+                // takes the cursor away.
+                //
+                // NOTE: cursor control writes go straight to Console rather than through the TUI
+                // library (PTY). That is safe because it does not touch the display buffer, and both
+                // paths share the same sink so the ordering against the frame holds. It is still a
+                // mixed output path; route it through Andy.Tui if that ever grows cursor support.
                 if (!inlineApproval.IsActive && prompt.TryGetTerminalCursor(out int col1, out int row1))
                 {
-                    if (!cursorStyledShown)
-                    {
-                        // Set blinking block cursor once and show cursor once (DECSCUSR 1 is blinking block)
-                        Console.Write("\u001b[1 q\u001b[?25h");
-                        cursorStyledShown = true;
-                    }
-                    Console.Write($"\u001b[{row1};{col1}H");
+                    cursor.TargetCaret(col1, row1);
                 }
                 else if (inlineApproval.IsActive)
                 {
-                    // Hide cursor while an approval is pending and owns the input area.
-                    if (cursorStyledShown)
-                    {
-                        Console.Write("\u001b[?25l"); // Hide cursor
-                        cursorStyledShown = false;
-                    }
+                    cursor.TargetHidden();
                 }
+
+                await scheduler.RenderOnceAsync(builder.Build(), viewport, caps, pty, CancellationToken.None);
+                // No-op when the frame painted (the placement rode along inside it); moves the
+                // caret when the renderer had nothing to do, which is what an arrow key on an
+                // otherwise unchanged screen looks like.
+                cursor.AfterFrame();
 
                 // Main surface. For a transparent theme, drop any fill/bg a widget
                 // hardcoded so the terminal background shows through (e.g. message blocks
@@ -3428,9 +3438,19 @@ class Program
 
 file sealed class LocalStdoutPty : Andy.Tui.Backend.Terminal.IPtyIo
 {
+    private readonly Func<string, string>? _decorate;
+
+    /// <param name="decorate">Wraps a frame before it reaches the terminal - synchronized-update
+    /// markers plus the cursor handling, see <see cref="Andy.Cli.Rendering.TerminalCursorController"/>.
+    /// It must be written in a single call so the synchronized block stays balanced. Empty frames
+    /// (the diff renderer had nothing to do) never reach it.</param>
+    public LocalStdoutPty(Func<string, string>? decorate = null) => _decorate = decorate;
+
     public Task WriteAsync(ReadOnlyMemory<byte> frameBytes, CancellationToken cancellationToken)
     {
-        Console.Write(System.Text.Encoding.UTF8.GetString(frameBytes.Span));
+        if (frameBytes.Length == 0) return Task.CompletedTask;
+        var frame = System.Text.Encoding.UTF8.GetString(frameBytes.Span);
+        Console.Write(_decorate is null ? frame : _decorate(frame));
         return Task.CompletedTask;
     }
 }
