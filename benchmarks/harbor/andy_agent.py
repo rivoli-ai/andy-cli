@@ -42,6 +42,7 @@ class AndyCli(BaseInstalledAgent):
         timeout_seconds: int | None = None,
         max_output_tokens: int = 8192,
         continuation_window_iterations: int = 50,
+        harbor_timeout_seconds: int | None = None,
         require_harbor_timeout: bool | str = False,
         **kwargs: object,
     ) -> None:
@@ -50,6 +51,8 @@ class AndyCli(BaseInstalledAgent):
             raise ValueError("max_iterations must be at least 1")
         if timeout_seconds is not None and timeout_seconds < 1:
             raise ValueError("timeout_seconds must be at least 1")
+        if harbor_timeout_seconds is not None and harbor_timeout_seconds < 1:
+            raise ValueError("harbor_timeout_seconds must be at least 1")
         if max_output_tokens < 256:
             raise ValueError("max_output_tokens must be at least 256")
         if not 1 <= continuation_window_iterations <= max_iterations:
@@ -60,6 +63,7 @@ class AndyCli(BaseInstalledAgent):
         self._timeout_seconds = timeout_seconds
         self._max_output_tokens = max_output_tokens
         self._continuation_window_iterations = continuation_window_iterations
+        self._harbor_timeout_seconds = harbor_timeout_seconds
         self._require_harbor_timeout = (
             require_harbor_timeout
             if isinstance(require_harbor_timeout, bool)
@@ -160,7 +164,11 @@ class AndyCli(BaseInstalledAgent):
             raise ValueError(f"{model.api_key_env} must be set in the environment")
 
         workspace_root = await self._workspace_root(environment)
-        harbor_timeout = resolve_harbor_agent_timeout(self.logs_dir)
+        harbor_timeout = (
+            float(self._harbor_timeout_seconds)
+            if self._harbor_timeout_seconds is not None
+            else resolve_harbor_agent_timeout(self.logs_dir)
+        )
         if harbor_timeout is None:
             if self._require_harbor_timeout:
                 raise ValueError(

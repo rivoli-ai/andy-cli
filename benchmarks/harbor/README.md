@@ -162,6 +162,23 @@ HARBOR_CONCURRENCY=2 ./scripts/harbor/run-terminal-bench.sh \
   openrouter/xiaomi/mimo-v2.5 'terminal-bench/*' 4
 ```
 
+Harbor 0.20 normalizes Terminal-Bench agent phases to a short outer timeout.
+The wrapper raises that phase with `HARBOR_AGENT_TIMEOUT_MULTIPLIER=12` and
+pins Andy's nested deadlines to an explicit 3,600-second effective outer budget
+and a 3,300-second CLI budget. Override those together when a run needs a
+different ceiling:
+
+```bash
+HARBOR_AGENT_TIMEOUT_MULTIPLIER=16 \
+HARBOR_EFFECTIVE_AGENT_TIMEOUT_SECONDS=4800 \
+ANDY_CLI_TIMEOUT_SECONDS=4500 \
+./scripts/harbor/run-terminal-bench.sh \
+  openrouter/xiaomi/mimo-v2.5 'terminal-bench/*' 4
+```
+
+Keep the CLI timeout below the effective outer timeout so Andy can flush its
+events and Harbor can collect artifacts before the phase deadline.
+
 Terminal-Bench 2 currently contains 89 tasks. Running the entire dataset can
 take substantial time and model spend.
 

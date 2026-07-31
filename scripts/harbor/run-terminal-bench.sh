@@ -10,6 +10,9 @@ task_limit="${3:-1}"
 archive="$repo_root/artifacts/harbor/andy-cli-linux-x64.tar.gz"
 harbor_bin="${HARBOR_BIN:-harbor}"
 concurrency="${HARBOR_CONCURRENCY:-1}"
+agent_timeout_multiplier="${HARBOR_AGENT_TIMEOUT_MULTIPLIER:-12}"
+effective_agent_timeout_seconds="${HARBOR_EFFECTIVE_AGENT_TIMEOUT_SECONDS:-3600}"
+cli_timeout_seconds="${ANDY_CLI_TIMEOUT_SECONDS:-3300}"
 
 if [ -z "$model_name" ] || [[ "$model_name" != */* ]]; then
     echo "Usage: $0 <provider/model> [task-pattern] [task-limit]" >&2
@@ -23,6 +26,26 @@ fi
 
 if ! [[ "$concurrency" =~ ^[1-9][0-9]*$ ]]; then
     echo "HARBOR_CONCURRENCY must be a positive integer" >&2
+    exit 2
+fi
+
+if ! [[ "$agent_timeout_multiplier" =~ ^[1-9][0-9]*$ ]]; then
+    echo "HARBOR_AGENT_TIMEOUT_MULTIPLIER must be a positive integer" >&2
+    exit 2
+fi
+
+if ! [[ "$effective_agent_timeout_seconds" =~ ^[1-9][0-9]*$ ]]; then
+    echo "HARBOR_EFFECTIVE_AGENT_TIMEOUT_SECONDS must be a positive integer" >&2
+    exit 2
+fi
+
+if ! [[ "$cli_timeout_seconds" =~ ^[1-9][0-9]*$ ]]; then
+    echo "ANDY_CLI_TIMEOUT_SECONDS must be a positive integer" >&2
+    exit 2
+fi
+
+if [ "$cli_timeout_seconds" -ge "$effective_agent_timeout_seconds" ]; then
+    echo "ANDY_CLI_TIMEOUT_SECONDS must be smaller than HARBOR_EFFECTIVE_AGENT_TIMEOUT_SECONDS" >&2
     exit 2
 fi
 
@@ -69,7 +92,10 @@ PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}" \
     --agent benchmarks.harbor.andy_agent:AndyCli \
     --model "$model_name" \
     --n-concurrent "$concurrency" \
+    --agent-timeout-multiplier "$agent_timeout_multiplier" \
     --agent-kwarg require_harbor_timeout=true \
+    --agent-kwarg "harbor_timeout_seconds=$effective_agent_timeout_seconds" \
+    --agent-kwarg "timeout_seconds=$cli_timeout_seconds" \
     --agent-kwarg max_iterations=150 \
     --agent-kwarg max_output_tokens=8192 \
     --agent-kwarg continuation_window_iterations=50 \
