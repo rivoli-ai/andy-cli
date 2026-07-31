@@ -7,7 +7,6 @@
     <Nullable>enable</Nullable>
     <AssemblyName>andy-cli</AssemblyName>
     <RootNamespace>Andy.Cli</RootNamespace>
-    <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>false</SelfContained>
     <!-- Enable JSON reflection for trimming compatibility -->
     <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
