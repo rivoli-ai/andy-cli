@@ -24,7 +24,7 @@ SHA is the executed version.
 
 ### Build, format, and test
 
-Runs on Ubuntu with .NET 8 and performs:
+Runs on Ubuntu with .NET 10 and performs:
 
 1. `dotnet restore Andy.Cli.sln --locked-mode`
 2. Release build with compiler warnings visible.

@@ -92,7 +92,7 @@ jobs:
 
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9  # v4.3.1
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '10.0.x'
 
       # Gate: the pinned global.json band must resolve to a .NET 8 SDK.
       # See docs/SDK_AND_DEPENDENCIES.md (issue #172).

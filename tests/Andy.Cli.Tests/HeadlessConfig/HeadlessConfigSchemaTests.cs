@@ -56,10 +56,10 @@ public class HeadlessConfigSchemaTests
 
     // Build a JsonArray via the classic params JsonNode?[] constructor. A bare
     // new JsonArray(item) binds to System.Text.Json 9's params ReadOnlySpan<JsonNode?>
-    // overload, which is a C# 13 "params collections" call the pinned .NET 8 SDK
+    // overload, which is a params-collections call the pinned .NET 10 SDK
     // compiler rejects (see global.json / dependency-manifest.json, issue #172).
     // Passing an explicit array keeps overload resolution on the array overload so
-    // the suite compiles on the .NET 8 SDK and remains identical at runtime.
+    // the suite compiles on the .NET 10 SDK and remains identical at runtime.
     private static JsonArray JsonArrayOf(params JsonNode?[] items) => new JsonArray(items);
 
     private static JsonNode LoadJson(string path)
