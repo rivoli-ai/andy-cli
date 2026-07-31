@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "run_id": "11111111-2222-3333-4444-555555555555",
+  "agent": {
+    "slug": "trim-smoke",
+    "instructions": "Exit immediately.",
+    "output_format": "plain"
+  },
+  "model": {
+    "provider": "openrouter",
+    "id": "none"
+  },
+  "tools": [],
+  "workspace": {
+    "root": "."
+  },
+  "output": {
+    "file": "headless-smoke-output.txt",
+    "stream": "stdout"
+  },
+  "permissions": {
+    "allowed_tools": []
+  },
+  "limits": {
+    "max_iterations": 1,
+    "timeout_seconds": 30,
+    "max_output_tokens": 256
+  }
+}

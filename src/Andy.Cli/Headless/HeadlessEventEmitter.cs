@@ -134,27 +134,43 @@ public sealed class HeadlessEventEmitter : IDisposable
     }
 
     public void EmitRequiredActionVerification(RequiredActionVerificationResult result)
-        => Write(HeadlessEventKind.RequiredActionVerification, new
+    {
+        var requirements = new JsonArray();
+        foreach (var requirement in result.Requirements)
         {
-            satisfied = result.Satisfied,
-            requirements = result.Requirements.Select(requirement => new
+            var calls = new JsonArray();
+            foreach (var call in requirement.Calls)
             {
-                index = requirement.Index,
-                tool_name = requirement.ToolName,
-                command_digest = requirement.CommandEquals is null
-                    ? null
-                    : ComputeDigest(requirement.CommandEquals),
-                at_least = requirement.AtLeast,
-                observed_matches = requirement.ObservedMatches,
-                successful_matches = requirement.SuccessfulMatches,
-                satisfied = requirement.Satisfied,
-                calls = requirement.Calls.Select(call => new
+                calls.Add((JsonNode)new JsonObject
                 {
-                    call_id = call.CallId,
-                    outcome = call.Outcome
-                })
-            })
+                    ["call_id"] = call.CallId,
+                    ["outcome"] = JsonNamingPolicy.SnakeCaseLower.ConvertName(call.Outcome.ToString())
+                });
+            }
+
+            var entry = new JsonObject
+            {
+                ["index"] = requirement.Index,
+                ["tool_name"] = requirement.ToolName,
+                ["at_least"] = requirement.AtLeast,
+                ["observed_matches"] = requirement.ObservedMatches,
+                ["successful_matches"] = requirement.SuccessfulMatches,
+                ["satisfied"] = requirement.Satisfied,
+                ["calls"] = calls
+            };
+            if (requirement.CommandEquals is not null)
+            {
+                entry["command_digest"] = ComputeDigest(requirement.CommandEquals);
+            }
+            requirements.Add((JsonNode)entry);
+        }
+
+        Write(HeadlessEventKind.RequiredActionVerification, new JsonObject
+        {
+            ["satisfied"] = result.Satisfied,
+            ["requirements"] = requirements
         });
+    }
 
     public void EmitOutputWritten(string path, long bytes)
         => Write(HeadlessEventKind.OutputWritten, new JsonObject { ["path"] = path, ["bytes"] = bytes });
@@ -194,15 +210,17 @@ public sealed class HeadlessEventEmitter : IDisposable
         int iterations,
         string? stopReason = null)
     {
+        var data = new JsonObject
+        {
+            ["exit_code"] = exitCode,
+            ["duration_ms"] = durationMs,
+            ["iterations"] = iterations
+        };
+        if (stopReason is not null) data["stop_reason"] = stopReason;
+
         var line = Serialize(
             HeadlessEventKind.Finished,
-            new
-            {
-                exit_code = exitCode,
-                duration_ms = durationMs,
-                iterations,
-                stop_reason = stopReason
-            });
+            data);
 
         lock (_writeLock)
         {
@@ -213,10 +231,10 @@ public sealed class HeadlessEventEmitter : IDisposable
             {
                 WritePrimary(Serialize(
                     HeadlessEventKind.Error,
-                    new
+                    new JsonObject
                     {
-                        message = transcriptError,
-                        fatal = false
+                        ["message"] = transcriptError,
+                        ["fatal"] = false
                     }));
             }
 
@@ -237,7 +255,7 @@ public sealed class HeadlessEventEmitter : IDisposable
         return "sha256:" + Convert.ToHexString(hash).ToLowerInvariant();
     }
 
-    private void Write(HeadlessEventKind kind, object data)
+    private void Write(HeadlessEventKind kind, JsonObject data)
     {
         var line = Serialize(kind, data);
 
@@ -250,19 +268,17 @@ public sealed class HeadlessEventEmitter : IDisposable
         }
     }
 
-    private string Serialize(HeadlessEventKind kind, object data)
+    private string Serialize(HeadlessEventKind kind, JsonObject data)
     {
-        // Keep the envelope shape explicit at the serializer call site rather
-        // than sprinkling it into every Emit* method.
-        var envelope = new
-        {
-            schema_version = SchemaVersion,
-            ts = _clock.GetUtcNow(),
-            kind,
-            data
-        };
+        var envelope = new HeadlessEventEnvelope(
+            SchemaVersion,
+            _clock.GetUtcNow(),
+            JsonNamingPolicy.SnakeCaseLower.ConvertName(kind.ToString()),
+            data);
 
-        return JsonSerializer.Serialize(envelope, s_jsonOptions);
+        return JsonSerializer.Serialize(
+            envelope,
+            HeadlessEventJsonContext.Default.HeadlessEventEnvelope);
     }
 
     private void WritePrimary(string line) => _writer.WriteLine(line);

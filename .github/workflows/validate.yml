@@ -194,6 +194,7 @@ jobs:
           --runtime ${{ matrix.runtime }}
           --self-contained true
           --output ./smoke-publish
+          -p:PublishTrimmed=true
           -p:PublishSingleFile=true
 
       # Smoke: the packaged binary must launch and report a version string.
@@ -206,6 +207,26 @@ jobs:
           out="$(./smoke-publish/${{ matrix.exe }} --version)"
           echo "Version output: $out"
           echo "$out" | grep -q "andy-cli"
+
+      # Exercise the first NDJSON write from the trimmed executable. A bogus
+      # provider intentionally fails after the lifecycle starts, keeping this
+      # smoke hermetic while catching reflection metadata removed by ILLink.
+      - name: Smoke test trimmed headless event serialization
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          ./smoke-publish/${{ matrix.exe }} run --headless \
+            --config tests/fixtures/headless-trim-smoke.json \
+            > headless-smoke.ndjson 2> headless-smoke.stderr
+          status=$?
+          set -e
+          test "$status" -ne 0
+          grep -q '"kind":"started"' headless-smoke.ndjson
+          if grep -q 'deserialization constructor' headless-smoke.stderr; then
+            cat headless-smoke.stderr >&2
+            exit 1
+          fi
 
       - name: Smoke test packaged ACP handshake
         run: >-
