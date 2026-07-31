@@ -2,22 +2,22 @@
 #
 # assert-sdk-version.sh
 #
-# Fails unless the .NET SDK selected by global.json is a .NET 8 SDK.
+# Fails unless the .NET SDK selected by global.json is a .NET 10 SDK.
 # Run locally before building, and in CI as a gate ahead of restore/build so a
-# host with only a newer major SDK (for example .NET 9) fails loudly instead of
+# host with only a newer major SDK (for example .NET 11) fails loudly instead of
 # silently building the CLI against the wrong toolchain.
 #
 # Policy and rationale: docs/SDK_AND_DEPENDENCIES.md (issue #172).
 #
 # Usage:
-#   scripts/assert-sdk-version.sh              # expect major version 8
-#   EXPECTED_MAJOR=8 scripts/assert-sdk-version.sh
+#   scripts/assert-sdk-version.sh               # expect major version 10
+#   EXPECTED_MAJOR=10 scripts/assert-sdk-version.sh
 #
 # Exit codes: 0 = SDK matches the expected major; 1 = mismatch or dotnet missing.
 
 set -euo pipefail
 
-EXPECTED_MAJOR="${EXPECTED_MAJOR:-8}"
+EXPECTED_MAJOR="${EXPECTED_MAJOR:-10}"
 
 if ! command -v dotnet >/dev/null 2>&1; then
   echo "assert-sdk-version: 'dotnet' was not found on PATH." >&2

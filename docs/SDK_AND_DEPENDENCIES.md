@@ -1,47 +1,39 @@
 # SDK and Dependency Policy
 
-Updated: 2026-07-23
+Updated: 2026-07-30
 
 This document describes how Andy CLI pins its .NET SDK, records its known-good
 dependency graph, and tracks compatibility with the Andy engine and TUI.
 
 ## 1. .NET SDK band
 
-andy-cli targets `net8.0` and must be built with a **.NET 8 SDK**. The SDK is
+andy-cli targets `net10.0` and must be built with a **.NET 10 SDK**. The SDK is
 pinned in [`global.json`](../global.json):
 
 ```json
 {
   "sdk": {
-    "version": "8.0.0",
-    "rollForward": "latestMinor",
+    "version": "10.0.100",
+    "rollForward": "latestFeature",
     "allowPrerelease": false
   }
 }
 ```
 
-- `version: 8.0.0` sets the .NET 8 line as the floor without pinning a specific
-  feature band, so any installed 8.0.x SDK satisfies it.
-- `rollForward: latestMinor` selects the **highest installed .NET 8 SDK** on the
-  host (for example 8.0.100, 8.0.204, or 8.0.4xx) but never rolls forward to
-  .NET 9 or later. This is deliberately different from `latestMajor`, which
-  previously let a host with only .NET 9 installed build the CLI against the
-  wrong toolchain and silently pull in C# 13 / .NET 9-only language behavior.
-- The policy accepts any installed .NET 8.x SDK, so local developers whose only
-  .NET 8 SDK is a lower feature band (for example 8.0.100 or 8.0.204) are not
-  hard-failed, while .NET 9.x hosts are still refused.
+- `version: 10.0.100` sets the first stable .NET 10 feature band as the floor.
+- `rollForward: latestFeature` selects the highest installed .NET 10 feature
+  band (for example 10.0.100 or 10.0.302) but never rolls forward to .NET 11.
+- `allowPrerelease: false` keeps local and CI builds on supported stable SDKs.
 
 ### Why this matters
 
-Building `net8.0` code with a .NET 9 SDK changes the effective C# language
-version and can let .NET 9-only API overloads (for example the
-`System.Text.Json` `params ReadOnlySpan<>` constructors, which require C# 13
-`params collections`) compile locally yet fail on a real .NET 8 SDK. Pinning the
-band keeps local dev and CI on the same compiler.
+The .NET 10 target requires the .NET 10 SDK and C# 14 compiler. Pinning the
+major and feature-band policy keeps local development and CI on compatible,
+supported tooling while still accepting servicing updates.
 
 ### How to update the SDK band
 
-1. Decide the new floor version (for example moving to a newer 8.0.x patch, or a
+1. Decide the new floor version (for example moving to a newer 10.0.x patch, or a
    future major-version migration).
 2. Edit `global.json` (`version`, and `rollForward` only if the major changes).
 3. Update the `sdk` block in [`dependency-manifest.json`](../dependency-manifest.json).
@@ -53,10 +45,10 @@ band keeps local dev and CI on the same compiler.
 
 ### CI gate (SDK check)
 
-CI must fail fast if the selected SDK is not .NET 8. Use the helper script:
+CI must fail fast if the selected SDK is not .NET 10. Use the helper script:
 
 ```bash
-scripts/assert-sdk-version.sh          # exits non-zero unless dotnet --version starts with 8.
+scripts/assert-sdk-version.sh          # exits non-zero unless dotnet --version starts with 10.
 ```
 
 The release workflows run the following gate. The reusable PR validation relies
@@ -66,8 +58,8 @@ helper directly.
 ```yaml
 - uses: actions/setup-dotnet@v4
   with:
-    dotnet-version: '8.0.x'
-- name: Assert .NET 8 SDK
+    dotnet-version: '10.0.x'
+- name: Assert .NET 10 SDK
   run: scripts/assert-sdk-version.sh
 ```
 

@@ -1,15 +1,15 @@
 {
   "$comment": "Known-good dependency graph for andy-cli. Records the exact SDK band and Andy ecosystem package versions the CLI is verified against. Update this file in the same commit that bumps global.json or any Andy.* PackageReference in src/Andy.Cli/Andy.Cli.csproj. See docs/SDK_AND_DEPENDENCIES.md and issue #172.",
   "schemaVersion": 1,
-  "updated": "2026-07-27",
+  "updated": "2026-07-30",
   "sdk": {
-    "channel": "8.0",
-    "minimumVersion": "8.0.0",
-    "rollForward": "latestMinor",
+    "channel": "10.0",
+    "minimumVersion": "10.0.100",
+    "rollForward": "latestFeature",
     "allowPrerelease": false,
-    "policy": "The build must run on a .NET 8 SDK. global.json (version 8.0.0, rollForward latestMinor) accepts the highest installed 8.0.x SDK on any host and never rolls forward to 9.x; CI and local dev verify with scripts/assert-sdk-version.sh."
+    "policy": "The build must run on a .NET 10 SDK. global.json (version 10.0.100, rollForward latestFeature) accepts the highest installed 10.0 feature band on any host and never rolls forward to 11.x; CI and local development verify with scripts/assert-sdk-version.sh."
   },
-  "targetFramework": "net8.0",
+  "targetFramework": "net10.0",
   "engine": {
     "Andy.Engine": "2026.7.25-rc.92"
   },

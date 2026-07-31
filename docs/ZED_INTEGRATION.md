@@ -9,7 +9,7 @@ error so they do not corrupt the protocol stream.
 ## Prerequisites
 
 - Zed with external ACP-agent support.
-- A published Andy CLI binary, or a .NET 8 SDK for source execution.
+- A published Andy CLI binary, or a .NET 10 SDK for source execution.
 - Credentials for at least one configured remote provider, or a reachable local
   Ollama instance.
 

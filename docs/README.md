@@ -1,6 +1,6 @@
 # Andy CLI documentation
 
-Updated: 2026-07-23
+Updated: 2026-07-30
 
 Use this index to find the maintained operational and architecture documents.
 Historical decisions remain in `adr/`; current behavior belongs in the guides
@@ -52,8 +52,10 @@ linked below.
 
 - [Continuous integration](CI.md) - Validation and release workflows plus local
   equivalents.
-- [SDK and dependencies](SDK_AND_DEPENDENCIES.md) - .NET 8 policy, locked restore,
+- [SDK and dependencies](SDK_AND_DEPENDENCIES.md) - .NET 10 policy, locked restore,
   dependency manifest, and source compatibility status.
+- [.NET 10 migration](NET10_MIGRATION.md) - Cross-repository scope, SDK policy,
+  compatibility work, and validation summary.
 - [Tool execution architecture](tool-execution-architecture.md) - Engine/tool adapter,
   permission, progress, and result flow.
 - [Formatters and the post-mutation pipeline](formatters.md) - Configured formatters,

@@ -1,6 +1,6 @@
 # Andy CLI
 
-A .NET 8 coding agent with an interactive terminal UI, a strict headless
+A .NET 10 coding agent with an interactive terminal UI, a strict headless
 runtime, and an Agent Client Protocol (ACP) server for editor integrations.
 
 > **ALPHA RELEASE WARNING**
@@ -372,7 +372,7 @@ dotnet clean
 
 ### SDK and dependency policy
 
-The build is pinned to a .NET 8 SDK via `global.json`, restore is locked to
+The build is pinned to a .NET 10 SDK via `global.json`, restore is locked to
 committed `packages.lock.json` files, and the known-good Andy engine/TUI/package
 versions are recorded in [`dependency-manifest.json`](dependency-manifest.json).
 See [`docs/SDK_AND_DEPENDENCIES.md`](docs/SDK_AND_DEPENDENCIES.md) for the SDK
@@ -387,7 +387,7 @@ available as the manual `Source compatibility` GitHub Actions workflow.
 
 Dependency status (2026-07-23): the CLI's direct NuGet references and recursive
 Andy package graph were refreshed to the latest verified stable or prerelease
-versions for the .NET 8 target. The package lock files and dependency manifest
+versions for the .NET 10 target. The package lock files and dependency manifest
 record the resulting known-good graph.
 
 ## License
