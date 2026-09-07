@@ -1,0 +1,90 @@
+{
+  "$comment": "Coordination protocol for this repository. Reviewed like code. Live state is not here, it is in the coord service.",
+  "baseBranch": "main",
+  "worktreeRoot": "../andy-cli-lanes",
+  "branchPattern": "agent/{agent}/{issue}-{slug}",
+  "protectedBranches": [
+    "main",
+    "master",
+    "release"
+  ],
+  "leaseSeconds": 1800,
+  "closeRequiresEvidence": true,
+  "integrationAuthority": false,
+  "idleLadder": [
+    "issue",
+    "review",
+    "audit",
+    "sweep",
+    "worktree-gc"
+  ],
+  "singleWriter": [
+    {
+      "name": ".coord/config.json",
+      "reason": "Changes to lane layout and coordination rules affect all active sessions."
+    },
+    {
+      "name": "Andy.Cli.sln, global.json",
+      "reason": "Coordinate dependency and build configuration changes across lanes."
+    }
+  ],
+  "verify": [
+    {
+      "name": "Patch whitespace",
+      "command": "git diff --check",
+      "required": true
+    },
+    {
+      "name": "Solution tests",
+      "command": "dotnet test Andy.Cli.sln",
+      "required": true
+    }
+  ],
+  "sweeps": [
+    {
+      "area": "tests",
+      "description": "Missing, skipped, or vacuous tests for shipped behavior.",
+      "cadenceHours": 168,
+      "method": "Pick the two or three modules changed most in the last month (`git log --format= --name-only`\nover that range, sorted by frequency). For each:\n1. list the behaviors a user depends on, from the code, not from the existing test names;\n2. find which of those a test would actually catch if it broke. A test that asserts a\n   function returns what it just computed catches nothing;\n3. check for skipped, commented-out, or always-true assertions, and for tests that pass\n   when you delete the implementation line they claim to cover.\nFile one issue per specific untested behavior, naming the module, the behavior, and how it\nwould fail. Do not file \"add more tests\".\nStop when the selected modules are covered. Say which modules you looked at."
+    },
+    {
+      "area": "docs",
+      "description": "Documentation that no longer matches the code.",
+      "cadenceHours": 336,
+      "method": "Take README and the docs a newcomer would read first. For each concrete claim:\n1. a command, flag, path, or file name: run it or open it;\n2. a described behavior: find the code and check it still does that;\n3. a count, version, or size: recompute it. Numbers in prose drift silently.\nAlso check the reverse direction: a feature added recently that nothing documents.\nFile one issue per divergence, quoting the stale line and what is true instead.\nStop when the entry-point documents are verified. Say which files you checked."
+    },
+    {
+      "area": "defects",
+      "description": "Latent bugs, unhandled errors, and TODO or FIXME markers.",
+      "cadenceHours": 168,
+      "method": "Read for the failure modes tests do not reach:\n1. every TODO, FIXME, XXX and HACK marker: is it still true, and does it hide a defect?\n2. error paths that swallow: empty catch blocks, ignored return values, unchecked exit codes;\n3. boundaries: empty input, one element, absent optional value, concurrent callers,\n   a path that does not exist, a network call that never returns;\n4. anything whose comment and code disagree. One of them is wrong.\nFile an issue only where you can state a concrete failure: inputs, and what goes wrong.\nA code smell with no failure is not a defect. Stop when the pass is complete; say what you read."
+    },
+    {
+      "area": "dead-code",
+      "description": "Unreferenced code, dead flags, and superseded modules.",
+      "cadenceHours": 720,
+      "method": "Find what nothing reaches: exported symbols with no importer, private functions with no\ncaller, configuration keys nothing reads, feature flags with one branch never taken, and\nmodules superseded by a replacement that both still exist.\nVerify each candidate by searching the whole repository including tests and scripts, and\ncheck the history: recently added code with no caller yet may be a half-landed feature,\nwhich is a different issue from dead code and should be filed as such.\nFile one issue listing the symbols and the evidence that nothing reaches them."
+    },
+    {
+      "area": "deps",
+      "description": "Outdated or vulnerable dependencies.",
+      "cadenceHours": 336,
+      "method": "Run the ecosystem audit and outdated commands for this project.\nFor each finding, state whether the vulnerable path is actually reached: an advisory in a\ntransitive dependency of a build-only tool is not the same risk as one in a request path.\nGroup by upgrade rather than by advisory, since one bump usually clears several.\nFile issues only for upgrades worth doing, with the version, what breaks, and the risk if\nleft. A list of every available minor bump is noise."
+    }
+  ],
+  "scanRoots": [],
+  "siblings": [],
+  "$siblingsExample": [
+    {
+      "name": "DiagramKit",
+      "source": "../DiagramKit",
+      "mode": "worktree",
+      "pin": "origin/main"
+    },
+    {
+      "name": "swift-ide-components",
+      "source": "../swift-ide-components",
+      "mode": "symlink"
+    }
+  ]
+}
