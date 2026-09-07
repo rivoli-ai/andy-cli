@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "coord": {
+      "command": "coord-mcp",
+      "args": [],
+      "env": {}
+    }
+  }
+}
