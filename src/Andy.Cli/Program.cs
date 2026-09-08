@@ -304,6 +304,7 @@ class Program
             var queuedDisplays = new System.Collections.Concurrent.ConcurrentDictionary<long, Andy.Cli.Widgets.UserBubbleItem>();
             var pendingByHistoryIndex = new System.Collections.Concurrent.ConcurrentDictionary<int, long>();
             var messagePumpLock = new object();
+            using var activeTurnCancellation = new ActiveTurnCancellation();
             long? editingPendingMessageId = null;
 
             var toast = new Toast(); // Don't show initial toast as it interferes with prompt
@@ -1613,10 +1614,11 @@ class Program
                         // Bracket the turn with shadow-Git snapshots so /undo can revert it
                         // (issue #276). A turn that throws or is interrupted is aborted below
                         // and never becomes an undoable transaction.
+                        using var turnCancellation = activeTurnCancellation.Begin();
                         var undoTurn = undoManager?.BeginTurn(currentMessage);
                         try
                         {
-                            contextStatusBar.SetStatusText("Thinking", animated: true);
+                            contextStatusBar.SetStatusText("Thinking (ESC to cancel)", animated: true);
                             var service = aiService;
                             if (service == null)
                             {
@@ -1627,7 +1629,7 @@ class Program
                             // Resolve @file mentions now rather than when they were typed, so the
                             // model sees the file as it is at send time. Attachments become extra
                             // message parts; the prompt text itself is left exactly as typed.
-                            var resolvedPrompt = await fileMentions.ResolveAsync(currentMessage);
+                            var resolvedPrompt = await fileMentions.ResolveAsync(currentMessage, turnCancellation.Token);
                             var resolutionNote = Andy.Cli.Services.FileMentions.FileMentionSession
                                 .DescribeResolution(resolvedPrompt);
                             if (resolutionNote is not null)
@@ -1638,13 +1640,21 @@ class Program
                             await service.ProcessMessageAsync(
                                 resolvedPrompt.ComposedText,
                                 enableStreaming: false,
+                                cancellationToken: turnCancellation.Token,
                                 structuredParts: resolvedPrompt.Parts);
+                            turnCancellation.Token.ThrowIfCancellationRequested();
                             undoManager?.CompleteTurn(undoTurn);
 
                             // Persist the transcript after every completed turn so the
                             // session survives an exit or crash and can be resumed later.
                             SaveSession();
                             contextStatusBar.SetStatusText("Ready", animated: false);
+                        }
+                        catch (OperationCanceledException) when (turnCancellation.Token.IsCancellationRequested)
+                        {
+                            undoManager?.AbortTurn(undoTurn);
+                            feed.AddDimText("Cancelled.");
+                            contextStatusBar.SetStatusText("Cancelled", animated: false);
                         }
                         catch (Exception ex)
                         {
@@ -1834,6 +1844,14 @@ class Program
                         if (prompt.TryExitShellMode())
                         {
                             return;
+                        }
+
+                        // Modal dismissals above retain precedence. ESC during a queued turn
+                        // cancels that turn; the pump proceeds to the next queued message.
+                        if (activeTurnCancellation.TryCancel()) return;
+                        lock (messagePumpLock)
+                        {
+                            if (isProcessingMessage) return; // pump is between turns
                         }
 
                         // Show exit confirmation dialog

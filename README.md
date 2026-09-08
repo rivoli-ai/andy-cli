@@ -452,3 +452,9 @@ as plain text. See [provider error diagnostics](docs/PROVIDER_ERRORS.md).
 
 Malformed execute_command calls fail before execution. Shell builtins, assignments,
 redirections and compound commands remain supported (PR #93).
+
+### Turn cancellation - 2026-09-08
+
+ESC cancels the active agent turn; queued messages continue with fresh cancellation
+tokens. Idle ESC still opens exit confirmation. Modal dismissal takes precedence
+(PR #94). Canceled turns are not recorded as completed undo transactions.

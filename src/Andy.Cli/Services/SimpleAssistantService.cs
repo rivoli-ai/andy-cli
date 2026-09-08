@@ -694,7 +694,7 @@ public class SimpleAssistantService : IDisposable
         {
             _liveStats.End();
             _feed.ClearProcessingIndicator();
-            return "[Cancelled]";
+            throw;
         }
         catch (Exception ex)
         {
