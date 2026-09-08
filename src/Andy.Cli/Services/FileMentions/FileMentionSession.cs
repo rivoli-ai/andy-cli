@@ -45,6 +45,14 @@ public sealed class FileMentionSession
     public Task<ResolvedPrompt> ResolveAsync(string promptText, CancellationToken cancellationToken = default) =>
         Resolver.ResolveAsync(promptText, cancellationToken);
 
+    /// <summary>Resolve typed mentions without interpreting pasted payloads as file requests.</summary>
+    public async Task<ResolvedPrompt> ResolveAsync(Andy.Cli.Editor.ComposerDocument document,
+        CancellationToken cancellationToken = default)
+    {
+        var displayed = await Resolver.ResolveAsync(document.ToPromptText(), cancellationToken).ConfigureAwait(false);
+        return new ResolvedPrompt(document.ToSubmittedText(), displayed.Attachments);
+    }
+
     /// <summary>
     /// A one-paragraph summary of what a resolution attached and what it refused, or null when the
     /// prompt had no mentions at all. Shown in the transcript so attaching is never silent - the

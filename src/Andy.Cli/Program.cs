@@ -301,7 +301,7 @@ class Program
             // Scroll mode state
             ScrollMode scrollMode = ScrollMode.Feed;
             int lastReflowSig = int.MinValue; // forces a full clear+repaint on the first frame
-            var promptHistory = new List<string>(); // Store user prompts for history navigation
+            var promptHistory = new List<Andy.Cli.Editor.ComposerDocument>(); // Store user prompts for history navigation
             int historyIndex = -1; // -1 means not navigating history, showing current input
             var pendingMessages = new Andy.Cli.Services.PendingMessageQueue();
             var queuedDisplays = new System.Collections.Concurrent.ConcurrentDictionary<long, Andy.Cli.Widgets.UserBubbleItem>();
@@ -1463,7 +1463,7 @@ class Program
                 var expanded = customCommandCatalog.Expand(definition, rawArguments);
                 var promptText = expanded.ToPromptText();
 
-                promptHistory.Add(promptText);
+                promptHistory.Add(Andy.Cli.Editor.ComposerDocument.FromText(promptText));
                 int customMessageNumber = promptHistory.Count;
                 feed.AddUserMessage(promptText, customMessageNumber);
                 historyIndex = -1;
@@ -1618,7 +1618,7 @@ class Program
             {
                 lock (messagePumpLock)
                 {
-                    prompt.SetText(promptHistory[index]);
+                    prompt.SetDocument(promptHistory[index]);
                     attachmentIndicator.Clear();
                     if (!pendingByHistoryIndex.TryGetValue(index, out var id)) return;
                     if (!pendingMessages.TryRemove(id, out var removed))
@@ -1633,11 +1633,12 @@ class Program
                 }
             }
 
-            void StartMessagePump(string firstMessage, Andy.Cli.Domain.ImageAttachment? firstImage = null)
+            void StartMessagePump(string firstMessage, Andy.Cli.Domain.ImageAttachment? firstImage = null, Andy.Cli.Editor.ComposerDocument? firstDocument = null)
             {
                 _ = Task.Run(async () =>
                 {
                     string currentMessage = firstMessage;
+                    var currentDocument = firstDocument;
                     var currentImage = firstImage;
                     long? currentQueuedId = null;
 
@@ -1661,7 +1662,7 @@ class Program
                             // Resolve @file mentions now rather than when they were typed, so the
                             // model sees the file as it is at send time. Attachments become extra
                             // message parts; the prompt text itself is left exactly as typed.
-                            var resolvedPrompt = await fileMentions.ResolveAsync(currentMessage, turnCancellation.Token);
+                            var resolvedPrompt = await fileMentions.ResolveAsync(currentDocument ?? Andy.Cli.Editor.ComposerDocument.FromText(currentMessage), turnCancellation.Token);
                             var resolutionNote = Andy.Cli.Services.FileMentions.FileMentionSession
                                 .DescribeResolution(resolvedPrompt);
                             if (resolutionNote is not null)
@@ -1693,7 +1694,7 @@ class Program
                                 },
                                 prepare: async (message, ct) =>
                                 {
-                                    var resolved = await fileMentions.ResolveAsync(message.Text, ct);
+                                    var resolved = await fileMentions.ResolveAsync(message.Document ?? Andy.Cli.Editor.ComposerDocument.FromText(message.Text), ct);
                                     var note = Andy.Cli.Services.FileMentions.FileMentionSession.DescribeResolution(resolved);
                                     if (note is not null) feed.AddMarkdownRich(note);
                                     return await service.PreparePendingPartsAsync(resolved.Parts, message.Image, ct);
@@ -1760,6 +1761,7 @@ class Program
                         if (next == null) break;
 
                         currentMessage = next.Text;
+                        currentDocument = next.Document;
                         currentImage = next.Image;
                         currentQueuedId = next.Id;
                         if (queuedDisplays.TryGetValue(next.Id, out var queuedDisplay))
@@ -1936,6 +1938,16 @@ class Program
                     {
                         ThinkingView.Toggle();
                         toast.Show(ThinkingView.Visible ? "Thinking visible" : "Thinking hidden", 90);
+                        return;
+                    }
+                    if (k.Key == ConsoleKey.F5)
+                    {
+                        foreach (var paste in prompt.GetDocument().Attachments.Where(a => a.Kind == "paste"))
+                        {
+                            feed.AddDimText(paste.Placeholder);
+                            feed.AddCode(paste.Payload ?? "", "text");
+                        }
+                        feed.SnapToBottom();
                         return;
                     }
                     if (k.Key == ConsoleKey.F2) { hud.Enabled = !hud.Enabled; return; }
@@ -2205,7 +2217,7 @@ class Program
                             historyIndex = -1;
                             // Fire and forget: the render loop keeps drawing while the command
                             // runs, and the row updates itself when it finishes.
-                            _ = RunUserShellCommandAsync(cmd);
+                            _ = RunUserShellCommandAsync(documentBeforeKey.ToSubmittedText());
                             return;
                         }
 
@@ -2215,9 +2227,9 @@ class Program
                         {
                             if (isProcessingMessage)
                             {
-                                promptHistory.Add(cmd);
+                                promptHistory.Add(documentBeforeKey);
                                 int queuedMessageNumber = promptHistory.Count;
-                                var queued = pendingMessages.Enqueue(cmd, queuedMessageNumber, attachmentIndicator.Take());
+                                var queued = pendingMessages.Enqueue(cmd, queuedMessageNumber, attachmentIndicator.Take(), documentBeforeKey);
                                 pendingByHistoryIndex[queuedMessageNumber - 1] = queued.Id;
                                 queuedDisplays[queued.Id] = feed.AddQueuedUserMessage(cmd, queuedMessageNumber);
                                 toast.Show($"Queued message #{queuedMessageNumber} for the next tool-round boundary ({pendingMessages.Count} pending)", 120);
@@ -2229,6 +2241,11 @@ class Program
                         // Check for slash commands
                         if (cmd.StartsWith("/"))
                         {
+                            // Preserve /editor placeholders; other command arguments receive the
+                            // retained text just as ordinary chat delivery does.
+                            var slashName = cmd.Split(' ', 2)[0];
+                            if (!string.Equals(slashName, "/editor", StringComparison.OrdinalIgnoreCase))
+                                cmd = documentBeforeKey.ToSubmittedText();
                             var parts = cmd.Substring(1).Split(' ', StringSplitOptions.RemoveEmptyEntries);
                             if (parts.Length > 0)
                             {
@@ -2628,7 +2645,7 @@ class Program
 
                         // Regular chat message
                         // Store in prompt history first to get the message number
-                        promptHistory.Add(cmd);
+                        promptHistory.Add(documentBeforeKey);
                         int messageNumber = promptHistory.Count;
                         feed.AddUserMessage(cmd, messageNumber);
                         historyIndex = -1; // Reset to showing current input
@@ -2641,7 +2658,7 @@ class Program
                             {
                                 isProcessingMessage = true;
                             }
-                            StartMessagePump(cmd, attachmentIndicator.Take());
+                            StartMessagePump(cmd, attachmentIndicator.Take(), documentBeforeKey);
                         }
                         // No fallback - if aiService is null, the user needs to configure API keys
                         // The initialization error message above already informed them
@@ -2681,8 +2698,13 @@ class Program
                         if (ev.Kind == TerminalInputKind.Paste)
                         {
                             if (inlineApproval.IsActive || mcpPlanOptIn.IsOpen || permissionsManager.IsOpen || commandPalette.IsOpen) continue;
-                            if (ev.PasteTruncated) toast.Show("Paste exceeded 1 MiB and was truncated", 150);
-                            if (!TryAttachDroppedPath(ev.PasteText ?? "")) prompt.InsertText(ev.PasteText ?? "");
+                            if (ev.PasteTruncated || !TryAttachDroppedPath(ev.PasteText ?? ""))
+                            {
+                                if (!prompt.InsertPaste(ev.PasteText ?? "", ev.PasteTruncated, out var pasteError))
+                                    toast.Show(pasteError!, 150);
+                                else if (prompt.GetDocument().Attachments.Any(a => a.Kind == "paste"))
+                                    toast.Show("Paste retained. F5: inspect; Backspace/Delete: remove; Ctrl+Z: undo", 150);
+                            }
                             lastComposerEdit = DateTime.UtcNow;
                         }
                         else if (ev.Kind == TerminalInputKind.Wheel)

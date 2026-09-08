@@ -16,16 +16,9 @@ public abstract record ComposerPart;
 public sealed record ComposerTextPart(string Text) : ComposerPart;
 
 /// <summary>
-/// A structured, non-text part: an <c>@file</c> reference today, images later.
-///
-/// SEAM FOR #277 (structured @file prompt parts): the composer on main is still a
-/// plain string, so <see cref="ComposerDocument.FromText"/> currently produces a
-/// single <see cref="ComposerTextPart"/> and no attachments. When #277 lands, the
-/// composer will hand this type its real parts (resolved path, mime type, byte
-/// payload, ...) and the editor round trip below will preserve them: the editor
-/// only ever sees <see cref="Placeholder"/>, and every surviving placeholder in the
-/// edited text is mapped back to the ORIGINAL part instance, never re-parsed into
-/// text. Nothing else in this file needs to change for #277.
+/// A structured item rendered as a stable placeholder. Pasted text uses kind "paste"
+/// and retains its exact text in Payload. The external editor sees the placeholder;
+/// surviving placeholders restore the original item, including its identity and payload.
 /// </summary>
 /// <param name="Placeholder">
 /// The exact text shown to the user in the composer and written into the temp file
@@ -62,7 +55,15 @@ public sealed class ComposerDocument
     public ComposerDocument(IEnumerable<ComposerPart> parts)
     {
         if (parts is null) throw new ArgumentNullException(nameof(parts));
-        _parts = parts.Where(p => p is not ComposerTextPart t || t.Text.Length > 0).ToArray();
+        var compact = new List<ComposerPart>();
+        foreach (var part in parts)
+        {
+            if (part is ComposerTextPart { Text.Length: 0 }) continue;
+            if (part is ComposerTextPart text && compact.Count > 0 && compact[^1] is ComposerTextPart previous)
+                compact[^1] = new ComposerTextPart(previous.Text + text.Text);
+            else compact.Add(part);
+        }
+        _parts = compact.AsReadOnly();
     }
 
     /// <summary>An empty document (empty prompt).</summary>
@@ -79,7 +80,7 @@ public sealed class ComposerDocument
     public bool IsEmpty => _parts.Count == 0;
 
     /// <summary>
-    /// Build a document from the flat composer string used on main today. Newlines are
+    /// Build a document from ordinary composer text. Newlines are
     /// normalized to LF so the temp file, the composer and the comparisons all agree.
     /// </summary>
     public static ComposerDocument FromText(string? text)
@@ -109,11 +110,66 @@ public sealed class ComposerDocument
     }
 
     /// <summary>
-    /// The string written back into the composer. Identical to <see cref="ToEditableText"/>
-    /// while the composer is a plain string; kept separate so #277 can diverge the two
-    /// (editor view vs. composer view) without touching the editor pipeline.
+    /// The compact display text used by the prompt. Pasted payloads remain separate.
     /// </summary>
     public string ToPromptText() => ToEditableText();
+
+    /// <summary>Lossless user text for delivery; paste labels never reach the model.</summary>
+    public string ToSubmittedText() => string.Concat(_parts.Select(p => p switch
+    {
+        ComposerTextPart t => t.Text,
+        ComposerAttachmentPart { Kind: "paste", Payload: not null } a => a.Payload,
+        ComposerAttachmentPart a => a.Placeholder,
+        _ => string.Empty
+    }));
+
+    /// <summary>Move an offset inside an attachment to its nearest directional boundary.</summary>
+    public int SnapCursor(int offset, bool forward)
+    {
+        int position = 0;
+        foreach (var part in _parts)
+        {
+            int length = DisplayLength(part);
+            if (part is ComposerAttachmentPart && offset > position && offset < position + length)
+                return forward ? position + length : position;
+            position += length;
+        }
+        return Math.Clamp(offset, 0, position);
+    }
+
+    /// <summary>Replace a displayed range, expanding partial attachment cuts to whole items.</summary>
+    public ComposerDocument Replace(int start, int length, ComposerDocument inserted, out int cursor)
+    {
+        int total = _parts.Sum(DisplayLength);
+        start = Math.Clamp(start, 0, total);
+        int end = Math.Clamp(start + Math.Max(0, length), start, total);
+        if (length == 0) start = end = SnapCursor(start, true);
+        else { start = SnapCursor(start, false); end = SnapCursor(end, true); }
+        var parts = Slice(0, start).Concat(inserted.Parts).Concat(Slice(end, total)).ToArray();
+        cursor = start + inserted.Parts.Sum(DisplayLength);
+        return new ComposerDocument(parts);
+    }
+
+    private IEnumerable<ComposerPart> Slice(int start, int end)
+    {
+        int position = 0;
+        foreach (var part in _parts)
+        {
+            int length = DisplayLength(part);
+            int from = Math.Max(start, position), to = Math.Min(end, position + length);
+            if (to > from)
+                yield return part is ComposerTextPart text
+                    ? new ComposerTextPart(text.Text.Substring(from - position, to - from)) : part;
+            position += length;
+        }
+    }
+
+    private static int DisplayLength(ComposerPart part) => part switch
+    {
+        ComposerTextPart t => t.Text.Length,
+        ComposerAttachmentPart a => a.Placeholder.Length,
+        _ => 0
+    };
 
     /// <summary>
     /// Rebuild the document from text the user saved in the external editor, restoring the
