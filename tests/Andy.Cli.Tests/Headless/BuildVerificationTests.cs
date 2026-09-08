@@ -85,14 +85,14 @@ public class BuildVerificationTests : IDisposable
             .ReturnsAsync(new Andy.Tools.Core.ToolExecutionResult
             {
                 IsSuccessful = true,
-                Data = new Dictionary<string, object?> { ["stdout"] = "error CS0106: api_key=sk-secret123456789" }
+                Data = new Dictionary<string, object?> { ["stdout"] = "error CS0106: api_key=sk-aaaaaaaaaaaaaaaa" }
             });
-        var gate = new BuildVerification(_root, new() { Commands = ["echo api_key=sk-secret123456789"] });
+        var gate = new BuildVerification(_root, new() { Commands = ["echo api_key=sk-aaaaaaaaaaaaaaaa"] });
         var result = Assert.Single(await gate.RunAsync(executor.Object, default));
         Assert.False(result.Passed);
         Assert.Null(result.ExitCode);
         Assert.Equal("CS0106", Assert.Single(result.Diagnostics).Code);
-        Assert.DoesNotContain("sk-secret123456789", BuildVerification.Feedback([result]));
+        Assert.DoesNotContain("sk-aaaaaaaaaaaaaaaa", BuildVerification.Feedback([result]));
     }
 
     private HeadlessRunConfig Config(bool allowed) => new()

@@ -135,11 +135,11 @@ public class AcpPersistenceTests : IDisposable
             Snapshot = new TranscriptSnapshot
             {
                 Turns = [new TranscriptTurn
-        { User = new() { Role = "user", Content = "api_key=sk-secret123456789" } }]
+        { User = new() { Role = "user", Content = "api_key=sk-aaaaaaaaaaaaaaaa" } }]
             }
         });
         var text = File.ReadAllText(Path.Combine(_directory, "secret.json"));
-        Assert.DoesNotContain("sk-secret123456789", text);
+        Assert.DoesNotContain("sk-aaaaaaaaaaaaaaaa", text);
         Assert.Contains("[REDACTED]", Store.Load("secret")!.Snapshot.Turns[0].User.Content);
     }
 
