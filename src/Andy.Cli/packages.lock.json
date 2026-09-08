@@ -61,9 +61,12 @@
       },
       "Andy.MCP": {
         "type": "Direct",
-        "requested": "[2026.5.16-rc.31, )",
-        "resolved": "2026.5.16-rc.31",
-        "contentHash": "kEd2iRU4xTAUU2oJTQ2j60d296S+sOA9hEQ2hXSP3Rsyk2cRaiJNa19//P6bIkC3iD+EMRwefNU9GWvJHnOl9w=="
+        "requested": "[2026.9.8-rc.167, )",
+        "resolved": "2026.9.8-rc.167",
+        "contentHash": "bI5Mcawa/onZy2Xcm4yLIBChWKpdYyf4jRGQ3D9SQpoiWQf2ODhHu576xW6x9Byq8EMFTGUejNojMdTlq3k73g==",
+        "dependencies": {
+          "JsonSchema.Net": "9.3.0"
+        }
       },
       "Andy.Model": {
         "type": "Direct",

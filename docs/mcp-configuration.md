@@ -1,6 +1,6 @@
 # Interactive MCP configuration
 
-Updated: 2026-07-23
+Updated: 2026-09-08
 
 Andy CLI can connect the interactive TUI to Model Context Protocol (MCP)
 servers over local stdio or Streamable HTTP. Tools discovered during startup
@@ -179,3 +179,18 @@ On 2026-07-23, Phase 1 interactive MCP support added merged configuration,
 environment interpolation, stdio and HTTP transports, graceful per-server
 startup failure, shared tool-registry integration, server-qualified tool
 metadata, deterministic cleanup, and `/mcp list|status`.
+
+## Integration update - 2026-09-08
+
+The MCP dependency now uses the current protocol implementation with JsonSchema.Net 9
+compatibility. Trimmed packages preserve MCP protocol serialization metadata, verified
+by an executable-level initialization/discovery smoke test. Successful tool calls return `structuredContent` as JSON when present;
+text-only tools retain their existing text output. The complete protocol result,
+including content blocks, `_meta`, and extension fields, is retained in
+`ToolResult.Metadata["mcp_result"]` on both success and tool-reported failure.
+This preserves data for consumers; it does not add image/audio rendering to the TUI.
+Cancellation of an active call propagates to the MCP client and its peer.
+
+The CLI still uses its interactive/headless adapter through the Andy.Tools registry
+consumed by Andy.Engine. Runtime reload, tool-list reconciliation, resources, prompts,
+and the shared Andy.Tools.Mcp package integration remain separate work.
