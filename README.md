@@ -474,3 +474,7 @@ The composer accepts dropped or pasted local image paths, shows a removable atta
 ### 2026-09-08: Long-response wrapping and scrolling
 
 Rich Markdown now wraps at word boundaries after parsing, preserving inline styles and hanging list indentation. Measurement and scrolling share the same cached row layout, including content beyond 8,192 display rows. Oversized words hard-wrap; language-aware hyphenation and advanced multilingual line breaking remain follow-up work.
+
+### 2026-09-08: Queued input steers active tool loops
+
+Queued messages now reach the next model request after a complete tool-call round. Recalling a queued message removes it until resubmission, and canceled preparation preserves pending input. See [queue timing and editing](docs/QUEUED_MESSAGES.md).

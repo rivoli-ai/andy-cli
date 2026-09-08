@@ -9,6 +9,7 @@ namespace Andy.Cli.Widgets
         Sent,
         Queued,
         Processing,
+        Removed,
     }
 
     /// <summary>User message bubble with rounded-ish border and colored label.</summary>
@@ -43,6 +44,7 @@ namespace Andy.Cli.Widgets
                 {
                     UserMessageQueueState.Queued => "queued",
                     UserMessageQueueState.Processing => "processing",
+                    UserMessageQueueState.Removed => "removed",
                     _ => string.Empty,
                 };
                 var detail = string.Join(", ", new[] { number, state }.Where(s => s.Length > 0));

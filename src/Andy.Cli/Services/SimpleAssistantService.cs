@@ -335,6 +335,10 @@ public class SimpleAssistantService : IDisposable
     /// <summary>The latest structured provider failure, cleared at the start of each request.</summary>
     public Andy.Llm.Errors.LlmProviderError? LastProviderError { get; private set; }
 
+    internal Task<IReadOnlyList<Andy.Model.Model.MessagePart>> PreparePendingPartsAsync(
+        IReadOnlyList<Andy.Model.Model.MessagePart> parts, Andy.Cli.Domain.ImageAttachment? image, CancellationToken ct) =>
+        image is null ? Task.FromResult(parts) : ImageAttachmentProcessor.AppendAsync(_attachmentProvider, parts, image, ct);
+
     /// <summary>
     /// Process a user message
     /// </summary>
@@ -349,8 +353,11 @@ public class SimpleAssistantService : IDisposable
         bool enableStreaming = false, // Ignored for now - streaming not yet implemented
         CancellationToken cancellationToken = default,
         IReadOnlyList<Andy.Model.Model.MessagePart>? structuredParts = null,
-        Andy.Cli.Domain.ImageAttachment? imageAttachment = null)
+        Andy.Cli.Domain.ImageAttachment? imageAttachment = null,
+        Func<CancellationToken, Task<IReadOnlyList<IReadOnlyList<Andy.Model.Model.MessagePart>>>>? pendingInputProvider = null)
     {
+        _agent.PendingInputProvider = pendingInputProvider is null ? null : async ct =>
+            (await pendingInputProvider(ct)).Select(PrependModeDirective).ToArray();
         LastProviderError = null;
         try
         {
