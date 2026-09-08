@@ -470,3 +470,7 @@ original transcript preservation. See [thinking blocks](docs/THINKING_BLOCKS.md)
 ### 2026-09-08: Local image attachments
 
 The composer accepts dropped or pasted local image paths, shows a removable attachment indicator, and preserves attachments in queued messages. Vision-capable providers receive structured image parts; other providers receive a file reference. See [image attachment support and limits](docs/IMAGE_ATTACHMENTS.md).
+
+### 2026-09-08: Long-response wrapping and scrolling
+
+Rich Markdown now wraps at word boundaries after parsing, preserving inline styles and hanging list indentation. Measurement and scrolling share the same cached row layout, including content beyond 8,192 display rows. Oversized words hard-wrap; language-aware hyphenation and advanced multilingual line breaking remain follow-up work.
