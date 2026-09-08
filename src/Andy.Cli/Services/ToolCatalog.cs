@@ -35,6 +35,10 @@ public static class ToolCatalog
 
         // Git tools
         RegisterTool<GitDiffTool>(services);
+        RegisterTool<GitWorktreeListTool>(services);
+        RegisterTool<GitWorktreeAddTool>(services);
+        RegisterTool<GitWorktreeRemoveTool>(services);
+        RegisterTool<GitWorktreePruneTool>(services);
 
         // System tools
         RegisterTool<ProcessInfoTool>(services);

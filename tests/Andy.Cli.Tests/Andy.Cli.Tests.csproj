@@ -11,7 +11,7 @@
 
   <ItemGroup>
     <PackageReference Include="Andy.Llm" Version="2026.9.8-rc.85" />
-    <PackageReference Include="Andy.Tools" Version="2026.7.21-rc.86" />
+    <PackageReference Include="Andy.Tools" Version="2026.9.8-alpha.111" />
     <PackageReference Include="Andy.Model" Version="2026.7.21-rc.13" />
     <PackageReference Include="coverlet.collector" Version="10.0.1" />
     <PackageReference Include="JsonSchema.Net" Version="9.3.0" />
