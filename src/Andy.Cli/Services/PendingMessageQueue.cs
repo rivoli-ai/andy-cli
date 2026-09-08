@@ -49,6 +49,41 @@ public sealed class PendingMessageQueue
         return false;
     }
 
+    /// <summary>Atomically remove a message for editing or discarding.</summary>
+    public bool TryRemove(long id, out PendingUserMessage message)
+    {
+        lock (_lock)
+        {
+            for (var node = _messages.First; node != null; node = node.Next)
+            {
+                if (node.Value.Id != id) continue;
+                message = node.Value;
+                _messages.Remove(node);
+                return true;
+            }
+        }
+        message = default!;
+        return false;
+    }
+
+    /// <summary>Take one bounded FIFO snapshot at the tool-round handoff.</summary>
+    public IReadOnlyList<PendingUserMessage> Drain()
+    {
+        lock (_lock)
+        {
+            var messages = _messages.ToArray();
+            _messages.Clear();
+            return messages;
+        }
+    }
+
+    /// <summary>Restore an unprepared snapshot ahead of messages submitted meanwhile.</summary>
+    public void RestoreFront(IReadOnlyList<PendingUserMessage> messages)
+    {
+        lock (_lock)
+            for (int i = messages.Count - 1; i >= 0; i--) _messages.AddFirst(messages[i]);
+    }
+
     public bool Contains(long id)
     {
         lock (_lock) return _messages.Any(message => message.Id == id);

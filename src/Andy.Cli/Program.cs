@@ -308,7 +308,6 @@ class Program
             var pendingByHistoryIndex = new System.Collections.Concurrent.ConcurrentDictionary<int, long>();
             var messagePumpLock = new object();
             using var activeTurnCancellation = new ActiveTurnCancellation();
-            long? editingPendingMessageId = null;
 
             var toast = new Toast(); // Don't show initial toast as it interferes with prompt
             var tokenCounter = new TokenCounter();
@@ -1615,6 +1614,25 @@ class Program
                 return confirmExit;
             }
 
+            void RecallHistoryMessage(int index)
+            {
+                lock (messagePumpLock)
+                {
+                    prompt.SetText(promptHistory[index]);
+                    attachmentIndicator.Clear();
+                    if (!pendingByHistoryIndex.TryGetValue(index, out var id)) return;
+                    if (!pendingMessages.TryRemove(id, out var removed))
+                    {
+                        toast.Show("Message is no longer queued; this is a new draft", 120);
+                        return;
+                    }
+                    if (removed.Image is { } image) attachmentIndicator.Show(image);
+                    if (queuedDisplays.TryGetValue(id, out var display))
+                        display.SetQueueState(Andy.Cli.Widgets.UserMessageQueueState.Removed);
+                    toast.Show($"Removed queued message #{removed.MessageNumber}; submit to send the revision", 150);
+                }
+            }
+
             void StartMessagePump(string firstMessage, Andy.Cli.Domain.ImageAttachment? firstImage = null)
             {
                 _ = Task.Run(async () =>
@@ -1651,12 +1669,49 @@ class Program
                                 feed.AddMarkdownRich(resolutionNote);
                             }
 
+                            var delivery = new Andy.Cli.Services.PendingMessageDelivery(
+                                take: () =>
+                                {
+                                    lock (messagePumpLock)
+                                    {
+                                        var batch = pendingMessages.Drain();
+                                        foreach (var message in batch)
+                                            if (queuedDisplays.TryGetValue(message.Id, out var display))
+                                                display.SetQueueState(Andy.Cli.Widgets.UserMessageQueueState.Processing);
+                                        return batch;
+                                    }
+                                },
+                                restore: batch =>
+                                {
+                                    lock (messagePumpLock)
+                                    {
+                                        pendingMessages.RestoreFront(batch);
+                                        foreach (var message in batch)
+                                            if (queuedDisplays.TryGetValue(message.Id, out var display))
+                                                display.SetQueueState(Andy.Cli.Widgets.UserMessageQueueState.Queued);
+                                    }
+                                },
+                                prepare: async (message, ct) =>
+                                {
+                                    var resolved = await fileMentions.ResolveAsync(message.Text, ct);
+                                    var note = Andy.Cli.Services.FileMentions.FileMentionSession.DescribeResolution(resolved);
+                                    if (note is not null) feed.AddMarkdownRich(note);
+                                    return await service.PreparePendingPartsAsync(resolved.Parts, message.Image, ct);
+                                },
+                                accepted: batch =>
+                                {
+                                    foreach (var message in batch)
+                                        if (queuedDisplays.TryGetValue(message.Id, out var display))
+                                            display.SetQueueState(Andy.Cli.Widgets.UserMessageQueueState.Sent);
+                                });
+
                             await service.ProcessMessageAsync(
                                 resolvedPrompt.ComposedText,
                                 enableStreaming: false,
                                 cancellationToken: turnCancellation.Token,
                                 structuredParts: resolvedPrompt.Parts,
-                                imageAttachment: currentImage);
+                                imageAttachment: currentImage,
+                                pendingInputProvider: delivery.TakeAsync);
                             turnCancellation.Token.ThrowIfCancellationRequested();
                             undoManager?.CompleteTurn(undoTurn);
 
@@ -2050,9 +2105,12 @@ class Program
                     }
 
                     // Handle prompt history navigation when in PromptHistory scroll mode
-                    if (scrollMode == ScrollMode.PromptHistory && promptHistory.Count > 0)
+                    if (promptHistory.Count > 0 &&
+                        ((scrollMode == ScrollMode.PromptHistory && (k.Modifiers & ConsoleModifiers.Control) == 0) ||
+                         (prompt.Mode == PromptMode.Normal && (k.Modifiers & ConsoleModifiers.Control) != 0 &&
+                          (pendingMessages.Count > 0 || historyIndex >= 0))))
                     {
-                        if (k.Key == ConsoleKey.UpArrow && (k.Modifiers & ConsoleModifiers.Control) == 0)
+                        if (k.Key == ConsoleKey.UpArrow)
                         {
                             // Navigate to previous message in history
                             if (historyIndex == -1)
@@ -2067,17 +2125,11 @@ class Program
 
                             if (historyIndex >= 0 && historyIndex < promptHistory.Count)
                             {
-                                prompt.SetText(promptHistory[historyIndex]);
-                                editingPendingMessageId = null;
-                                if (pendingByHistoryIndex.TryGetValue(historyIndex, out var pendingId) &&
-                                    pendingMessages.Contains(pendingId))
-                                {
-                                    editingPendingMessageId = pendingId;
-                                }
+                                RecallHistoryMessage(historyIndex);
                             }
                             return;
                         }
-                        else if (k.Key == ConsoleKey.DownArrow && (k.Modifiers & ConsoleModifiers.Control) == 0)
+                        else if (k.Key == ConsoleKey.DownArrow)
                         {
                             // Navigate to next message in history
                             if (historyIndex >= 0)
@@ -2088,17 +2140,11 @@ class Program
                                     // Reached the end - clear prompt
                                     historyIndex = -1;
                                     prompt.SetText("");
-                                    editingPendingMessageId = null;
+                                    attachmentIndicator.Clear();
                                 }
                                 else
                                 {
-                                    prompt.SetText(promptHistory[historyIndex]);
-                                    editingPendingMessageId = null;
-                                    if (pendingByHistoryIndex.TryGetValue(historyIndex, out var pendingId) &&
-                                        pendingMessages.Contains(pendingId))
-                                    {
-                                        editingPendingMessageId = pendingId;
-                                    }
+                                    RecallHistoryMessage(historyIndex);
                                 }
                             }
                             return;
@@ -2163,40 +2209,21 @@ class Program
                             return;
                         }
 
-                        bool processingNow;
-                        lock (messagePumpLock) processingNow = isProcessingMessage;
-                        if (processingNow)
+                        // Queue publication and pump shutdown use the same lock. A message
+                        // cannot land between the empty-queue check and marking the pump idle.
+                        lock (messagePumpLock)
                         {
-                            if (editingPendingMessageId is long editId &&
-                                pendingMessages.TryUpdate(editId, cmd, out var revised))
-                            {
-                                int revisedHistoryIndex = revised.MessageNumber - 1;
-                                if (revisedHistoryIndex >= 0 && revisedHistoryIndex < promptHistory.Count)
-                                {
-                                    promptHistory[revisedHistoryIndex] = revised.Text;
-                                }
-                                if (queuedDisplays.TryGetValue(editId, out var revisedDisplay))
-                                {
-                                    revisedDisplay.UpdateQueuedText(revised.Text);
-                                }
-                                toast.Show($"Updated queued message #{revised.MessageNumber}", 90);
-                            }
-                            else
+                            if (isProcessingMessage)
                             {
                                 promptHistory.Add(cmd);
                                 int queuedMessageNumber = promptHistory.Count;
                                 var queued = pendingMessages.Enqueue(cmd, queuedMessageNumber, attachmentIndicator.Take());
                                 pendingByHistoryIndex[queuedMessageNumber - 1] = queued.Id;
-                                queuedDisplays[queued.Id] =
-                                    feed.AddQueuedUserMessage(cmd, queuedMessageNumber);
-                                toast.Show(
-                                    $"Queued message #{queuedMessageNumber} ({pendingMessages.Count} pending)",
-                                    90);
+                                queuedDisplays[queued.Id] = feed.AddQueuedUserMessage(cmd, queuedMessageNumber);
+                                toast.Show($"Queued message #{queuedMessageNumber} for the next tool-round boundary ({pendingMessages.Count} pending)", 120);
+                                historyIndex = -1;
+                                return;
                             }
-
-                            editingPendingMessageId = null;
-                            historyIndex = -1;
-                            return;
                         }
 
                         // Check for slash commands

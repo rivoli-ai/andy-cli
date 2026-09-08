@@ -151,6 +151,15 @@ public static class SessionMarkdownExporter
 
         foreach (var message in turn.Interleaved ?? Array.Empty<TranscriptMessage>())
         {
+            if (string.Equals(message.Role, "user", StringComparison.OrdinalIgnoreCase)
+                && message.Parts is { Count: > 0 } && !string.IsNullOrWhiteSpace(message.Content))
+            {
+                sb.AppendLine("### User (follow-up)");
+                sb.AppendLine();
+                sb.AppendLine(scrub.RedactText(message.Content).TrimEnd());
+                sb.AppendLine();
+            }
+
             if (string.Equals(message.Role, "assistant", StringComparison.OrdinalIgnoreCase)
                 && !string.IsNullOrWhiteSpace(message.Content))
             {
