@@ -60,12 +60,16 @@ public static class HeadlessAgentRunner
         // "Begin." kickoff exactly as before.
         string? kickoffMessage = null,
         Andy.Cli.Configuration.AndyConfiguration? layeredConfiguration = null,
-        Andy.Cli.Modes.AgentMode mode = Andy.Cli.Modes.AgentMode.Build)
+        Andy.Cli.Modes.AgentMode mode = Andy.Cli.Modes.AgentMode.Build,
+        string? agentName = null)
     {
         var transcriptCreation = HeadlessTranscriptSession.TryCreate(config);
         using var emitter = new HeadlessEventEmitter(
             eventStream,
             transcript: transcriptCreation.Session);
+        var identity = new AgentIdentityState();
+        if (agentName is not null) identity.SetName(agentName);
+        emitter.AgentIdentity = identity;
         var stopwatch = Stopwatch.StartNew();
         var finished = false;
 
@@ -111,7 +115,7 @@ public static class HeadlessAgentRunner
                 Finish,
                 kickoffMessage,
                 layeredConfiguration,
-                mode);
+                mode, identity);
         }
         catch (OperationCanceledException)
         {
@@ -146,7 +150,8 @@ public static class HeadlessAgentRunner
         Action<HeadlessExitCode, int, string?> finish,
         string? kickoffMessage,
         Andy.Cli.Configuration.AndyConfiguration? layeredConfiguration,
-        Andy.Cli.Modes.AgentMode mode)
+        Andy.Cli.Modes.AgentMode mode,
+        AgentIdentityState identity)
     {
         var iterations = 0;
         var exitCode = HeadlessExitCode.Success;
@@ -292,7 +297,7 @@ public static class HeadlessAgentRunner
             workingDirectory: workingDirectory,
             logger: loggerFactory.CreateLogger<SimpleAgent>(),
             maxOutputTokens: budget.MaxOutputTokens,
-            continuationPolicy: budget.ContinuationPolicy);
+            continuationPolicy: budget.ContinuationPolicy, identity: identity);
 
         agent.ContinuationProgress += (_, progress) =>
         {
@@ -370,7 +375,7 @@ public static class HeadlessAgentRunner
                 }
                 using var correction = new SimpleAgent(new HeadlessStreamingProvider(llmProvider), toolHost.Registry, toolExecutor, systemPrompt,
                     maxTurns: remaining, workingDirectory: workingDirectory, maxOutputTokens: budget.MaxOutputTokens,
-                    logger: loggerFactory.CreateLogger<SimpleAgent>());
+                    logger: loggerFactory.CreateLogger<SimpleAgent>(), identity: identity);
                 correctionSnapshot ??= agent.ExportTranscript();
                 correction.RestoreTranscript(correctionSnapshot);
                 var offset = iterations;

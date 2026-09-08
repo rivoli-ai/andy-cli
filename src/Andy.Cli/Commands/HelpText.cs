@@ -38,6 +38,7 @@ public static class HelpText
         "### General Commands:\n" +
         "- **/exit**, **/bye**, **/quit**: Exit the application\n" +
         "- **exit**, **bye**, **quit**: Exit the application (without slash)\n" +
+        "- **/agent-name [name|--clear|--history]**: Inspect, rename, clear, or view agent runtime history\n" +
         "- **/clear**: Clear conversation history\n" +
         "- **/restart**: Restart the session (fresh conversation context, counters, and prompt history)\n" +
         "- **/sessions**: List saved sessions that can be resumed\n" +

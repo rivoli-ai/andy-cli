@@ -493,3 +493,23 @@ Updated MCP integration preserves structured tool output and complete protocol r
 through the tool registry, with cancellation propagated to the remote server.
 Packaged builds preserve MCP protocol metadata and verify real server discovery. See the
 [MCP integration update](docs/mcp-configuration.md#integration-update---2026-09-08).
+
+### Agent naming and portable runtime history (2026-09-08)
+
+Set a display name with `andy-cli --agent-name "cedar"`, including `run` and ACP
+entry points. In the interactive prompt, `/agent-name cedar` renames the agent,
+`/agent-name` inspects it, `/agent-name --clear` removes the name, and
+`/agent-name --history` shows its recorded runtime and naming history.
+The `set_agent_name` and `get_agent_identity` tools use the same per-agent state.
+
+Saved sessions, portable JSON archives, and forks retain the logical agent ID and
+history. Resuming records a fresh activation with the current PID, platform, OS,
+architecture, and UTC timestamp. An explicit startup name overrides the restored
+name and records that change. Clearing conversation context or switching models
+retains identity; a new session process starts a new identity unless resumed.
+Headless started/finished events include `data.agent_identity`. Display names do
+not change session IDs, permission identity, or coordination registration.
+
+- [x] Interactive, one-shot, headless and ACP naming controls.
+- [x] Portable session and fork history with fresh runtime observations on resume.
+- [x] Tests for naming, clearing, archive round trips, ACP isolation and headless tool execution.

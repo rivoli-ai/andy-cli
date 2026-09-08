@@ -65,6 +65,7 @@ public static class OneShotArgParser
         + "Options:\n"
         + "  --json, --ndjson      Emit the NDJSON event stream on stdout instead of concise text.\n"
         + "  --provider <name>     LLM provider (default: detected from the environment).\n"
+        + "  --agent-name <name>   Set the agent display name; an empty string clears it.\n"
         + "  --model <id>          Model id (default: the provider's remembered or default model).\n"
         + "  --cwd <path>          Working directory for the run (default: the current directory).\n"
         + "  --timeout <seconds>   Wall-clock timeout, 1-86400 (default: 300).\n"

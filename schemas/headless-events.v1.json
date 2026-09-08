@@ -61,10 +61,30 @@
         }
       }
     },
+    "agent_identity": {
+      "type": "object",
+      "description": "Logical identity and current-host activation; history survives context transfer. Names are display metadata, not authorization credentials.",
+      "required": ["version", "agent_id", "activation", "history"],
+      "properties": {
+        "version": { "const": 1 },
+        "agent_id": { "type": "string" },
+        "name": { "type": ["string", "null"] },
+        "activation": { "type": "object", "required": ["instance_id", "started_at_utc"], "properties": {
+          "instance_id": { "type": "string" },
+          "process_id": { "type": ["integer", "null"] },
+          "platform": { "type": ["string", "null"] },
+          "operating_system": { "type": ["string", "null"] },
+          "architecture": { "type": ["string", "null"] },
+          "started_at_utc": { "type": "string", "format": "date-time" }
+        } },
+        "history": { "type": "array", "items": { "type": "object", "required": ["sequence", "kind", "timestamp_utc", "activation"] } }
+      }
+    },
     "started": {
       "type": "object",
       "required": ["run_id", "agent_slug", "model_provider", "model_id", "tool_count"],
       "properties": {
+        "agent_identity": { "$ref": "#/$defs/agent_identity" },
         "run_id":         { "type": "string", "format": "uuid" },
         "agent_slug":     { "type": "string" },
         "model_provider": { "type": "string" },
@@ -205,6 +225,7 @@
       "type": "object",
       "required": ["exit_code", "duration_ms"],
       "properties": {
+        "agent_identity": { "$ref": "#/$defs/agent_identity" },
         "exit_code":    { "type": "integer", "minimum": 0, "maximum": 5, "description": "Mirrors the process exit code (HeadlessExitCode in src/Andy.Cli/HeadlessConfig)." },
         "duration_ms":  { "type": "integer", "minimum": 0 },
         "iterations":   { "type": "integer", "minimum": 0, "description": "Number of LLM/tool turns executed before terminating." },

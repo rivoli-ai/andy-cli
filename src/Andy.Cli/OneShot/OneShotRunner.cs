@@ -48,8 +48,16 @@ public static class OneShotRunner
         TextReader? stdin = null,
         OneShotModelResolver? modelResolver = null,
         ILlmProvider? llmProviderOverride = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? agentName = null)
     {
+        try
+        {
+            var naming = Andy.Cli.Hosting.AgentNameOption.Extract(args);
+            args = naming.Args;
+            agentName = naming.Name ?? agentName;
+        }
+        catch (ArgumentException ex) { stderr.WriteLine(ex.Message); return HeadlessExitCode.ConfigError; }
         var safeStdout = new BrokenPipeTolerantWriter(stdout);
         var safeStderr = new BrokenPipeTolerantWriter(stderr);
 
@@ -147,7 +155,7 @@ public static class OneShotRunner
                 llmProviderOverride: llmProviderOverride,
                 ct: ct,
                 currentBranchResolver: null,
-                kickoffMessage: prompt);
+                kickoffMessage: prompt, agentName: agentName);
         }
         finally
         {

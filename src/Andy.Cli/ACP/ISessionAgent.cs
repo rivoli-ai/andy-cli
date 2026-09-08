@@ -39,12 +39,14 @@ internal sealed class SimpleAgentSessionAgent : ISessionAgent
     private readonly SimpleAgent _agent;
     private readonly AcpSessionUpdateSink _sink;
     private readonly IDisposable? _owner;
+    private readonly string? _nameOverride;
 
-    public SimpleAgentSessionAgent(SimpleAgent agent, AcpSessionUpdateSink sink, IDisposable? owner = null)
+    public SimpleAgentSessionAgent(SimpleAgent agent, AcpSessionUpdateSink sink, IDisposable? owner = null, string? nameOverride = null)
     {
         _agent = agent;
         _sink = sink;
         _owner = owner;
+        _nameOverride = nameOverride;
     }
 
     public bool StreamsResponses => true;
@@ -71,7 +73,11 @@ internal sealed class SimpleAgentSessionAgent : ISessionAgent
     }
 
     public TranscriptSnapshot ExportTranscript() => _agent.ExportTranscript();
-    public void RestoreTranscript(TranscriptSnapshot snapshot) => _agent.RestoreTranscript(snapshot);
+    public void RestoreTranscript(TranscriptSnapshot snapshot)
+    {
+        _agent.RestoreTranscript(snapshot);
+        if (_nameOverride is not null) _agent.Identity.SetName(_nameOverride);
+    }
 
     public void Dispose()
     {
@@ -92,19 +98,21 @@ internal sealed class SimpleAgentSessionAgentFactory : ISessionAgentFactory
     private readonly IToolExecutor _toolExecutor;
     private readonly ILoggerFactory? _loggerFactory;
     private readonly int _maxTurns;
+    private readonly string? _agentName;
 
     public SimpleAgentSessionAgentFactory(
         ILlmProvider llmProvider,
         IToolRegistry toolRegistry,
         IToolExecutor toolExecutor,
         ILoggerFactory? loggerFactory,
-        int maxTurns = 10)
+        int maxTurns = 10, string? agentName = null)
     {
         _llmProvider = llmProvider;
         _toolRegistry = toolRegistry;
         _toolExecutor = toolExecutor;
         _loggerFactory = loggerFactory;
         _maxTurns = maxTurns;
+        _agentName = agentName;
     }
 
     public SimpleAgentSessionAgentFactory(
@@ -112,7 +120,7 @@ internal sealed class SimpleAgentSessionAgentFactory : ISessionAgentFactory
         IToolRegistry toolRegistry,
         IToolExecutor toolExecutor,
         ILoggerFactory? loggerFactory,
-        int maxTurns = 10)
+        int maxTurns = 10, string? agentName = null)
     {
         _providerFactory = providerFactory ?? throw new ArgumentNullException(nameof(providerFactory));
         _llmProvider = null!;
@@ -120,6 +128,7 @@ internal sealed class SimpleAgentSessionAgentFactory : ISessionAgentFactory
         _toolExecutor = toolExecutor;
         _loggerFactory = loggerFactory;
         _maxTurns = maxTurns;
+        _agentName = agentName;
     }
 
     public ISessionAgent Create(string systemPrompt, string provider, string model)
@@ -140,6 +149,7 @@ internal sealed class SimpleAgentSessionAgentFactory : ISessionAgentFactory
             workingDirectory: cwd,
             logger: AndyAgentProvider.CreateAgentLogger(_loggerFactory));
 
-        return new SimpleAgentSessionAgent(agent, sink, lease.Item2);
+        if (_agentName is not null) agent.Identity.SetName(_agentName);
+        return new SimpleAgentSessionAgent(agent, sink, lease.Item2, _agentName);
     }
 }

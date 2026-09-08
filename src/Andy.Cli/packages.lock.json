@@ -30,15 +30,15 @@
       },
       "Andy.Engine": {
         "type": "Direct",
-        "requested": "[2026.9.8-rc.104, )",
-        "resolved": "2026.9.8-rc.104",
-        "contentHash": "JKrzlpcq5YwOv8zSVhNjl+1o+88fuHhLS4VIEvYC30LSong6kmx+RlbiaZ0WCgxidWAhyDn998c1mYUgYiW38g==",
+        "requested": "[2026.9.8-rc.109, )",
+        "resolved": "2026.9.8-rc.109",
+        "contentHash": "/UtI3xC8wb0S9lJsgvJYlexNqqPd5u56ludX3hrNtCXC+/urfN0jgsz9Zf+tAikz7l5JQOvMy7zBh2I41IeGBQ==",
         "dependencies": {
           "Andy.Configuration": "2026.5.16-rc.8",
           "Andy.Context": "2026.5.16-rc.6",
           "Andy.Llm": "2026.9.8-rc.85",
           "Andy.Model": "2026.7.21-rc.13",
-          "Andy.Tools": "2026.7.21-rc.86",
+          "Andy.Tools": "2026.9.8-rc.100",
           "Andy.Tools.Pdf": "2026.7.21-rc.86",
           "JsonPointer.Net": "5.0.0",
           "JsonSchema.Net": "7.0.0",
@@ -95,29 +95,29 @@
       },
       "Andy.Tools": {
         "type": "Direct",
-        "requested": "[2026.9.8-rc.98, )",
-        "resolved": "2026.9.8-rc.98",
-        "contentHash": "NqjuFuldjsXLJL4fOm7tl4OKwXhmXGgsFYfEYQ48w5/dc0QbM7Z11iFb1ahgc9DIFSCvXhBdnPjGt9YTP8wT8w=="
+        "requested": "[2026.9.8-rc.100, )",
+        "resolved": "2026.9.8-rc.100",
+        "contentHash": "FrZLI1HefFNr0d+YnTC+gqLLzejBW0xstY50kb4GQT+Fg0slOgmDJpwA90F5hbjxw0sPNWef4X2V+fgwG7csBg=="
       },
       "Andy.Tools.Data": {
         "type": "Direct",
-        "requested": "[2026.9.8-rc.98, )",
-        "resolved": "2026.9.8-rc.98",
-        "contentHash": "0FN2WZrPTvJNfuK2UBHcbsUm1fgKgf++YRAYC1wwXa6MzxD+8t+/sAM1ApiEd2hJ2DIbG8GHvppGZ+3n1mQ6iw==",
+        "requested": "[2026.9.8-rc.100, )",
+        "resolved": "2026.9.8-rc.100",
+        "contentHash": "1fxx1EtW8Lgf5xJ3Kb7cuBiiSgyOQspqmTTnCU7RmHPu3UG/o9ziAahlJPtPAKg5O7+W4hYuR4ddPuwsF29pCw==",
         "dependencies": {
           "Andy.Data": "2026.6.15-rc.2",
           "Andy.Data.Abstractions": "2026.6.15-rc.2",
-          "Andy.Tools": "2026.9.8-rc.98"
+          "Andy.Tools": "2026.9.8-rc.100"
         }
       },
       "Andy.Tools.Pdf": {
         "type": "Direct",
-        "requested": "[2026.9.8-rc.98, )",
-        "resolved": "2026.9.8-rc.98",
-        "contentHash": "JJE+hJHf6FSfMGrgZKTr+bNuBh1M3OELobUhJ2nBPVbJonpAJRiLx/rvz71kjqOLY/BK7n6UW1iP6l0TZLFh5A==",
+        "requested": "[2026.9.8-rc.100, )",
+        "resolved": "2026.9.8-rc.100",
+        "contentHash": "ocaEWmD7vlN74bxq+4VbixVEnxYjv1H7vrEZb1+9U+Lu4fC63d6Ws5ETqmfTiooH1kQQoaP2Wn8B1VrkxT9ajw==",
         "dependencies": {
           "Andy.Doc.Pdf": "2026.7.21-rc.1",
-          "Andy.Tools": "2026.9.8-rc.98"
+          "Andy.Tools": "2026.9.8-rc.100"
         }
       },
       "Andy.Tui": {

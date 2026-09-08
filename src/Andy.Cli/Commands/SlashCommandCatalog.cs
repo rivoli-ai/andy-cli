@@ -28,6 +28,7 @@ public static class SlashCommandCatalog
         new InlineCommandHelp.CommandInfo { Name = "commands", Description = "List, inspect, and reload Markdown slash commands", Aliases = new[] { "cmds" } },
         new InlineCommandHelp.CommandInfo { Name = "theme", Description = "List, switch, or toggle transparency of the UI theme", Aliases = new[] { "themes" } },
         new InlineCommandHelp.CommandInfo { Name = "editor", Description = "Compose the prompt in $VISUAL/$EDITOR; Ctrl+X does the same from the composer", Aliases = new[] { "edit" } },
+        new InlineCommandHelp.CommandInfo { Name = "agent-name", Description = "Inspect or set the agent name; --clear removes it, --history shows runtime history", Aliases = Array.Empty<string>() },
         new InlineCommandHelp.CommandInfo { Name = "clear", Description = "Clear conversation history", Aliases = Array.Empty<string>() },
         new InlineCommandHelp.CommandInfo { Name = "restart", Description = "Restart the session with a fresh conversation context", Aliases = Array.Empty<string>() },
         new InlineCommandHelp.CommandInfo { Name = "sessions", Description = "List saved sessions that can be resumed", Aliases = Array.Empty<string>() },

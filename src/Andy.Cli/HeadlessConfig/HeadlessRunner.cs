@@ -27,10 +27,19 @@ public static class HeadlessRunner
         // redirected, otherwise no stdin). Injectable so tests never depend on
         // the ambient console.
         TextReader? stdin = null,
-        bool? stdinRedirected = null)
+        bool? stdinRedirected = null,
+        string? agentName = null)
     {
         stdout ??= Console.Out;
         stderr ??= Console.Error;
+        try
+        {
+            var naming = Andy.Cli.Hosting.AgentNameOption.Extract(args);
+            args = naming.Args;
+            agentName = naming.Name ?? agentName;
+        }
+        catch (ArgumentException ex) { stderr.WriteLine(ex.Message); return HeadlessExitCode.ConfigError; }
+
 
         // rivoli-ai/andy-cli#279: `run` without `--headless` is the lightweight
         // one-shot form (`andy-cli run "prompt"`, `git diff | andy-cli run ...`).
@@ -50,7 +59,7 @@ public static class HeadlessRunner
             try
             {
                 return await Andy.Cli.OneShot.OneShotRunner.RunAsync(
-                    args, stdout, stderr, oneShotLoggerFactory, resolvedStdin, ct: ct);
+                    args, stdout, stderr, oneShotLoggerFactory, resolvedStdin, ct: ct, agentName: agentName);
             }
             catch (OperationCanceledException)
             {
@@ -161,7 +170,7 @@ public static class HeadlessRunner
                     llmProviderOverride: null,
                     ct: ct,
                     layeredConfiguration: layered.Config,
-                    mode: parsed.Mode);
+                    mode: parsed.Mode, agentName: agentName);
             }
             finally
             {
@@ -220,6 +229,7 @@ public static class HeadlessRunner
         "Usage: andy-cli run --headless --config <path> [--mode <build|plan>] [--isolated]\n"
         + "  --headless        Non-interactive execution driven entirely by the config file (required).\n"
         + "  --config <path>   Path to a headless-config.v1 JSON file (required).\n"
+        + "  --agent-name <name>   Set the agent display name; an empty string clears it.\n"
         + "  --mode <id>       Primary operating mode: build (default) or plan (read-only).\n"
         + "                    An unknown mode is rejected; the run never falls back to build.\n"
         + "  --isolated        Ignore ~/.andy/andy.jsonc and the workspace andy.jsonc files, so the\n"
