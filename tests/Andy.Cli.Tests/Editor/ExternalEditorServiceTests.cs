@@ -114,6 +114,23 @@ public class ExternalEditorServiceTests : IDisposable
     private void AssertNoTempFilesLeft()
         => Assert.Empty(Directory.GetFileSystemEntries(_root));
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public async Task PastedPayloadSurvivesSuccessfulAndFailedEditorRoundTrips(int exitCode)
+    {
+        var prompt = new Andy.Cli.Widgets.PromptLine();
+        var payload = "\t\r\n" + new string('x', Andy.Cli.Widgets.PromptLine.LargePasteBytes) + "\r\n ";
+        prompt.InsertPaste(payload, false, out _);
+        var original = prompt.GetDocument();
+        var result = await NewService(Saves("before " + original.ToEditableText() + " after", exitCode)).EditAsync(original);
+        Assert.Equal(exitCode == 0, result.Applied);
+        Assert.Same(original.Attachments[0], Assert.Single(result.Document.Attachments));
+        Assert.Equal(exitCode == 0 ? "before " + payload + " after" : payload, result.Document.ToSubmittedText());
+        AssertTerminalFullyRestored();
+        AssertNoTempFilesLeft();
+    }
+
     // ----- success -----
 
     [Fact]

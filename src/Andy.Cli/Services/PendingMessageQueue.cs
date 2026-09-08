@@ -1,6 +1,6 @@
 namespace Andy.Cli.Services;
 
-public sealed record PendingUserMessage(long Id, string Text, int MessageNumber, Andy.Cli.Domain.ImageAttachment? Image = null);
+public sealed record PendingUserMessage(long Id, string Text, int MessageNumber, Andy.Cli.Domain.ImageAttachment? Image = null, Andy.Cli.Editor.ComposerDocument? Document = null);
 
 /// <summary>
 /// Thread-safe FIFO for user messages submitted while an agent turn is active.
@@ -20,13 +20,13 @@ public sealed class PendingMessageQueue
         }
     }
 
-    public PendingUserMessage Enqueue(string text, int messageNumber, Andy.Cli.Domain.ImageAttachment? image = null)
+    public PendingUserMessage Enqueue(string text, int messageNumber, Andy.Cli.Domain.ImageAttachment? image = null, Andy.Cli.Editor.ComposerDocument? document = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
         var message = new PendingUserMessage(
             Interlocked.Increment(ref _nextId),
             text,
-            messageNumber, image);
+            messageNumber, image, document);
         lock (_lock) _messages.AddLast(message);
         return message;
     }
@@ -39,7 +39,7 @@ public sealed class PendingMessageQueue
             for (var node = _messages.First; node != null; node = node.Next)
             {
                 if (node.Value.Id != id) continue;
-                updated = node.Value with { Text = text };
+                updated = node.Value with { Text = text, Document = node.Value.Document?.ApplyEditedText(text) };
                 node.Value = updated;
                 return true;
             }

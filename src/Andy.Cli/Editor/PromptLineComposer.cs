@@ -17,15 +17,8 @@ public interface IComposerDocumentSource
 }
 
 /// <summary>
-/// Adapts <see cref="PromptLine"/> (the interactive composer) to <see cref="IComposerDocumentSource"/>.
-///
-/// <para>SEAM FOR #277: <see cref="PromptLine"/> on main stores a single string, so a document
-/// built here has exactly one text part and no attachments - the round trip is lossless but
-/// trivially so. When #277 gives the composer structured <c>@file</c> (and later image) parts,
-/// this adapter is the ONLY place that has to change: build the document from those parts and
-/// push them back in <see cref="SetDocument"/>. <see cref="ComposerDocument.ApplyEditedText"/>
-/// already preserves attachment identity and position, and
-/// <see cref="ExternalEditorService"/> never sees anything but a document.</para>
+/// Adapts the interactive prompt's structured document to the external editor.
+/// Attachment records and exact paste payloads survive the round trip.
 /// </summary>
 public sealed class PromptLineComposer : IComposerDocumentSource
 {
@@ -34,8 +27,8 @@ public sealed class PromptLineComposer : IComposerDocumentSource
     public PromptLineComposer(PromptLine prompt)
         => _prompt = prompt ?? throw new ArgumentNullException(nameof(prompt));
 
-    public ComposerDocument GetDocument() => ComposerDocument.FromText(_prompt.Text);
+    public ComposerDocument GetDocument() => _prompt.GetDocument();
 
     public void SetDocument(ComposerDocument document)
-        => _prompt.SetText((document ?? ComposerDocument.Empty).ToPromptText());
+        => _prompt.SetDocument(document ?? ComposerDocument.Empty);
 }
