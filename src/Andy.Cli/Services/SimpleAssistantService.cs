@@ -154,7 +154,8 @@ public class SimpleAssistantService : IDisposable
         ILoggerFactory? loggerFactory = null,
         IReadOnlyDictionary<string, object?>? extraBody = null,
         string? systemPromptSuffix = null,
-        Andy.Cli.Modes.AgentModeState? modeState = null)
+        Andy.Cli.Modes.AgentModeState? modeState = null,
+        AgentIdentityState? identity = null)
     {
         _feed = feed;
         _attachmentProvider = llmProvider;
@@ -246,8 +247,8 @@ public class SimpleAssistantService : IDisposable
             logger: loggerFactory?.CreateLogger<SimpleAgent>(),
             // Provider-specific request fields (e.g. OpenRouter `provider` routing) resolved from the
             // selected provider's config; flow through the engine to the LLM provider.
-            extraBody: extraBody
-        );
+            extraBody: extraBody,
+            identity: identity);
 
         // Opt in to the engine's structured plan lifecycle before the first turn. The reflected
         // bridge keeps this CLI compatible with engine packages released before planning existed.
@@ -826,6 +827,8 @@ public class SimpleAssistantService : IDisposable
             ? userMessage
             : directive + "\n\n" + userMessage;
     }
+
+    public AgentIdentityState Identity => _agent.Identity;
 
     public Andy.Engine.TranscriptSnapshot ExportTranscript() => _agent.ExportTranscript();
 

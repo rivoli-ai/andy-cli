@@ -42,6 +42,27 @@ public class OneShotRunnerTests
     // ---- input combination -------------------------------------------------
 
     [Fact]
+    public async Task NamingToolsShareStartupIdentityThroughProductionPermissionsAndEngine()
+    {
+        using var ws = new TempDir();
+        var llm = new ScriptedLlmProvider(
+            ScriptedLlmProvider.ToolCallResponse("set_agent_name", "name-1", "{\"name\":\"oak\"}"),
+            ScriptedLlmProvider.ToolCallResponse("get_agent_identity", "identity-1", "{}"),
+            ScriptedLlmProvider.TextResponse("Named."));
+        var run = await RunAsync(["run", "--cwd", ws.Path, "--agent-name", "cedar", "--json", "name yourself"], llm);
+        Assert.Equal(HeadlessExitCode.Success, run.Code);
+        var events = ParseEvents(run.Stdout);
+        var started = events.Single(e => e.GetProperty("kind").GetString() == "started").GetProperty("data").GetProperty("agent_identity");
+        var finished = events.Single(e => e.GetProperty("kind").GetString() == "finished").GetProperty("data").GetProperty("agent_identity");
+        Assert.Equal("cedar", started.GetProperty("name").GetString());
+        Assert.Equal("oak", finished.GetProperty("name").GetString());
+        var toolResults = events.Where(e => e.GetProperty("kind").GetString() == "tool_call_finished").ToArray();
+        Assert.Equal(2, toolResults.Length);
+        Assert.All(toolResults, e => Assert.True(e.GetProperty("data").GetProperty("ok").GetBoolean()));
+        Assert.Equal(started.GetProperty("agent_id").GetString(), finished.GetProperty("agent_id").GetString());
+    }
+
+    [Fact]
     public async Task PositionalOnly_SendsTheWordsAsTheUserTurnAndPrintsTheAnswer()
     {
         using var ws = new TempDir();

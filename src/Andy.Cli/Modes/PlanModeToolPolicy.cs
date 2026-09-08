@@ -60,6 +60,8 @@ public sealed class PlanModeToolPolicy
 
         // Host inspection
         "system_info",
+        "get_agent_identity",
+        "set_agent_name",
         "process_info",
 
         // Pure computation over inputs the model already supplies

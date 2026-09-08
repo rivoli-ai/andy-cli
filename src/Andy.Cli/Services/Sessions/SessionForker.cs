@@ -84,6 +84,7 @@ public static class SessionForker
         {
             Version = copy.Version,
             Turns = (copy.Turns ?? Array.Empty<TranscriptTurn>()).Take(keep).ToArray(),
+            Identity = copy.Identity,
             Plan = copy.Plan
         };
 

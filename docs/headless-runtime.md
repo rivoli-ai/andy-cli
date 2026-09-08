@@ -680,3 +680,11 @@ priority over strict additivity, and a real policy engine would arrive as v2.
 - [ADR 0002: headless v1 inactive fields](adr/0002-headless-v1-inactive-fields.md) - implement-or-reject decisions for previously no-op v1 fields.
 - [`schemas/headless-config.v1.json`](../schemas/headless-config.v1.json) - the config schema.
 - [`schemas/samples/`](../schemas/samples) - example configs.
+
+### Agent display names
+
+Pass `--agent-name "cedar"` to `run` (one-shot or `--headless`) to set a name
+without changing the config file. The `set_agent_name` and `get_agent_identity`
+tools share the running Engine's identity state. Started and finished NDJSON
+metadata includes the identity snapshot, so a supervisor can associate its
+logical ID and current activation with the configured run ID and agent slug.

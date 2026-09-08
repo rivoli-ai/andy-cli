@@ -271,3 +271,18 @@ A failing run (e.g. timeout) ends with a fatal `error` then `finished`:
 - [Headless runtime](headless-runtime.md) - the command, config schema, and exit codes.
 - [ADR 0001: headless agent runtime](adr/0001-headless-agent-runtime.md) - versioning strategy for this contract.
 - [`schemas/headless-events.v1.json`](../schemas/headless-events.v1.json) - the event schema.
+
+### Agent identity metadata
+
+`started.data.agent_identity` and `finished.data.agent_identity` carry the
+versioned identity snapshot. `agent_id` remains stable across saved-context
+transfer; `name` is optional display text. `activation` describes the current
+instance using `instance_id`, optional `process_id`, `platform`,
+`operating_system`, `architecture`, and `started_at_utc`. `history` retains
+ordered `created`, `renamed`, `cleared`, and `resumed` events with their runtime
+observations and UTC timestamps. The final event captures names changed by tools
+during the run. These fields are additive to event schema version 1.
+
+Use `--agent-name "cedar"` at startup. An absent option preserves a restored
+name; an explicit empty string clears it. Display names do not replace the run
+ID or the configured agent slug.

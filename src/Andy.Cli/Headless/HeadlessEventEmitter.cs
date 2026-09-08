@@ -24,6 +24,7 @@ namespace Andy.Cli.Headless;
 public sealed class HeadlessEventEmitter : IDisposable
 {
     public const int SchemaVersion = 1;
+    public Andy.Tools.Core.IAgentIdentity? AgentIdentity { get; set; }
 
     private static readonly JsonSerializerOptions s_jsonOptions = new()
     {
@@ -289,6 +290,9 @@ public sealed class HeadlessEventEmitter : IDisposable
 
     private string Serialize(HeadlessEventKind kind, JsonObject data)
     {
+        if (kind is HeadlessEventKind.Started or HeadlessEventKind.Finished && AgentIdentity is { } identity)
+            data["agent_identity"] = JsonSerializer.SerializeToNode(identity.GetSnapshot(), s_jsonOptions);
+
         var envelope = new HeadlessEventEnvelope(
             SchemaVersion,
             _clock.GetUtcNow(),

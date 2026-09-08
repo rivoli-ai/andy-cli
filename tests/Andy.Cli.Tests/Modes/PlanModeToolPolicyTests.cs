@@ -72,6 +72,8 @@ public class PlanModeToolPolicyTests
     [InlineData("git_worktree_list")]
     [InlineData("code_index")]
     [InlineData("system_info")]
+    [InlineData("get_agent_identity")]
+    [InlineData("set_agent_name")]
     [InlineData("json_processor")]
     [InlineData("pdf_extract_text")]
     [InlineData("dataframe_preview")]

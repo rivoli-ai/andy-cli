@@ -95,7 +95,7 @@ class Program
     // HeadlessRunner.RunAsync follows its graceful shutdown path (flush events,
     // exit code 3, no partial output) instead of being killed abruptly. The
     // wall-clock timeout is handled separately inside HeadlessAgentRunner.
-    private static async Task<Andy.Cli.HeadlessConfig.HeadlessExitCode> RunHeadlessAsync(string[] args)
+    private static async Task<Andy.Cli.HeadlessConfig.HeadlessExitCode> RunHeadlessAsync(string[] args, string? agentName = null)
     {
         using var cts = new CancellationTokenSource();
 
@@ -119,7 +119,7 @@ class Program
         using var sigint = System.Runtime.InteropServices.PosixSignalRegistration.Create(
             System.Runtime.InteropServices.PosixSignal.SIGINT, HandleSignal);
 
-        return await Andy.Cli.HeadlessConfig.HeadlessRunner.RunAsync(args, ct: cts.Token);
+        return await Andy.Cli.HeadlessConfig.HeadlessRunner.RunAsync(args, ct: cts.Token, agentName: agentName);
     }
 
     static async Task Main(string[] args)
@@ -157,6 +157,17 @@ class Program
         // preserved in CliModeSelector (version -> acp -> headless -> command ->
         // interactive), so bare words like "version" and "run" are still matched
         // ahead of the generic non-dash "command" branch.
+        string? agentName;
+        try { (args, agentName) = AgentNameOption.Extract(args); }
+        catch (ArgumentException ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            Environment.ExitCode = 2;
+            return;
+        }
+        var agentIdentity = new Andy.Engine.AgentIdentityState();
+        if (agentName is not null) agentIdentity.SetName(agentName);
+
         switch (CliModeSelector.Select(args))
         {
             case CliMode.Version:
@@ -167,7 +178,7 @@ class Program
                 return;
 
             case CliMode.Acp:
-                await RunAcpServerModeAsync();
+                await RunAcpServerModeAsync(agentName);
                 return;
 
             case CliMode.Headless:
@@ -175,7 +186,7 @@ class Program
                 // Handled here (not via HandleCommandLineArgs) because it needs the
                 // structured exit-code contract from rivoli-ai/andy-cli#47, which
                 // doesn't fit the ICommand Success/Fail → exit 0|1 scheme.
-                var exitCode = await RunHeadlessAsync(args);
+                var exitCode = await RunHeadlessAsync(args, agentName);
                 Environment.Exit((int)exitCode);
                 return;
 
@@ -653,7 +664,8 @@ class Program
                     loggerFactory,
                     extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, currentProvider),
                     systemPromptSuffix: ComposeSkillsPromptSection(),
-                    modeState: agentModeState);
+                    modeState: agentModeState,
+                    identity: agentIdentity);
 
                 var providerUrl = ProviderUrlResolver.Resolve(currentProvider);
 
@@ -830,6 +842,7 @@ class Program
                             else
                             {
                                 aiService.RestoreTranscript(record.Snapshot);
+                                if (agentName is not null) aiService.Identity.SetName(agentName);
                                 sessionId = targetId;
                                 ReplaySessionIntoFeed(record.Snapshot, targetId);
                                 feed.AddMarkdownRich($"[session] Resumed session {targetId} ({record.Summary.TurnCount} turn{(record.Summary.TurnCount == 1 ? "" : "s")} restored)");
@@ -1028,8 +1041,10 @@ class Program
                     tokenCounter,
                     resumeLoggerFactory,
                     extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, resumeProvider),
-                    modeState: agentModeState);
+                    modeState: agentModeState,
+                    identity: agentIdentity);
                 aiService.RestoreTranscript(record.Snapshot);
+                if (agentName is not null) aiService.Identity.SetName(agentName);
                 sessionId = targetId;
 
                 // Point the permission prompt at the resumed session and re-grant its recorded
@@ -1088,7 +1103,8 @@ class Program
                         loggerFactory,
                         extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, provider),
                         systemPromptSuffix: ComposeSkillsPromptSection(),
-                        modeState: agentModeState);
+                        modeState: agentModeState,
+                    identity: agentIdentity);
                 }
                 else
                 {
@@ -1190,7 +1206,8 @@ class Program
                                         loggerFactory,
                                         extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, newProvider),
                                         systemPromptSuffix: ComposeSkillsPromptSection(),
-                                        modeState: agentModeState);
+                                        modeState: agentModeState,
+                    identity: agentIdentity);
                                 }
 
                                 feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
@@ -2221,6 +2238,18 @@ class Program
                             return;
                         }
 
+                        if (cmd == "/agent-name" || cmd.StartsWith("/agent-name ", StringComparison.Ordinal))
+                        {
+                            try
+                            {
+                                feed.AddCode(Andy.Cli.Commands.AgentNameCommand.Execute(agentIdentity, cmd["/agent-name".Length..]), "text");
+                                // A running turn saves on completion; avoid exporting its changing transcript here.
+                                if (!isProcessingMessage) SaveSession();
+                            }
+                            catch (ArgumentException ex) { toast.Show(ex.Message, 150); }
+                            return;
+                        }
+
                         // Queue publication and pump shutdown use the same lock. A message
                         // cannot land between the empty-queue check and marking the pump idle.
                         lock (messagePumpLock)
@@ -2308,7 +2337,8 @@ class Program
                                                     loggerFactory,
                                                     extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, newProvider),
                                                     systemPromptSuffix: ComposeSkillsPromptSection(),
-                                                    modeState: agentModeState);
+                                                    modeState: agentModeState,
+                    identity: agentIdentity);
                                             }
 
                                             feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
@@ -3211,7 +3241,7 @@ class Program
         }
     }
 
-    private static async Task RunAcpServerModeAsync()
+    private static async Task RunAcpServerModeAsync(string? agentName = null)
     {
         // Same layered configuration as interactive mode (rivoli-ai/andy-cli#280),
         // loaded through the shared instance so ACP sessions see the same typed
@@ -3340,7 +3370,7 @@ class Program
                 },
                 toolRegistry,
                 toolExecutor,
-                loggerFactory);
+                loggerFactory, agentName: agentName);
 
             // Create the Andy agent provider. Passing the logger factory lets it
             // build a proper typed logger for each engine agent, and the provider

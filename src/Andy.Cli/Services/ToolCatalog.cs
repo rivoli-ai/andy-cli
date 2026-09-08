@@ -43,6 +43,8 @@ public static class ToolCatalog
         // System tools
         RegisterTool<ProcessInfoTool>(services);
         RegisterTool<SystemInfoTool>(services);
+        RegisterTool<SetAgentNameTool>(services);
+        RegisterTool<GetAgentIdentityTool>(services);
         RegisterTool<ExecuteCommandTool>(services);
 
         // Text processing tools
