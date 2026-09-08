@@ -147,7 +147,7 @@ public class HeadlessAgentRunnerStabilityTests
         var config = NewConfig(ws) with { Tools = new[] { CrossPlatform.NoOpCliTool("noop") } };
 
         var provider = new FakeLlmProvider(
-            FakeLlmProvider.ToolCallResponse("noop", "call-1"),
+            FakeLlmProvider.ToolCallResponse("noop", "call-1", narration: "checking"),
             FakeLlmProvider.TextResponse("done"));
 
         var (events, code) = await RunAsync(config, provider);
@@ -171,6 +171,12 @@ public class HeadlessAgentRunnerStabilityTests
         Assert.True(kinds.IndexOf("tool_call_started") < kinds.IndexOf("tool_call_finished"));
         Assert.True(kinds.IndexOf("started") < kinds.IndexOf("tool_call_started"));
         Assert.True(kinds.IndexOf("tool_call_finished") < kinds.LastIndexOf("finished"));
+        var narration = events.FindIndex(e => e.Kind == "llm_chunk" && e.Data.GetProperty("state").GetString() == "narration");
+        var final = events.FindIndex(e => e.Kind == "llm_chunk" && e.Data.GetProperty("state").GetString() == "final");
+        Assert.True(narration >= 0 && narration < kinds.IndexOf("tool_call_started"));
+        Assert.True(final > kinds.IndexOf("tool_call_finished"));
+        Assert.Equal("checkingdone", string.Concat(events.Where(e => e.Kind == "llm_chunk").Select(e => e.Data.GetProperty("text").GetString())));
+
     }
 
     [Fact]
@@ -681,12 +687,12 @@ public class HeadlessAgentRunnerStabilityTests
         public static LlmResponse ToolCallResponse(
             string toolName,
             string callId,
-            string argumentsJson = "{\"args\":[]}") => new()
+            string argumentsJson = "{\"args\":[]}", string narration = "") => new()
             {
                 AssistantMessage = new Message
                 {
                     Role = Role.Assistant,
-                    Content = string.Empty,
+                    Content = narration,
                     ToolCalls = new List<ToolCall>
                 {
                     new()

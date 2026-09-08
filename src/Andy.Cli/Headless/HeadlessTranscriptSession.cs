@@ -33,6 +33,9 @@ public sealed class HeadlessTranscriptSession : IDisposable
     private readonly IReadOnlyList<string> _secretValues;
     private readonly TimeProvider _clock;
     private readonly object _sync = new();
+    private JsonObject? _pendingModelEvent;
+    private readonly StringBuilder _pendingModelText = new();
+    private bool _pendingModelTruncated;
     private long _bytesWritten;
     private bool _limitReached;
     private bool _completed;
@@ -129,6 +132,8 @@ public sealed class HeadlessTranscriptSession : IDisposable
 
             try
             {
+                if (BufferModelDelta(eventLine)) return;
+                FlushModelText();
                 var record = PrepareRecord(eventLine);
                 var terminalReserve = _options.MaxRecordBytes + TerminalReserveOverhead;
                 if (_bytesWritten + record.Length + 1 > _options.MaxRunBytes - terminalReserve)
@@ -169,6 +174,7 @@ public sealed class HeadlessTranscriptSession : IDisposable
 
             try
             {
+                FlushModelText();
                 var terminalRecord = PrepareRecord(terminalEventLine);
                 if (_bytesWritten + terminalRecord.Length + 1 > _options.MaxRunBytes)
                 {
@@ -190,6 +196,50 @@ public sealed class HeadlessTranscriptSession : IDisposable
 
             return Failure;
         }
+    }
+
+    // Live token boundaries must not defeat per-record secret redaction. Persist one
+    // bounded record per model turn; the live stdout stream remains incremental.
+    private bool BufferModelDelta(string line)
+    {
+        var node = JsonNode.Parse(line) as JsonObject;
+        if (node?["kind"]?.GetValue<string>() != "llm_chunk"
+            || node["data"]?["state"]?.GetValue<string>() != "delta") return false;
+        if (_pendingModelEvent is not null
+            && _pendingModelEvent["data"]?["turn"]?.ToJsonString() != node["data"]?["turn"]?.ToJsonString())
+            FlushModelText();
+        _pendingModelEvent ??= node;
+        var text = node["data"]?["text"]?.GetValue<string>() ?? "";
+        if (!_pendingModelTruncated && text.Length <= _options.MaxRecordBytes - _pendingModelText.Length)
+            _pendingModelText.Append(text);
+        else
+        {
+            // Never persist a prefix that may contain only half a secret.
+            _pendingModelText.Clear();
+            _pendingModelTruncated = true;
+        }
+        return true;
+    }
+
+    private void FlushModelText()
+    {
+        if (_pendingModelEvent is null) return;
+        var data = (JsonObject)_pendingModelEvent["data"]!;
+        data["text"] = _pendingModelTruncated ? "[MODEL TEXT OMITTED: TRANSCRIPT LIMIT]" : _pendingModelText.ToString();
+        data["transcript_coalesced"] = true;
+        if (_pendingModelTruncated) data["transcript_truncated"] = true;
+        var record = PrepareRecord(_pendingModelEvent.ToJsonString());
+        _pendingModelEvent = null;
+        _pendingModelText.Clear();
+        _pendingModelTruncated = false;
+        if (_limitReached) return;
+        if (_bytesWritten + record.Length + 1 > _options.MaxRunBytes - _options.MaxRecordBytes - TerminalReserveOverhead)
+        {
+            WriteLimitMarker();
+            _limitReached = true;
+            return;
+        }
+        WriteBytes(record);
     }
 
     private byte[] PrepareRecord(string eventLine)

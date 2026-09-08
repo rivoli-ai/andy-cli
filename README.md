@@ -43,6 +43,9 @@ runtime, and an Agent Client Protocol (ACP) server for editor integrations.
 
 ## Development update - 2026-09-07
 
+- Fixed #48: headless model text streams live with turn disposition metadata,
+  cancellation-safe finalization, and bounded transcript coalescing for redaction.
+
 - Fixed #296: JSON-encoded array tool arguments now recursively normalize nested
   objects and scalar values, so structured dataframe arguments reach tools as CLR
   dictionaries instead of raw JSON elements.

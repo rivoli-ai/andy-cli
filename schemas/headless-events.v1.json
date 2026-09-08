@@ -54,7 +54,8 @@
       "required": ["text"],
       "properties": {
         "text":  { "type": "string" },
-        "turn":  { "type": "integer", "minimum": 0 }
+        "turn":  { "type": "integer", "minimum": 0 },
+        "state": { "type": "string", "enum": ["delta", "narration", "final"], "description": "Delta text is provisional. Empty narration/final markers classify previously emitted text for this zero-based turn." }
       }
     },
     "tool_call_started": {

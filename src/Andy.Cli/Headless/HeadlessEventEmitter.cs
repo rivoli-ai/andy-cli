@@ -58,11 +58,22 @@ public sealed class HeadlessEventEmitter : IDisposable
             ["tool_count"] = toolCount
         });
 
-    public void EmitLlmChunk(string text, int? turn = null)
+    public void EmitLlmChunk(string text, int? turn = null, string? state = null)
     {
-        var data = new JsonObject { ["text"] = text };
-        if (turn.HasValue) data["turn"] = turn.Value;
-        Write(HeadlessEventKind.LlmChunk, data);
+        // Bound each event without dropping content. Keep surrogate pairs together.
+        const int maxChars = 4096;
+        var offset = 0;
+        do
+        {
+            var count = Math.Min(maxChars, text.Length - offset);
+            if (offset + count < text.Length && count > 0 && char.IsHighSurrogate(text[offset + count - 1]))
+                count--;
+            var data = new JsonObject { ["text"] = text.Substring(offset, count) };
+            if (turn.HasValue) data["turn"] = turn.Value;
+            if (state is not null) data["state"] = state;
+            Write(HeadlessEventKind.LlmChunk, data);
+            offset += count;
+        } while (offset < text.Length);
     }
 
     public void EmitToolCallStarted(string callId, string toolName, string? argsDigest = null)

@@ -1,6 +1,6 @@
 # Event stream
 
-Updated: 2026-07-23
+Updated: 2026-09-07
 
 The headless runtime emits a structured event stream while it runs. The format
 is NDJSON: one JSON object per line. The authoritative contract is
@@ -66,15 +66,27 @@ runtime setup begins.
 
 ### `llm_chunk`
 
-Assistant-model output text. The current Engine integration emits retained
-assistant messages in turn order when the run finalizes; a future
-token-streaming Engine can emit incremental chunks without changing this
-contract.
+Assistant-model output arrives incrementally from Engine's response callback.
+Each `state=delta` chunk is provisional; an empty `narration` marker reclassifies
+that turn as tool-round or output-limited text, and an empty `final` marker
+identifies the converged answer. The output file and `finished` event still
+determine run success. Cancelled or failed turns may remain provisional.
+Unsupported streaming providers emit one honest completion chunk. Each event
+contains at most 4,096 UTF-16 code units; large provider chunks are split without
+delays or lost content. No model history is replayed at finalization.
+
+Only provider-exposed response text is streamed, never hidden reasoning or raw
+tool arguments/results. The optional persisted transcript coalesces delta text
+per turn before redaction so secrets split across token boundaries remain
+redacted. Coalescing is bounded by the record limit; oversized model text is
+omitted with explicit truncation metadata. Live stdout/FIFO text is model output,
+as before; the persisted transcript is the redacted retention surface.
 
 | Field | Type | Notes |
 | --- | --- | --- |
 | `text` | string | The chunk of generated text. |
-| `turn` | integer >= 0 | Optional turn index. |
+| `turn` | integer >= 0 | Zero-based Engine turn index. |
+| `state` | string | Optional `delta`, `narration`, or `final`; older producers omit it. |
 
 ### `tool_call_started`
 

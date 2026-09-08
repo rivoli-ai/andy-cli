@@ -280,7 +280,7 @@ public static class HeadlessAgentRunner
             : config.Agent.Instructions + "\n\n" + modeSection;
 
         using var agent = new SimpleAgent(
-            llmProvider,
+            new HeadlessStreamingProvider(llmProvider),
             toolHost.Registry,
             toolExecutor,
             systemPrompt: systemPrompt,
@@ -304,26 +304,6 @@ public static class HeadlessAgentRunner
         };
 
         RequiredActionVerificationResult? requiredActionVerification = null;
-        var modelHistoryEmitted = false;
-
-        void EmitModelHistory()
-        {
-            if (modelHistoryEmitted)
-            {
-                return;
-            }
-
-            modelHistoryEmitted = true;
-            var turn = 0;
-            foreach (var message in agent.GetHistory()
-                .Where(message =>
-                    message.Role == Andy.Model.Model.Role.Assistant
-                    && !string.IsNullOrWhiteSpace(message.Content)))
-            {
-                emitter.EmitLlmChunk(message.Content!, turn++);
-            }
-        }
-
         void EmitRequiredActionVerification()
         {
             if (!requiredActionVerifier.HasRequirements || requiredActionVerification is not null)
@@ -339,7 +319,6 @@ public static class HeadlessAgentRunner
         // audit, required-action evidence when configured, then the terminal event.
         void Finalize(HeadlessExitCode code, int iters, string? stopReason = null)
         {
-            EmitModelHistory();
             EmitToolUsageAudit(emitter, auditor, services, toolHost.Registry, allowedTools);
             EmitRequiredActionVerification();
             finish(code, iters, stopReason);
@@ -356,7 +335,14 @@ public static class HeadlessAgentRunner
         try
         {
             var kickoff = string.IsNullOrWhiteSpace(kickoffMessage) ? KickoffMessage : kickoffMessage;
-            result = await agent.ProcessMessageAsync(kickoff, linkedCts.Token);
+            result = await agent.ProcessMessageAsync(kickoff, delta =>
+            {
+                if (linkedCts.IsCancellationRequested) return;
+                if (delta.Kind == AgentResponseDeltaKind.Text)
+                    emitter.EmitLlmChunk(delta.Text ?? string.Empty, delta.Turn - 1, "delta");
+                else if (delta.Kind == AgentResponseDeltaKind.Discarded)
+                    emitter.EmitLlmChunk(string.Empty, delta.Turn - 1, "narration");
+            }, linkedCts.Token);
             iterations = result?.TurnCount ?? 0;
         }
         catch (OperationCanceledException)
@@ -438,7 +424,7 @@ public static class HeadlessAgentRunner
         }
 
         var output = result.Response ?? string.Empty;
-        EmitModelHistory();
+        emitter.EmitLlmChunk(string.Empty, Math.Max(0, result.TurnCount - 1), "final");
 
         // #219: a plausible model response is not evidence that a required action
         // happened. Verify actual terminal tool outcomes before format validation
