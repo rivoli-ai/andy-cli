@@ -84,6 +84,10 @@ namespace Andy.Cli.Widgets
                 error = "Paste contains binary NUL data; nothing inserted.";
                 return false;
             }
+            // An explicit paste event is complete; its next Enter is a submit, even if
+            // preceding typing had armed the legacy key-by-key paste heuristic.
+            _inPasteMode = false;
+            _lastKeyTime = DateTime.MinValue;
             if (text.Length == 0) return true;
             int lines = ComposerDocument.NormalizeNewlines(text).Count(c => c == '\n') + 1;
             if (_mode == PromptMode.Shell || (Encoding.UTF8.GetByteCount(text) < LargePasteBytes && lines < LargePasteLines))

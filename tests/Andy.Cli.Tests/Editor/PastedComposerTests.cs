@@ -206,4 +206,17 @@ public class PastedComposerTests
         Assert.DoesNotContain(new string('x', 100), displayed);
         Assert.Equal("Review " + Payload + " please", prompt.GetDocument().ToSubmittedText());
     }
+    [Fact]
+    public void EnterImmediatelyAfterBracketedPasteSubmitsInsteadOfInsertingANewline()
+    {
+        var prompt = new PromptLine();
+        prompt.OnKey(new ConsoleKeyInfo('a', ConsoleKey.A, false, false, false));
+        prompt.OnKey(new ConsoleKeyInfo('b', ConsoleKey.B, false, false, false));
+        prompt.InsertPaste(Payload, false, out _);
+        var display = prompt.Text;
+        var document = prompt.GetDocument();
+        Assert.Equal(display, prompt.OnKey(Key(ConsoleKey.Enter)));
+        Assert.True(prompt.GetDocument().IsEmpty);
+        Assert.Equal("ab" + Payload, document.ToSubmittedText());
+    }
 }
