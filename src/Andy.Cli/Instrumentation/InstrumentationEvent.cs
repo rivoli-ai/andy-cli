@@ -178,3 +178,10 @@ public class RedactedEvent : InstrumentationEvent
     /// <summary>Constant note indicating the payload was withheld.</summary>
     public string Note { get; set; } = InstrumentationRedactor.Placeholder;
 }
+
+public class ThinkingEvent : InstrumentationEvent
+{
+    public override string EventType => "Thinking";
+    public string Content { get; set; } = string.Empty;
+    public string Phase { get; set; } = string.Empty;
+}

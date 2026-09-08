@@ -203,6 +203,9 @@ class Program
             });
         Andy.Cli.Configuration.ConfigStartup.Apply(andyConfig);
 
+        var thinkingSetting = Environment.GetEnvironmentVariable("ANDY_SHOW_THINKING")?.ToLowerInvariant();
+        ThinkingView.Visible = !args.Contains("--hide-thinking") && thinkingSetting is not ("false" or "0" or "no");
+
         // Apply the persisted theme (falling back to the effective ui.theme, then the
         // built-in dark theme) before the first frame is rendered.
         var themeMemory = new ThemeMemoryService();
@@ -1859,6 +1862,12 @@ class Program
                         {
                             running = false;
                         }
+                        return;
+                    }
+                    if (k.Key == ConsoleKey.F4)
+                    {
+                        ThinkingView.Toggle();
+                        toast.Show(ThinkingView.Visible ? "Thinking visible" : "Thinking hidden", 90);
                         return;
                     }
                     if (k.Key == ConsoleKey.F2) { hud.Enabled = !hud.Enabled; return; }

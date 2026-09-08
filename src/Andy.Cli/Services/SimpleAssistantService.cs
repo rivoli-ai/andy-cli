@@ -113,6 +113,7 @@ public class SimpleAssistantService : IDisposable
     /// </summary>
     private void OnIntermediateAssistantText(string text)
     {
+        text = ThinkingContent.WithoutBlocks(text);
         if (!ShouldRenderIntermediateText(text, _lastIntermediateText))
             return;
 
@@ -211,9 +212,27 @@ public class SimpleAssistantService : IDisposable
         // wrapper also surfaces the model's intermediate narration text (the "I'll first read the
         // file..." narration the model emits alongside tool calls) into the feed as the turn
         // progresses, since SimpleAgent itself is non-streaming and only returns the final answer.
+        ThinkingBlockItem? thinkingItem = null;
         var usageTrackingProvider = new UsageTrackingLlmProvider(
             llmProvider, OnLlmUsage, OnIntermediateAssistantText,
-            loggerFactory?.CreateLogger<UsageTrackingLlmProvider>());
+            loggerFactory?.CreateLogger<UsageTrackingLlmProvider>(),
+            onThinkingStart: () =>
+            {
+                thinkingItem = new ThinkingBlockItem();
+                _feed.AddItem(thinkingItem);
+                InstrumentationHub.Instance.Publish(new ThinkingEvent { Phase = "start" });
+            },
+            onThinkingText: text =>
+            {
+                thinkingItem?.AppendContent(text);
+                InstrumentationHub.Instance.Publish(new ThinkingEvent { Phase = "content", Content = text });
+            },
+            onThinkingEnd: () =>
+            {
+                thinkingItem?.Complete();
+                thinkingItem = null;
+                InstrumentationHub.Instance.Publish(new ThinkingEvent { Phase = "end" });
+            });
 
         // Create the SimpleAgent
         _agent = new SimpleAgent(
@@ -664,7 +683,7 @@ public class SimpleAssistantService : IDisposable
             if (!result.Success && result.ProviderError is { } providerError)
                 _feed.AddItem(new ErrorTextItem(ProviderErrorFormatter.Format(providerError)));
             else
-                pipeline.AddRawContent(SelectResponseContent(result.Response, result.Success, result.StopReason));
+                pipeline.AddRawContent(ThinkingContent.WithoutBlocks(SelectResponseContent(result.Response, result.Success, result.StopReason)));
 
             // Context line disabled to avoid rendering issues
             // pipeline.AddSystemMessage("", SystemMessageType.Context, priority: 1999);

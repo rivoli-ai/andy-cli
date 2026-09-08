@@ -463,3 +463,7 @@ tokens. Idle ESC still opens exit confirmation. Modal dismissal takes precedence
 
 Headless tools support MCP gateway routing and bounded JSON stdin input with
 concurrent pipe draining. See [configuration](docs/MCP_GATEWAY_AND_JSON_TOOLS.md).
+### Thinking blocks - 2026-09-08
+
+Explicit provider thinking is rendered separately, with F4 visibility control and
+original transcript preservation. See [thinking blocks](docs/THINKING_BLOCKS.md).
