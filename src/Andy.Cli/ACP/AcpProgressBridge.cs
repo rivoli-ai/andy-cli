@@ -48,6 +48,9 @@ internal sealed class AcpSessionUpdateSink
         }
     }
 
+    public Task SendMessageAsync(string text, CancellationToken cancellationToken)
+        => SendAsync((streamer, token) => streamer.SendMessageChunkAsync(text, token), cancellationToken);
+
     public Task SendThinkingAsync(string text, CancellationToken cancellationToken)
         => string.IsNullOrWhiteSpace(text)
             ? Task.CompletedTask
@@ -98,19 +101,17 @@ internal sealed class AcpSessionUpdateSink
 }
 
 /// <summary>
-/// Surfaces assistant narration produced on model rounds that also request
-/// tools. Those messages are intermediate progress; the no-tool response is the
-/// final answer and is sent by <see cref="AndyAgentProvider"/> to avoid duplication.
+/// Delegates provider traffic and requests the engine's non-streaming fallback
+/// when a provider exposes an empty, unsupported streaming implementation.
 /// </summary>
 internal sealed class AcpProgressLlmProvider : ILlmProvider
 {
     private readonly ILlmProvider _inner;
-    private readonly AcpSessionUpdateSink _sink;
 
     public AcpProgressLlmProvider(ILlmProvider inner, AcpSessionUpdateSink sink)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
-        _sink = sink ?? throw new ArgumentNullException(nameof(sink));
+        ArgumentNullException.ThrowIfNull(sink);
     }
 
     public string Name => _inner.Name;
@@ -125,27 +126,20 @@ internal sealed class AcpProgressLlmProvider : ILlmProvider
         LlmRequest request,
         CancellationToken cancellationToken = default)
     {
-        var response = await _inner.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
-
-        if (response.HasToolCalls)
-        {
-            var narration = string.IsNullOrWhiteSpace(response.Content)
-                ? $"Preparing {response.ToolCalls.Count} tool call(s)..."
-                : response.Content;
-            await _sink.SendThinkingAsync(narration, cancellationToken).ConfigureAwait(false);
-        }
-
-        return response;
+        return await _inner.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
     }
 
     public async IAsyncEnumerable<LlmStreamResponse> StreamCompleteAsync(
         LlmRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        var received = false;
         await foreach (var chunk in _inner.StreamCompleteAsync(request, cancellationToken).ConfigureAwait(false))
         {
+            received = true;
             yield return chunk;
         }
+        if (!received) throw new NotSupportedException("Provider returned no streaming packets.");
     }
 }
 
@@ -237,6 +231,7 @@ internal sealed class AcpObservingToolExecutor : IToolExecutor
                 Kind = InferKind(toolId),
                 Status = "in_progress",
                 Input = parameters,
+                Locations = GetLocations(parameters),
             },
             cancellationToken).ConfigureAwait(false);
 
@@ -247,14 +242,29 @@ internal sealed class AcpObservingToolExecutor : IToolExecutor
                 new AcpToolResult
                 {
                     CallId = callId,
-                    IsError = !result.IsSuccessful,
+                    IsError = !result.IsSuccessful || result.WasCancelled || result.HitResourceLimits,
                     Content = FormatResult(result),
+                    ContentItems = BuildContent(toolId, parameters, result),
+                    Locations = GetResultLocations(parameters, result),
                 },
                 cancellationToken).ConfigureAwait(false);
             return result;
         }
         catch (OperationCanceledException)
         {
+            // The prompt token is cancelled, but the started tool still needs
+            // a terminal update. Bound this final transport attempt separately.
+            using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            try
+            {
+                await _sink.SendToolResultAsync(new AcpToolResult
+                {
+                    CallId = callId,
+                    IsError = true,
+                    Content = "Tool execution cancelled."
+                }, cleanup.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { }
             throw;
         }
         catch (Exception ex)
@@ -271,9 +281,42 @@ internal sealed class AcpObservingToolExecutor : IToolExecutor
         }
     }
 
+    private static List<ToolCallLocation>? GetLocations(IReadOnlyDictionary<string, object?> parameters)
+    {
+        foreach (var key in new[] { "file_path", "path" })
+            if (parameters.TryGetValue(key, out var value) && value is string path && Path.IsPathFullyQualified(path))
+                return [new ToolCallLocation { Path = path }];
+        return null;
+    }
+
+    private static List<ToolCallLocation>? GetResultLocations(IReadOnlyDictionary<string, object?> parameters, ToolExecutionResult result)
+    {
+        // File tools return the resolved path after their own validation. Use it
+        // rather than resolving relative paths against the server process cwd.
+        if (result.IsSuccessful && result.Data is IReadOnlyDictionary<string, object?> data)
+            return GetLocations(data) ?? GetLocations(parameters);
+        return GetLocations(parameters);
+    }
+
+    private static List<ToolCallContent> BuildContent(string toolId,
+        IReadOnlyDictionary<string, object?> parameters, ToolExecutionResult result)
+    {
+        var items = new List<ToolCallContent> { new() { Type = "content", Text = FormatResult(result) } };
+        // Project successful full replacements only. Append and partial edits do
+        // not describe a complete replacement and must not become misleading diffs.
+        if (result.IsSuccessful && !result.WasCancelled && !result.HitResourceLimits &&
+            toolId == "write_file" && GetResultLocations(parameters, result) is { Count: > 0 } locations &&
+            parameters.TryGetValue("content", out var value) && value is string text && text.Length <= MaxResultChars &&
+            (!parameters.TryGetValue("append", out var append) || append is false))
+            items.Add(new ToolCallContent { Type = "diff", Path = locations[0].Path, NewText = text });
+        return items;
+    }
+
     private static string FormatResult(ToolExecutionResult result)
     {
         string text;
+        if (result.WasCancelled) return "Tool execution cancelled.";
+        if (result.HitResourceLimits) return "Tool execution reached a resource limit. " + result.ErrorMessage;
         if (!result.IsSuccessful)
         {
             text = string.IsNullOrWhiteSpace(result.ErrorMessage)

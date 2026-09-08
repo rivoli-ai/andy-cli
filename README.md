@@ -419,3 +419,8 @@ record the resulting known-good graph.
 ## License
 
 See [`LICENSE`](LICENSE) for details.
+
+### 2026-09-07: ACP streaming and tool outcomes
+
+ACP now streams real model text, falls back to one chunk for non-streaming providers,
+and reports correlated cancellation/failure outcomes with bounded native file content (#204).

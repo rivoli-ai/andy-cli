@@ -259,7 +259,6 @@ public class AndyAgentProvider : IAgentProvider, ISessionConfigProvider, IDispos
                     $"Model: {entry.Provider}/{entry.Model}", linkedToken);
             }
 
-            await streamer.SendThinkingAsync("Analyzing request...", linkedToken);
 
             // Thread the linked cancellation token and prompt-specific ACP
             // streamer into the engine call so intermediate narration and real
@@ -268,7 +267,7 @@ public class AndyAgentProvider : IAgentProvider, ISessionConfigProvider, IDispos
 
             entry.IncrementMessageCount();
 
-            if (result.Success && !string.IsNullOrEmpty(result.Response))
+            if (!agent.StreamsResponses && result.Success && !string.IsNullOrEmpty(result.Response))
             {
                 await StreamResponse(result.Response, streamer, linkedToken);
             }
@@ -342,12 +341,7 @@ public class AndyAgentProvider : IAgentProvider, ISessionConfigProvider, IDispos
     }
 
     /// <summary>
-    /// Forwards the model response to the client as a single ordered block.
-    /// The engine's <see cref="SimpleAgent.ProcessMessageAsync"/> returns a
-    /// complete response and exposes no incremental chunk/token API, so real
-    /// token-level streaming is not possible without an engine capability.
-    /// The previous artificial word-splitting with Task.Delay (which faked
-    /// token cadence over an already-complete string) has been removed.
+    /// Forwards one complete response for session agents without incremental output.
     /// </summary>
     private static async Task StreamResponse(string response, IResponseStreamer streamer, CancellationToken cancellationToken)
     {

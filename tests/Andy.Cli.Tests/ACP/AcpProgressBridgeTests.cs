@@ -95,7 +95,7 @@ public class AcpProgressBridgeTests
     }
 
     [Fact]
-    public async Task ProgressProvider_SendsToolRoundNarration_AsThinkingUpdate()
+    public async Task ProgressProvider_DoesNotDuplicateNarrationAsThinking()
     {
         var inner = new Mock<ILlmProvider>();
         inner.Setup(provider => provider.CompleteAsync(
@@ -127,7 +127,7 @@ public class AcpProgressBridgeTests
         await provider.CompleteAsync(
             new LlmRequest { Messages = [] }, CancellationToken.None);
 
-        Assert.Equal(["I will inspect the project first."], thoughts);
+        Assert.Empty(thoughts);
     }
 
     [Fact]
@@ -165,6 +165,71 @@ public class AcpProgressBridgeTests
         Assert.Equal(call.Id, result.CallId);
         Assert.False(result.IsError);
         Assert.Equal("file contents", result.Content);
+    }
+
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(false, false, true)]
+    public async Task ToolOutcomesHaveCorrelatedTerminalUpdates(bool cancelled, bool limited, bool denied)
+    {
+        var inner = new Mock<IToolExecutor>();
+        inner.Setup(e => e.ExecuteAsync(It.IsAny<string>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<ToolExecutionContext?>()))
+            .ReturnsAsync(new ToolExecutionResult
+            {
+                IsSuccessful = !denied,
+                WasCancelled = cancelled,
+                HitResourceLimits = limited,
+                ErrorMessage = denied ? "Permission denied" : null
+            });
+        var calls = new List<Andy.Acp.Core.Agent.ToolCall>();
+        var results = new List<Andy.Acp.Core.Agent.ToolResult>();
+        var sink = new AcpSessionUpdateSink();
+        sink.Attach(CreateStreamer(calls: calls, results: results).Object);
+        await new AcpObservingToolExecutor(inner.Object, sink).ExecuteAsync("execute_command", []);
+        Assert.Equal(Assert.Single(calls).Id, Assert.Single(results).CallId);
+        Assert.Equal(cancelled || limited || denied, results[0].IsError);
+        Assert.Equal("content", Assert.Single(results[0].ContentItems!).Type);
+    }
+
+    [Fact]
+    public async Task ThrownCancellationTerminatesStartedToolWithFreshToken()
+    {
+        using var cts = new CancellationTokenSource();
+        var inner = new Mock<IToolExecutor>();
+        inner.Setup(e => e.ExecuteAsync(It.IsAny<string>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<ToolExecutionContext?>()))
+            .Returns(() => { cts.Cancel(); throw new OperationCanceledException(cts.Token); });
+        var calls = new List<Andy.Acp.Core.Agent.ToolCall>();
+        var results = new List<Andy.Acp.Core.Agent.ToolResult>();
+        var sink = new AcpSessionUpdateSink();
+        sink.Attach(CreateStreamer(calls: calls, results: results).Object);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new AcpObservingToolExecutor(inner.Object, sink)
+            .ExecuteAsync("execute_command", [], new ToolExecutionContext { CancellationToken = cts.Token }));
+        Assert.Equal(Assert.Single(calls).Id, Assert.Single(results).CallId);
+        Assert.True(results[0].IsError);
+        Assert.Contains("cancelled", results[0].Content);
+    }
+
+    [Theory]
+    [InlineData(false, true, true)]
+    [InlineData(true, true, false)]
+    [InlineData(false, false, false)]
+    public async Task OnlySuccessfulFullWritesProduceNativeReplacementDiffs(bool append, bool success, bool diff)
+    {
+        var inner = new Mock<IToolExecutor>();
+        inner.Setup(e => e.ExecuteAsync(It.IsAny<string>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<ToolExecutionContext?>()))
+            .ReturnsAsync(new ToolExecutionResult { IsSuccessful = success });
+        var results = new List<Andy.Acp.Core.Agent.ToolResult>();
+        var sink = new AcpSessionUpdateSink();
+        sink.Attach(CreateStreamer(results: results).Object);
+        var path = Path.Combine(Path.GetTempPath(), "sample.txt");
+        await new AcpObservingToolExecutor(inner.Object, sink).ExecuteAsync("write_file",
+            new() { ["file_path"] = path, ["content"] = "new contents", ["append"] = append });
+        var result = Assert.Single(results);
+        Assert.Equal(path, Assert.Single(result.Locations!).Path);
+        Assert.Equal(diff, result.ContentItems!.Any(c => c.Type == "diff"));
+        if (diff) Assert.Equal("new contents", result.ContentItems!.Single(c => c.Type == "diff").NewText);
     }
 
     private static Mock<IResponseStreamer> CreateStreamer(

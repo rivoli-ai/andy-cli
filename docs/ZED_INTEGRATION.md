@@ -185,3 +185,18 @@ versions.
 - [Agent Client Protocol](https://agentclientprotocol.com/)
 - [Andy command reference](README_COMMANDS.md)
 - [Rider CLI-agent comparison](CLI_AGENT_FEATURE_COMPARISON.md)
+
+### ACP streaming and tool content (2026-09-07)
+
+Response text streams directly from the provider through the engine callback. Tool-round
+assistant narration remains visible as message text; it is not manufactured reasoning.
+Providers without streaming deliver one complete chunk. Cancellation stops further text.
+Tool starts and terminal updates share a call ID. Cancellation, permission failures,
+resource limits and thrown failures finish as ACP `failed`; successful execution finishes
+as `completed`. A cancelled prompt allows a bounded two-second terminal update attempt.
+
+Absolute file arguments provide native locations. Successful full `write_file`
+replacements up to 8,000 characters provide native diff content (without a before-image).
+Appends, partial edits, oversized files and failures retain bounded text results.
+Command output is native text content; terminal references require client-created
+terminals and are not invented for local executor processes.

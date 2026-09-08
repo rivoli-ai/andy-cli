@@ -17,6 +17,7 @@ namespace Andy.Cli.ACP;
 /// </summary>
 public interface ISessionAgent : IDisposable
 {
+    bool StreamsResponses => false;
     Task<SimpleAgentResult> ProcessMessageAsync(
         string userMessage,
         IResponseStreamer streamer,
@@ -43,6 +44,8 @@ internal sealed class SimpleAgentSessionAgent : ISessionAgent
         _owner = owner;
     }
 
+    public bool StreamsResponses => true;
+
     public async Task<SimpleAgentResult> ProcessMessageAsync(
         string userMessage,
         IResponseStreamer streamer,
@@ -51,7 +54,12 @@ internal sealed class SimpleAgentSessionAgent : ISessionAgent
         _sink.Attach(streamer);
         try
         {
-            return await _agent.ProcessMessageAsync(userMessage, cancellationToken).ConfigureAwait(false);
+            return await _agent.ProcessMessageAsync(userMessage, delta =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (delta.Kind == AgentResponseDeltaKind.Text && !string.IsNullOrEmpty(delta.Text))
+                    _sink.SendMessageAsync(delta.Text, cancellationToken).GetAwaiter().GetResult();
+            }, cancellationToken).ConfigureAwait(false);
         }
         finally
         {

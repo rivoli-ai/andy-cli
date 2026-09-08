@@ -472,7 +472,7 @@ public class AndyAgentProviderTests
             session.SessionId, new PromptMessage { Text = "two" }, streamer.Object, CancellationToken.None);
 
         Assert.Single(thoughts, text => text == "Model: openrouter/moonshotai/kimi-k3");
-        Assert.Equal(2, thoughts.Count(text => text == "Analyzing request..."));
+        Assert.DoesNotContain("Analyzing request...", thoughts);
     }
 
     [Fact]
