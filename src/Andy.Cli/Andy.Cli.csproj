@@ -89,6 +89,8 @@
          System.Text.Json; trimming their members breaks ACP mode at the first
          initialize message. -->
     <TrimmerRootAssembly Include="Andy.Acp.Core" />
+    <!-- MCP protocol records use reflection-based JSON serialization/deserialization. -->
+    <TrimmerRootAssembly Include="Andy.MCP" />
     <TrimmerRootAssembly Include="Andy.Skills" />
     <TrimmerRootAssembly Include="Andy.Skills.Tools" />
     <TrimmerRootAssembly Include="Andy.Tools" />

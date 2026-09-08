@@ -183,7 +183,8 @@ metadata, deterministic cleanup, and `/mcp list|status`.
 ## Integration update - 2026-09-08
 
 The MCP dependency now uses the current protocol implementation with JsonSchema.Net 9
-compatibility. Successful tool calls return `structuredContent` as JSON when present;
+compatibility. Trimmed packages preserve MCP protocol serialization metadata, verified
+by an executable-level initialization/discovery smoke test. Successful tool calls return `structuredContent` as JSON when present;
 text-only tools retain their existing text output. The complete protocol result,
 including content blocks, `_meta`, and extension fields, is retained in
 `ToolResult.Metadata["mcp_result"]` on both success and tool-reported failure.

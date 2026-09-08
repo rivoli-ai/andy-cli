@@ -197,6 +197,14 @@ jobs:
           -p:PublishTrimmed=true
           -p:PublishSingleFile=true
 
+      - name: Smoke test packaged MCP discovery
+        env:
+          ANDY_MCP_SMOKE_BINARY: ${{ github.workspace }}/smoke-publish/${{ matrix.exe }}
+        run: >-
+          dotnet test tests/Andy.Cli.Tests/Andy.Cli.Tests.csproj
+          --configuration Release --no-build
+          --filter "FullyQualifiedName~McpExecutableTests"
+
       # Smoke: the packaged binary must launch and report a version string.
       # --help is intentionally not exercised here because it enters the
       # interactive TUI, which requires a real terminal.

@@ -486,5 +486,6 @@ Tool command headers now distinguish environment assignments, common command-fam
 ### 2026-09-08: MCP runtime compatibility and tool results
 
 Updated MCP integration preserves structured tool output and complete protocol results
-through the tool registry, with cancellation propagated to the remote server. See the
+through the tool registry, with cancellation propagated to the remote server.
+Packaged builds preserve MCP protocol metadata and verify real server discovery. See the
 [MCP integration update](docs/mcp-configuration.md#integration-update---2026-09-08).
