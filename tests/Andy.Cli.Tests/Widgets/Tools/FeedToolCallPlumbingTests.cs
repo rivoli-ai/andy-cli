@@ -157,4 +157,55 @@ public class FeedToolCallPlumbingTests
         Assert.Contains("Ran git status", rows[0]);
         Assert.Contains(rows, r => r.Contains("working tree clean"));
     }
+    [Theory]
+    [InlineData("execute_command", "command")]
+    [InlineData("bash_command", "cmd")]
+    [InlineData("run_command", "command_line")]
+    [InlineData("shell", "script")]
+    public void CommandColorsSurviveFeedStatesWrappingAndThemeChanges(string tool, string parameter)
+    {
+        var originalTheme = Andy.Cli.Themes.Theme.Current;
+        var originalExpanded = ToolOutputView.Expanded;
+        const string command = "MODE=unit dotnet test --configuration=Release --filter \"Category=Unit\" | cat";
+        try
+        {
+            var feed = new FeedView();
+            feed.AddToolExecutionStart("shell-colors", tool,
+                new Dictionary<string, object?> { [parameter] = command });
+            var item = SingleToolCall(feed);
+            foreach (var complete in new[] { false, true })
+            {
+                if (complete) feed.CompleteToolCall("shell-colors", new ToolCallCompletion
+                {
+                    IsSuccessful = true,
+                    Data = new Dictionary<string, object?> { ["stdout"] = "passed" }
+                });
+                foreach (var width in new[] { 24, 120 })
+                    foreach (var expanded in new[] { false, true })
+                        foreach (var theme in new[] { Andy.Cli.Themes.Theme.Dark, Andy.Cli.Themes.Theme.Light })
+                        {
+                            Andy.Cli.Themes.Theme.Current = theme;
+                            ToolOutputView.Expanded = expanded;
+                            var builder = new Andy.Tui.DisplayList.DisplayListBuilder();
+                            item.RenderSlice(0, 0, width, 0, 100, builder.Build(), builder);
+                            var runs = builder.Build().Ops.OfType<Andy.Tui.DisplayList.TextRun>().ToList();
+                            // A token may be split across rows. Compare its colored characters, not spans.
+                            var keywordText = string.Concat(runs.Where(r => r.Fg == theme.SyntaxKeyword).Select(r => r.Content));
+                            var typeText = string.Concat(runs.Where(r => r.Fg == theme.SyntaxType).Select(r => r.Content));
+                            var stringText = string.Concat(runs.Where(r => r.Fg == theme.SyntaxString).Select(r => r.Content));
+                            Assert.Contains("dotnet", typeText);
+                            Assert.Contains("test--configuration--filter|", keywordText);
+                            Assert.Contains("Release", stringText);
+                            Assert.Contains("Category=Unit", stringText);
+                            Assert.DoesNotContain(runs, r => r.Content.Contains('\u001b'));
+                            Assert.Equal(command, item.Snapshot.Parameters[parameter]);
+                        }
+            }
+        }
+        finally
+        {
+            Andy.Cli.Themes.Theme.Current = originalTheme;
+            ToolOutputView.Expanded = originalExpanded;
+        }
+    }
 }
