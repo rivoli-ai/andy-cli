@@ -67,6 +67,14 @@ public static class ToolCallSummarizer
                     var target = PathArg(p, "path", "file_path", "repository_path", "repo_path");
                     return string.IsNullOrEmpty(target) ? "Getting git diff" : $"Getting git diff for {target}";
                 }
+            case "git_worktree_list":
+                return "Listing git worktrees";
+            case "git_worktree_add":
+                return WithTarget("Adding worktree", PathArg(p, "path"), "");
+            case "git_worktree_remove":
+                return WithTarget("Removing worktree", PathArg(p, "path"), "");
+            case "git_worktree_prune":
+                return "Pruning stale git worktrees";
 
             // System
             case "execute_command":

@@ -70,6 +70,24 @@ public class ToolCallSummarizerTests
         => Assert.Equal("Getting git diff", ToolCallSummarizer.Summarize("git_diff", P()));
 
     [Fact]
+    public void GitWorktreeList_ShowsListing()
+        => Assert.Equal("Listing git worktrees", ToolCallSummarizer.Summarize("git_worktree_list", P()));
+
+    [Fact]
+    public void GitWorktreeAdd_ShowsPath()
+        => Assert.Equal("Adding worktree ../lanes/lane-1",
+            ToolCallSummarizer.Summarize("git_worktree_add", P(("path", "../lanes/lane-1"), ("branch", "feature/x"))));
+
+    [Fact]
+    public void GitWorktreeRemove_ShowsPath()
+        => Assert.Equal("Removing worktree ../lanes/lane-1",
+            ToolCallSummarizer.Summarize("git_worktree_remove", P(("path", "../lanes/lane-1"))));
+
+    [Fact]
+    public void GitWorktreePrune_ShowsPruning()
+        => Assert.Equal("Pruning stale git worktrees", ToolCallSummarizer.Summarize("git_worktree_prune", P()));
+
+    [Fact]
     public void ExecuteCommand_ShowsRunningPrefixWithCommand()
         => Assert.Equal("Running: dotnet build",
             ToolCallSummarizer.Summarize("execute_command", P(("command", "dotnet build"))));

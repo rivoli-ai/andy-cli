@@ -151,7 +151,7 @@ public static class ApprovalRiskAssessor
     }
 
     private static bool IsDestructiveFileTool(string toolId) =>
-        toolId is "delete_file" or "move_file";
+        toolId is "delete_file" or "move_file" or "git_worktree_remove";
 
     /// <summary>Detects `rm`/`del`/`Remove-Item` style deletes that escape the project root or target VCS.</summary>
     private static bool IsDangerousDelete(string command, string projectRoot)

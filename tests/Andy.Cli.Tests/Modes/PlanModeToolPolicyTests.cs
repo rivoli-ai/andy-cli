@@ -38,6 +38,9 @@ public class PlanModeToolPolicyTests
     [InlineData("bash")]
     [InlineData("dataframe_export")]
     [InlineData("todo_management")]
+    [InlineData("git_worktree_add")]
+    [InlineData("git_worktree_remove")]
+    [InlineData("git_worktree_prune")]
     public void EveryKnownMutatingTool_IsDenied(string toolId)
     {
         var verdict = Policy.Evaluate(toolId, P());
@@ -66,6 +69,7 @@ public class PlanModeToolPolicyTests
     [InlineData("search_files")]
     [InlineData("git_diff")]
     [InlineData("git_log")]
+    [InlineData("git_worktree_list")]
     [InlineData("code_index")]
     [InlineData("system_info")]
     [InlineData("json_processor")]
