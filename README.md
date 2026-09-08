@@ -482,3 +482,9 @@ Queued messages now reach the next model request after a complete tool-call roun
 ### 2026-09-08: Command display colors
 
 Tool command headers now distinguish environment assignments, common command-family subcommands, options and inline values. Colors remain consistent across wrapped lines and update when the theme changes. Shell text is preserved unchanged for copying and execution.
+
+### 2026-09-08: MCP runtime compatibility and tool results
+
+Updated MCP integration preserves structured tool output and complete protocol results
+through the tool registry, with cancellation propagated to the remote server. See the
+[MCP integration update](docs/mcp-configuration.md#integration-update---2026-09-08).
