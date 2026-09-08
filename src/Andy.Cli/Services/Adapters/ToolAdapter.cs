@@ -113,6 +113,20 @@ public class ToolAdapter : Andy.Model.Tooling.ITool
         };
     }
 
+    // Validate the tool-call shape, not shell grammar. Builtins, assignments,
+    // redirections and compound commands are legitimate shell input.
+    internal static string? GetInvalidCommandReason(IReadOnlyDictionary<string, object?> parameters)
+    {
+        if (!parameters.TryGetValue("command", out var value) || value is not string command)
+            return "execute_command requires a string command argument.";
+        var trimmed = command.Trim();
+        if (trimmed.Length == 0)
+            return "execute_command requires a non-empty command.";
+        if (trimmed.All(char.IsDigit))
+            return "execute_command received a bare number. Supply the complete shell command.";
+        return null;
+    }
+
     public async Task<Andy.Model.Model.ToolResult> ExecuteAsync(Andy.Model.Model.ToolCall call, CancellationToken ct = default)
     {
         try
@@ -127,6 +141,14 @@ public class ToolAdapter : Andy.Model.Tooling.ITool
             foreach (var kvp in rawParameters)
             {
                 parameters[kvp.Key] = JsonValueConverter.ConvertJsonElement(kvp.Value);
+            }
+
+            if (string.Equals(_toolId, "execute_command", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(call.Name, "execute_command", StringComparison.OrdinalIgnoreCase))
+            {
+                var reason = GetInvalidCommandReason(parameters);
+                if (reason != null)
+                    return Andy.Model.Model.ToolResult.FromObject(call.Id, call.Name, new { error = reason }, isError: true);
             }
 
             // Log what we're about to do

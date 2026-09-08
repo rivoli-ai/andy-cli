@@ -447,3 +447,8 @@ correction. Explicit commands support other workflows. See
 Provider failures now display in the error color with structured provider, HTTP
 status, and retry information when available. Messages are redacted and rendered
 as plain text. See [provider error diagnostics](docs/PROVIDER_ERRORS.md).
+
+### Command validation - 2026-09-08
+
+Malformed execute_command calls fail before execution. Shell builtins, assignments,
+redirections and compound commands remain supported (PR #93).
