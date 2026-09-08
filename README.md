@@ -478,3 +478,7 @@ Rich Markdown now wraps at word boundaries after parsing, preserving inline styl
 ### 2026-09-08: Queued input steers active tool loops
 
 Queued messages now reach the next model request after a complete tool-call round. Recalling a queued message removes it until resubmission, and canceled preparation preserves pending input. See [queue timing and editing](docs/QUEUED_MESSAGES.md).
+
+### 2026-09-08: Command display colors
+
+Tool command headers now distinguish environment assignments, common command-family subcommands, options and inline values. Colors remain consistent across wrapped lines and update when the theme changes. Shell text is preserved unchanged for copying and execution.
