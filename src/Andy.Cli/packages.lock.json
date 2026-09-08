@@ -95,29 +95,29 @@
       },
       "Andy.Tools": {
         "type": "Direct",
-        "requested": "[2026.9.8-alpha.111, )",
-        "resolved": "2026.9.8-alpha.111",
-        "contentHash": "SEQtoiRpFbFoTVC/wYVRmZOBBatwSYlH/PhsBgCHcYn9eQCCbWJUc01wyihIq/8md6CvcQSdd2+NfTM5wNyX4Q=="
+        "requested": "[2026.9.8-rc.98, )",
+        "resolved": "2026.9.8-rc.98",
+        "contentHash": "NqjuFuldjsXLJL4fOm7tl4OKwXhmXGgsFYfEYQ48w5/dc0QbM7Z11iFb1ahgc9DIFSCvXhBdnPjGt9YTP8wT8w=="
       },
       "Andy.Tools.Data": {
         "type": "Direct",
-        "requested": "[2026.7.21-rc.86, )",
-        "resolved": "2026.7.21-rc.86",
-        "contentHash": "lVv1iA6c+0fJXOx0e0uxwj6trXxwB4761O0EG/LzK3Dnri5rKNW5rTjm33pIDpQLyUeY77IXgLRzjfCcCbXWsg==",
+        "requested": "[2026.9.8-rc.98, )",
+        "resolved": "2026.9.8-rc.98",
+        "contentHash": "0FN2WZrPTvJNfuK2UBHcbsUm1fgKgf++YRAYC1wwXa6MzxD+8t+/sAM1ApiEd2hJ2DIbG8GHvppGZ+3n1mQ6iw==",
         "dependencies": {
           "Andy.Data": "2026.6.15-rc.2",
           "Andy.Data.Abstractions": "2026.6.15-rc.2",
-          "Andy.Tools": "2026.7.21-rc.86"
+          "Andy.Tools": "2026.9.8-rc.98"
         }
       },
       "Andy.Tools.Pdf": {
         "type": "Direct",
-        "requested": "[2026.7.21-rc.86, )",
-        "resolved": "2026.7.21-rc.86",
-        "contentHash": "QSPfjXRPWrZqYL/5pZS1w/uhuk5fQc8/4AIjJizEizS0J9G0T+d7FlOjz4m9a9w0T+HazTJV3J7j3dvUR9gppA==",
+        "requested": "[2026.9.8-rc.98, )",
+        "resolved": "2026.9.8-rc.98",
+        "contentHash": "JJE+hJHf6FSfMGrgZKTr+bNuBh1M3OELobUhJ2nBPVbJonpAJRiLx/rvz71kjqOLY/BK7n6UW1iP6l0TZLFh5A==",
         "dependencies": {
           "Andy.Doc.Pdf": "2026.7.21-rc.1",
-          "Andy.Tools": "2026.7.21-rc.86"
+          "Andy.Tools": "2026.9.8-rc.98"
         }
       },
       "Andy.Tui": {

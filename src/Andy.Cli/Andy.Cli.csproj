@@ -34,9 +34,9 @@
     <PackageReference Include="Andy.Model" Version="2026.7.21-rc.13" />
     <PackageReference Include="Andy.Permissions" Version="2026.7.27-rc.16" />
     <PackageReference Include="Andy.Skills.Tools" Version="2026.7.21-rc.17" />
-    <PackageReference Include="Andy.Tools" Version="2026.9.8-alpha.111" />
-    <PackageReference Include="Andy.Tools.Data" Version="2026.7.21-rc.86" />
-    <PackageReference Include="Andy.Tools.Pdf" Version="2026.7.21-rc.86" />
+    <PackageReference Include="Andy.Tools" Version="2026.9.8-rc.98" />
+    <PackageReference Include="Andy.Tools.Data" Version="2026.9.8-rc.98" />
+    <PackageReference Include="Andy.Tools.Pdf" Version="2026.9.8-rc.98" />
     <PackageReference Include="Andy.Tui" Version="2026.7.21-rc.162" />
     <PackageReference Include="JsonRepairSharp" Version="1.2.4" />
     <PackageReference Include="JsonSchema.Net" Version="9.3.0" />
