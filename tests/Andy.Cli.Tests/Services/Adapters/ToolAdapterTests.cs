@@ -222,6 +222,36 @@ public class ToolAdapterTests
         Assert.Equal(5, registeredToolNames.Count);
     }
 
+
+    [Fact]
+    public async Task ExecuteAsync_ConvertsNestedJsonBeforeCallingExecutor()
+    {
+        Dictionary<string, object?>? captured = null;
+        _mockToolRegistry.Setup(r => r.GetTool("test_array_tool")).Returns(Reg(new TestToolWithArray()));
+        _mockToolExecutor.Setup(e => e.ExecuteAsync(
+                "test_array_tool", It.IsAny<Dictionary<string, object?>>(), It.IsAny<ToolExecutionContext>()))
+            .Callback<string, Dictionary<string, object?>, ToolExecutionContext>((_, parameters, _) => captured = parameters)
+            .ReturnsAsync(new ToolExecutionResult { IsSuccessful = true, Message = "ok" });
+        var adapter = new ToolAdapter("test_array_tool", _mockToolRegistry.Object, _mockToolExecutor.Object);
+
+        await adapter.ExecuteAsync(new Andy.Model.Model.ToolCall
+        {
+            Id = "nested-json-regression",
+            Name = "test_array_tool",
+            ArgumentsJson = """{"file_patterns":[{"name":"rating","options":[1,2.5,true,null]}]}"""
+        });
+
+        Assert.NotNull(captured);
+        var entry = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(
+            Assert.Single(Assert.IsType<object[]>(captured["file_patterns"])));
+        Assert.Equal("rating", entry["name"]);
+        var options = Assert.IsType<object[]>(entry["options"]);
+        Assert.Equal(1, Assert.IsType<int>(options[0]));
+        Assert.Equal(2.5, Assert.IsType<double>(options[1]));
+        Assert.True(Assert.IsType<bool>(options[2]));
+        Assert.Null(options[3]);
+    }
+
     // Helper test tool class for provider-specific tests
     private class TestTool : ToolBase
     {

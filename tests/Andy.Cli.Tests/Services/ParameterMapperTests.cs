@@ -388,4 +388,73 @@ public class ParameterMapperTests
 
         _output.WriteLine("Boolean conversions successful");
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ArrayRescue_ConvertsNestedJsonToClrValues(bool normalizeOnly)
+    {
+        var input = new Dictionary<string, object?>
+        {
+            ["aggregations"] = """[{"column":"rating","function":"avg","alias":"avg_rating","options":{"values":[1,2.5,true,false,null,{"name":"nested"}]}}]"""
+        };
+        var metadata = new ToolMetadata
+        {
+            Id = "dataframe_group_by",
+            Parameters = new[] { new ToolParameter { Name = "aggregations", Type = "array" } }
+        };
+
+        var result = normalizeOnly
+            ? ParameterMapper.NormalizeParameterTypes(input, metadata)
+            : ParameterMapper.MapParameters(metadata.Id, input, metadata);
+
+        var aggregation = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(
+            Assert.Single(Assert.IsType<object[]>(result["aggregations"])));
+        Assert.Equal("rating", aggregation["column"]);
+        Assert.Equal("avg", aggregation["function"]);
+        Assert.Equal("avg_rating", aggregation["alias"]);
+        var options = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(aggregation["options"]);
+        var values = Assert.IsType<object[]>(options["values"]);
+        Assert.Equal(1, Assert.IsType<int>(values[0]));
+        Assert.Equal(2.5, Assert.IsType<double>(values[1]));
+        Assert.True(Assert.IsType<bool>(values[2]));
+        Assert.False(Assert.IsType<bool>(values[3]));
+        Assert.Null(values[4]);
+        Assert.Equal("nested", Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(values[5])["name"]);
+    }
+
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("""["rating","avg","123","true","{literal}"]""")]
+    public void ArrayRescue_PreservesEmptyArraysAndLiteralStrings(string json)
+    {
+        var result = ParameterMapper.NormalizeParameterTypes(
+            new Dictionary<string, object?> { ["items"] = json },
+            new ToolMetadata
+            {
+                Id = "test",
+                Parameters = new[] { new ToolParameter { Name = "items", Type = "array" } }
+            });
+
+        var expected = json == "[]" ? System.Array.Empty<string>() : new[] { "rating", "avg", "123", "true", "{literal}" };
+        var actual = Assert.IsType<object[]>(result["items"]);
+        Assert.Equal(expected.Length, actual.Length);
+        for (var i = 0; i < expected.Length; i++)
+            Assert.Equal(expected[i], Assert.IsType<string>(actual[i]));
+    }
+
+    [Fact]
+    public void ArrayRescue_PreservesMalformedJsonFallback()
+    {
+        const string malformed = "[{not valid json}]";
+        var result = ParameterMapper.NormalizeParameterTypes(
+            new Dictionary<string, object?> { ["items"] = malformed },
+            new ToolMetadata
+            {
+                Id = "test",
+                Parameters = new[] { new ToolParameter { Name = "items", Type = "array" } }
+            });
+
+        Assert.Equal(malformed, Assert.Single(Assert.IsType<object[]>(result["items"])));
+    }
 }

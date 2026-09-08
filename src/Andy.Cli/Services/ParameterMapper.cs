@@ -273,7 +273,8 @@ public static class ParameterMapper
                 {
                     try
                     {
-                        return System.Text.Json.JsonSerializer.Deserialize<object[]>(strValue);
+                        using var document = System.Text.Json.JsonDocument.Parse(strValue);
+                        return JsonValueConverter.ConvertJsonElement(document.RootElement);
                     }
                     catch
                     {

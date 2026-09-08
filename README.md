@@ -41,6 +41,14 @@ runtime, and an Agent Client Protocol (ACP) server for editor integrations.
 - **Reusable .NET Components** - Built on the Andy.Engine, Andy.Llm,
   Andy.Tools, Andy.Permissions, Andy.MCP, Andy.Acp.Core, and Andy.Tui packages
 
+## Development update - 2026-09-07
+
+- Fixed #296: JSON-encoded array tool arguments now recursively normalize nested
+  objects and scalar values, so structured dataframe arguments reach tools as CLR
+  dictionaries instead of raw JSON elements.
+- Added regression coverage for nested values, string arrays, empty arrays,
+  malformed-input fallback, and the tool adapter's executor boundary.
+
 ## Build and run
 
 ```bash

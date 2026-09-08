@@ -113,27 +113,6 @@ public class ToolAdapter : Andy.Model.Tooling.ITool
         };
     }
 
-    private object? ConvertJsonElement(object? value)
-    {
-        if (value is not JsonElement element)
-            return value;
-
-        return element.ValueKind switch
-        {
-            JsonValueKind.String => element.GetString(),
-            JsonValueKind.Number => element.TryGetInt32(out var intVal) ? (object)intVal : element.GetDouble(),
-            JsonValueKind.True => true,
-            JsonValueKind.False => false,
-            JsonValueKind.Null => null,
-            JsonValueKind.Array => element.EnumerateArray().Select(e => ConvertJsonElement(e)).ToArray(),
-            JsonValueKind.Object => element.EnumerateObject().ToDictionary(
-                prop => prop.Name,
-                prop => ConvertJsonElement(prop.Value)
-            ),
-            _ => element.ToString()
-        };
-    }
-
     public async Task<Andy.Model.Model.ToolResult> ExecuteAsync(Andy.Model.Model.ToolCall call, CancellationToken ct = default)
     {
         try
@@ -147,7 +126,7 @@ public class ToolAdapter : Andy.Model.Tooling.ITool
             var parameters = new Dictionary<string, object?>();
             foreach (var kvp in rawParameters)
             {
-                parameters[kvp.Key] = ConvertJsonElement(kvp.Value);
+                parameters[kvp.Key] = JsonValueConverter.ConvertJsonElement(kvp.Value);
             }
 
             // Log what we're about to do
