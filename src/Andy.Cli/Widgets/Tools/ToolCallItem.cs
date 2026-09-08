@@ -50,6 +50,7 @@ namespace Andy.Cli.Widgets.Tools
         private ToolPresentation? _presentation;
         private int _planWidth = -1;
         private bool _planExpanded;
+        private Themes.Theme? _planTheme;
         private ToolCallSnapshot? _planSnapshot;
 
         /// <summary>Create an item for a call that may still be running.</summary>
@@ -153,7 +154,7 @@ namespace Andy.Cli.Widgets.Tools
             int bodyWidth = width - GlyphWidth;
             if (bodyWidth <= 0) return;
 
-            headerRow.Render(b, bodyX, y, bodyWidth, theme.ToolName);
+            headerRow.Render(b, bodyX, y, bodyWidth, theme.Text);
 
             // A running call's elapsed clock is drawn HERE rather than baked into the cached row
             // plan. The plan is only rebuilt when the width, the mode or the snapshot changes -
@@ -202,15 +203,16 @@ namespace Andy.Cli.Widgets.Tools
         private void EnsurePlan(int width)
         {
             bool expanded = ToolOutputView.Expanded;
+            var theme = Themes.Theme.Current;
             if (width == _planWidth && expanded == _planExpanded
-                && ReferenceEquals(_planSnapshot, _snapshot) && _plan.Count > 0)
+                && ReferenceEquals(_planSnapshot, _snapshot) && ReferenceEquals(_planTheme, theme) && _plan.Count > 0)
                 return;
 
             _planWidth = width;
             _planExpanded = expanded;
+            _planTheme = theme;
             _planSnapshot = _snapshot;
 
-            var theme = Themes.Theme.Current;
             var context = new ToolPresentationContext(width, expanded, theme);
             _presentation = _presenter.Present(_snapshot, context);
 

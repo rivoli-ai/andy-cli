@@ -1497,29 +1497,34 @@ namespace Andy.Cli.Widgets
             // during rendering, so we don't need to do it here
         }
 
-        // Cache the measured display-row count per width. The feed lays out in display rows and
-        // calls RenderSlice with display-row indices, so measurement MUST equal what the renderer
-        // actually draws. The previous hand-rolled simulation (paragraph-spacing guess + width*0.8
-        // wrap estimate) diverged from the real renderer and over-counted, leaving the surplus rows
-        // blank at the bottom of every response. We now measure by rendering with the SAME renderer.
+        // Measurement and slicing share the parsed, styled row plan. Theme changes rebuild it.
         private int _cachedWidth = -1;
-        private int _cachedLineCount = -1;
+        private (DL.Rgb24? Background, DL.Rgb24 Text, DL.Rgb24 Accent, DL.Rgb24 Heading)? _cachedColors;
+        private List<List<DL.TextRun>> _rows = new();
 
-        public int MeasureLineCount(int width)
+        private List<List<DL.TextRun>> Rows(int width)
         {
-            if (width <= 0) return 1;
-            if (width == _cachedWidth && _cachedLineCount >= 0) return _cachedLineCount;
-
-            int count = MeasureByRendering(width);
+            var theme = Themes.Theme.Current;
+            var colors = (theme.Background, theme.Text, theme.Accent, theme.Heading);
+            if (_cachedWidth == width && _cachedColors == colors) return _rows;
+            var probe = new DL.DisplayListBuilder();
+            // Parse without soft wrapping first: Markdown markers can span a word boundary.
+            // The display list stores glyph operations, not a grid of this rectangle's size.
+            int bound = (int)Math.Min(int.MaxValue, Math.Max(64L, (long)_md.Length * 2 + 32));
+            var probeBase = new DL.DisplayListBuilder().Build();
+            int unwrappedWidth = (int)Math.Min(int.MaxValue, (long)_md.Length + 1);
+            if (!TryRenderSimpleHtmlLink(_md, 0, 0, unwrappedWidth, 1, probeBase, probe))
+                BuildRenderer().Render(new L.Rect(0, 0, unwrappedWidth, bound), probeBase, probe);
+            _rows = MarkdownRowLayout.Wrap(probe.Build().Ops.OfType<DL.TextRun>(), width);
             _cachedWidth = width;
-            _cachedLineCount = count;
-            return count;
+            _cachedColors = colors;
+            return _rows;
         }
 
+        public int MeasureLineCount(int width) => width <= 0 ? 1 : Rows(width).Count;
+
         /// <summary>
-        /// Build the markdown renderer exactly as RenderSlice does, so measurement and rendering
-        /// wrap and space identically. Colors do not affect wrapping, so the result depends only on
-        /// the text and width.
+        /// Parse Markdown into styled glyphs before the shared row layout wraps them.
         /// </summary>
         private Andy.Tui.Widgets.MarkdownRenderer BuildRenderer()
         {
@@ -1537,51 +1542,21 @@ namespace Andy.Cli.Widgets
             return r;
         }
 
-        /// <summary>
-        /// The number of display rows the real renderer produces for this width = the row of the
-        /// last drawn glyph + 1. Rendered into a throwaway display list with a generous height bound.
-        /// </summary>
-        private int MeasureByRendering(int width)
-        {
-            // Upper bound on rendered height: raw lines + a wrap allowance, doubled, with margin.
-            // Must exceed the true height (under-counting would clip content) without being wasteful.
-            int newlines = 0;
-            foreach (var c in _md) if (c == '\n') newlines++;
-            int bound = Math.Clamp((newlines + _md.Length / Math.Max(1, width) + 1) * 2 + 32, 64, 8192);
-
-            var probe = new DL.DisplayListBuilder();
-            var probeBase = new DL.DisplayListBuilder().Build();
-            BuildRenderer().Render(new L.Rect(0, 0, width, bound), probeBase, probe);
-
-            int maxRow = -1;
-            foreach (var op in probe.Build().Ops)
-            {
-                if (op is DL.TextRun tr && !string.IsNullOrEmpty(tr.Content) && tr.Y > maxRow)
-                    maxRow = tr.Y;
-            }
-            return maxRow < 0 ? 1 : maxRow + 1;
-        }
-
         public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
-            // Guard against invalid dimensions
-            if (width <= 0 || maxLines <= 0) return;
-            if (startLine < 0) return;
-            if (startLine >= MeasureLineCount(width)) return;
-
-            // Detect a whole-content simple HTML link <a href="...">text</a> and render it as a link.
-            if (startLine == 0 && TryRenderSimpleHtmlLink(_md, x, y, width, maxLines, baseDl, b)) return;
-
-            // Render the FULL markdown, shifted up by startLine display rows, clipped to the
-            // [y, y+maxLines) window. Because measurement uses this exact renderer, the rows the feed
-            // reserved line up with the rows drawn — no slicing by raw line index, no blank surplus.
-            int total = MeasureLineCount(width);
+            if (width <= 0 || maxLines <= 0 || startLine < 0) return;
+            var rows = Rows(width);
+            if (startLine >= rows.Count) return;
             b.PushClip(new DL.ClipPush(x, y, width, maxLines));
-            // Render into a throwaway builder, then replay its ops with the Underline attribute
-            // (used by the bundled renderer for emphasized text) converted to Bold + link color.
-            var linkColor = Themes.Theme.Current.Accent;
-            MarkdownLinkStyle.RenderWithoutUnderline(b, linkColor, temp =>
-                BuildRenderer().Render(new L.Rect(x, y - startLine, width, total), baseDl, temp));
+            var theme = Themes.Theme.Current;
+            b.DrawRect(new DL.Rect(x, y, width, Math.Min(maxLines, rows.Count - startLine), theme.Background));
+            MarkdownLinkStyle.RenderWithoutUnderline(b, theme.Accent, temp =>
+            {
+                for (int row = startLine; row < rows.Count && row - startLine < maxLines; row++)
+                    foreach (var glyph in rows[row])
+                        temp.DrawText(new DL.TextRun(x + glyph.X, y + row - startLine,
+                            glyph.Content, glyph.Fg, theme.Background, glyph.Attrs));
+            });
             b.Pop();
         }
 

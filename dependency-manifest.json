@@ -11,7 +11,7 @@
   },
   "targetFramework": "net10.0",
   "engine": {
-    "Andy.Engine": "2026.9.8-rc.102"
+    "Andy.Engine": "2026.9.8-rc.104"
   },
   "tui": {
     "Andy.Tui": "2026.7.21-rc.162"
@@ -25,7 +25,7 @@
   "otherAndyPackages": {
     "Andy.Acp.Core": "2026.7.21",
     "Andy.Llm": "2026.9.8-rc.85",
-    "Andy.MCP": "2026.5.16-rc.31",
+    "Andy.MCP": "2026.9.8-rc.167",
     "Andy.Model": "2026.7.21-rc.13",
     "Andy.Tools": "2026.7.21-rc.86",
     "Andy.Tools.Data": "2026.7.21-rc.86",

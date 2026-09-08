@@ -16,6 +16,7 @@
   ],
   "additionalProperties": false,
   "properties": {
+    "mcp_gateway": { "type": "string", "minLength": 1 },
     "verification": {
       "type": "object",
       "additionalProperties": false,
@@ -110,7 +111,7 @@
           {
             "type": "object",
             "title": "MCP tool binding",
-            "required": ["name", "transport", "endpoint"],
+            "required": ["name", "transport"],
             "additionalProperties": false,
             "properties": {
               "name": {
@@ -137,6 +138,7 @@
                 "pattern": "^[a-z][a-z0-9_.-]*$"
               },
               "transport": { "const": "cli" },
+              "input_mode": { "type": "string", "enum": ["argv", "json"], "default": "argv" },
               "binary": {
                 "type": "string",
                 "description": "Executable name resolved via $PATH (e.g. 'andy-tasks-cli')."

@@ -199,7 +199,7 @@ public class HeadlessConfigSchemaTests
     }
 
     [Fact]
-    public void McpToolBinding_MissingEndpoint_Rejected()
+    public void McpToolBinding_EndpointMayBeResolvedByRuntimeGateway()
     {
         var schema = LoadSchema();
         var config = MinimalValidConfig();
@@ -212,7 +212,7 @@ public class HeadlessConfigSchemaTests
             });
 
         var result = schema.Evaluate(ToElement(config));
-        Assert.False(result.IsValid, "MCP binding requires endpoint");
+        Assert.True(result.IsValid, "Gateway fallback is checked by semantic validation");
     }
 
     [Fact]

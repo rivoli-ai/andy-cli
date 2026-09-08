@@ -2,6 +2,8 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Threading.Channels;
 using Andy.Cli.Commands;
+using Andy.Cli.Headless.Tools;
+using Andy.MCP.Client;
 using Andy.Cli.Mcp;
 using Andy.MCP.Protocol;
 using Andy.MCP.Transport;
@@ -64,8 +66,10 @@ public sealed class InteractiveMcpToolHostTests
         Assert.Contains("[disabled] disabled-local (stdio)", result.Message, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task ConnectedServer_RegistersDiscoveredToolsWithSourceMetadata()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConnectedServer_RegistersDiscoveredToolsWithSourceMetadata(bool structured)
     {
         var configuration = new McpConfigurationLoadResult(
             new[]
@@ -96,7 +100,7 @@ public sealed class InteractiveMcpToolHostTests
                     registered.Add(metadata);
                     toolFactory = factory;
                 });
-        var transport = new FakeMcpTransport();
+        var transport = new FakeMcpTransport { Structured = structured };
 
         await using var host = await InteractiveMcpToolHost.BuildWithTransportFactoryAsync(
             configuration,
@@ -125,6 +129,40 @@ public sealed class InteractiveMcpToolHostTests
         Assert.Equal(
             "notes/today.md",
             transport.LastToolCall?.Arguments?.GetProperty("path").GetString());
+        if (structured)
+        {
+            Assert.Equal("note contents", Assert.IsType<JsonElement>(execution.Data).GetProperty("note").GetString());
+        }
+        else
+        {
+            Assert.Equal("note contents", execution.Data);
+        }
+
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        transport.LastToolCall = null;
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => tool.ExecuteAsync(
+            new Dictionary<string, object?> { ["path"] = "notes/today.md" },
+            new ToolExecutionContext { CancellationToken = cancellation.Token }));
+        Assert.Null(transport.LastToolCall);
+    }
+
+    [Fact]
+    public async Task RunningCall_CancellationPropagatesToMcpPeer()
+    {
+        var transport = new FakeMcpTransport { DeferToolResult = true };
+        await using var client = await McpClient.ConnectAsync(transport);
+        var remote = Assert.Single(await client.ListToolsAsync());
+        var tool = new McpRemoteTool("mcp_test_read_note", "test", client, remote);
+        using var cancellation = new CancellationTokenSource();
+        var execution = tool.ExecuteAsync(new() { ["path"] = "note.md" },
+            new ToolExecutionContext { CancellationToken = cancellation.Token });
+        await transport.ToolCalled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => execution.WaitAsync(TimeSpan.FromSeconds(5)));
+        await transport.CallCancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     private sealed class FakeMcpTransport : IClientTransport
@@ -138,7 +176,13 @@ public sealed class InteractiveMcpToolHostTests
 
         public IAsyncEnumerable<JsonRpcMessage> Messages => ReadMessagesAsync();
 
-        public CallToolRequest? LastToolCall { get; private set; }
+        public CallToolRequest? LastToolCall { get; set; }
+
+        public bool Structured { get; init; }
+
+        public bool DeferToolResult { get; init; }
+        public TaskCompletionSource ToolCalled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource CallCancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public Task ConnectAsync(CancellationToken cancellationToken = default)
         {
@@ -150,8 +194,18 @@ public sealed class InteractiveMcpToolHostTests
             JsonRpcMessage message,
             CancellationToken cancellationToken = default)
         {
+            if (message is JsonRpcNotification { Method: "notifications/cancelled" })
+            {
+                CallCancelled.TrySetResult();
+            }
             if (message is not JsonRpcRequest request)
             {
+                return Task.CompletedTask;
+            }
+
+            if (request.Method == "tools/call" && DeferToolResult)
+            {
+                ToolCalled.TrySetResult();
                 return Task.CompletedTask;
             }
 
@@ -207,6 +261,7 @@ public sealed class InteractiveMcpToolHostTests
             LastToolCall = request.GetParams<CallToolRequest>();
             return JsonSerializer.SerializeToElement(new
             {
+                structuredContent = Structured ? new { note = "note contents" } : null,
                 content = new[]
                 {
                     new
@@ -216,7 +271,7 @@ public sealed class InteractiveMcpToolHostTests
                     },
                 },
                 isError = false,
-            });
+            }, McpJsonDefaults.Options);
         }
 
         private async IAsyncEnumerable<JsonRpcMessage> ReadMessagesAsync(

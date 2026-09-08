@@ -25,6 +25,12 @@ namespace Andy.Cli.Widgets.Tools
             "sudo", "env", "time", "nohup", "xargs", "command", "exec", "nice", "doas"
         };
 
+        // Only known command families treat their first positional word as a subcommand.
+        private static readonly HashSet<string> CommandFamilies = new(StringComparer.Ordinal)
+        {
+            "dotnet", "git", "gh", "docker", "kubectl", "npm", "pnpm", "yarn", "cargo", "coord"
+        };
+
         // Operators that end one command and begin another, so the next word is an executable.
         private static readonly HashSet<string> Separators = new(StringComparer.Ordinal)
         {
@@ -40,6 +46,9 @@ namespace Andy.Cli.Widgets.Tools
             var spans = new List<StyledSpan>();
             int i = 0, n = command.Length;
             bool expectCommand = true;
+            bool expectSubcommand = false;
+            bool redirectTarget = false;
+            bool optionsEnded = false;
 
             while (i < n)
             {
@@ -49,7 +58,14 @@ namespace Andy.Cli.Widgets.Tools
                 {
                     int j = i;
                     while (j < n && char.IsWhiteSpace(command[j])) j++;
-                    spans.Add(StyledSpan.Plain(command.Substring(i, j - i)));
+                    var whitespace = command.Substring(i, j - i);
+                    if (whitespace.Contains('\n'))
+                    {
+                        expectCommand = true;
+                        expectSubcommand = false;
+                        optionsEnded = false;
+                    }
+                    spans.Add(StyledSpan.Plain(whitespace));
                     i = j;
                     continue;
                 }
@@ -58,8 +74,11 @@ namespace Andy.Cli.Widgets.Tools
                 // a URL fragment are not comments.
                 if (c == '#' && (spans.Count == 0 || EndsWithWhitespace(spans)))
                 {
-                    spans.Add(new StyledSpan(command.Substring(i), theme.SyntaxComment, DL.CellAttrFlags.None));
-                    break;
+                    int end = command.IndexOf('\n', i);
+                    if (end < 0) end = n;
+                    spans.Add(new StyledSpan(command.Substring(i, end - i), theme.SyntaxComment, DL.CellAttrFlags.None));
+                    i = end;
+                    continue;
                 }
 
                 if (c == '\'' || c == '"')
@@ -67,7 +86,8 @@ namespace Andy.Cli.Widgets.Tools
                     int j = ReadQuoted(command, i);
                     spans.Add(new StyledSpan(command.Substring(i, j - i), theme.SyntaxString, DL.CellAttrFlags.None));
                     i = j;
-                    expectCommand = false;
+                    if (redirectTarget) redirectTarget = false;
+                    else { expectCommand = false; expectSubcommand = false; }
                     continue;
                 }
 
@@ -76,7 +96,8 @@ namespace Andy.Cli.Widgets.Tools
                     int j = ReadVariable(command, i);
                     spans.Add(new StyledSpan(command.Substring(i, j - i), theme.SyntaxType, DL.CellAttrFlags.None));
                     i = j;
-                    expectCommand = false;
+                    if (redirectTarget) redirectTarget = false;
+                    else { expectCommand = false; expectSubcommand = false; }
                     continue;
                 }
 
@@ -88,7 +109,13 @@ namespace Andy.Cli.Widgets.Tools
                     spans.Add(new StyledSpan(op, theme.SyntaxKeyword, DL.CellAttrFlags.None));
                     i = j;
                     // After a pipe or a list separator the next word runs a new program.
-                    expectCommand = Separators.Contains(op) || op.StartsWith("|", StringComparison.Ordinal);
+                    if (op.Contains('>') || op.Contains('<')) redirectTarget = true;
+                    else
+                    {
+                        expectCommand = Separators.Contains(op) || op.Contains('(');
+                        expectSubcommand = false;
+                        optionsEnded = false;
+                    }
                     continue;
                 }
 
@@ -96,19 +123,65 @@ namespace Andy.Cli.Widgets.Tools
                 {
                     int j = i;
                     while (j < n && !char.IsWhiteSpace(command[j]) && !IsOperatorChar(command[j])
-                           && command[j] != '\'' && command[j] != '"' && command[j] != '$') j++;
+                           && command[j] != '\'' && command[j] != '"' && command[j] != '$')
+                    {
+                        if (command[j] == '\\' && j + 1 < n) j += 2;
+                        else j++;
+                    }
                     var word = command.Substring(i, j - i);
                     i = j;
 
-                    if (word.StartsWith("-", StringComparison.Ordinal) && word.Length > 1)
+                    int equals = word.IndexOf('=');
+                    bool assignment = expectCommand && equals > 0
+                        && (char.IsLetter(word[0]) || word[0] == '_');
+                    if (assignment)
                     {
-                        spans.Add(new StyledSpan(word, theme.SyntaxKeyword, DL.CellAttrFlags.None));
+                        for (int k = 1; k < equals; k++)
+                            assignment &= char.IsLetterOrDigit(word[k]) || word[k] == '_';
+                    }
+
+                    if (redirectTarget)
+                    {
+                        spans.Add(StyledSpan.Plain(word));
+                        redirectTarget = false;
+                    }
+                    else if (assignment)
+                    {
+                        spans.Add(new StyledSpan(word[..equals], theme.SyntaxType, DL.CellAttrFlags.None));
+                        spans.Add(new StyledSpan("=", theme.SyntaxKeyword, DL.CellAttrFlags.None));
+                        spans.Add(new StyledSpan(word[(equals + 1)..], theme.SyntaxString, DL.CellAttrFlags.None));
+                        // Consume quoted/variable suffixes as part of the assignment, retaining
+                        // command position for the executable after the next whitespace.
+                        while (i < n && (command[i] == '\'' || command[i] == '"' || command[i] == '$'))
+                        {
+                            bool variable = command[i] == '$';
+                            int end = variable ? ReadVariable(command, i) : ReadQuoted(command, i);
+                            spans.Add(new StyledSpan(command[i..end], variable ? theme.SyntaxType : theme.SyntaxString, DL.CellAttrFlags.None));
+                            i = end;
+                        }
+                    }
+                    else if (!optionsEnded && word.StartsWith("-", StringComparison.Ordinal) && word.Length > 1)
+                    {
+                        if (equals > 0)
+                        {
+                            spans.Add(new StyledSpan(word[..equals], theme.SyntaxKeyword, DL.CellAttrFlags.None));
+                            spans.Add(StyledSpan.Plain("="));
+                            spans.Add(new StyledSpan(word[(equals + 1)..], theme.SyntaxString, DL.CellAttrFlags.None));
+                        }
+                        else spans.Add(new StyledSpan(word, theme.SyntaxKeyword, DL.CellAttrFlags.None));
+                        if (word == "--") optionsEnded = true;
                     }
                     else if (expectCommand)
                     {
                         spans.Add(new StyledSpan(word, theme.SyntaxType, DL.CellAttrFlags.Bold));
                         // "sudo dotnet build": the word after a prefix is still a command.
                         expectCommand = CommandPrefixes.Contains(word);
+                        expectSubcommand = CommandFamilies.Contains(word);
+                    }
+                    else if (expectSubcommand)
+                    {
+                        spans.Add(new StyledSpan(word, theme.SyntaxKeyword, DL.CellAttrFlags.Bold));
+                        expectSubcommand = false;
                     }
                     else if (LooksNumeric(word))
                     {

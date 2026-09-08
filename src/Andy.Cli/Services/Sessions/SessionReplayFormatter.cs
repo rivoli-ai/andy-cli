@@ -100,6 +100,11 @@ public static class SessionReplayFormatter
         foreach (var message in turn.Interleaved ?? Array.Empty<TranscriptMessage>())
         {
             toolCallCount += message.ToolCalls?.Count ?? 0;
+            // Host follow-ups carry structured parts; Engine-generated wrap-up/recovery
+            // nudges do not. Replay only actual input as a user bubble.
+            if (string.Equals(message.Role, "user", StringComparison.OrdinalIgnoreCase)
+                && message.Parts is { Count: > 0 } && !string.IsNullOrWhiteSpace(message.Content))
+                entries.Add(new Entry(EntryKind.User, message.Content));
             if (string.Equals(message.Role, "assistant", StringComparison.OrdinalIgnoreCase)
                 && !string.IsNullOrWhiteSpace(message.Content))
             {

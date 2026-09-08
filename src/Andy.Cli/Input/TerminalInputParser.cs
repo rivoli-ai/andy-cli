@@ -14,7 +14,9 @@ public enum TerminalInputKind
     /// <summary>A left mouse button press (no modifiers decoded). Used to detect the
     /// start of a click/drag so mouse capture can be released for native text
     /// selection while the user is scrolled up reading history.</summary>
-    MouseDown
+    MouseDown,
+    /// <summary>A complete bracketed paste, never interpreted as key presses.</summary>
+    Paste
 }
 
 /// <summary>
@@ -28,16 +30,21 @@ public readonly struct TerminalInputEvent
     public ConsoleKeyInfo Key { get; }
     /// <summary>Wheel notches: positive scrolls up (toward older content), negative scrolls down.</summary>
     public int WheelDelta { get; }
+    public string? PasteText { get; }
+    public bool PasteTruncated { get; }
 
-    private TerminalInputEvent(TerminalInputKind kind, ConsoleKeyInfo key, int wheelDelta)
+    private TerminalInputEvent(TerminalInputKind kind, ConsoleKeyInfo key, int wheelDelta, string? paste = null, bool truncated = false)
     {
         Kind = kind;
+        PasteText = paste;
+        PasteTruncated = truncated;
         Key = key;
         WheelDelta = wheelDelta;
     }
 
     public static TerminalInputEvent FromKey(ConsoleKeyInfo key) => new(TerminalInputKind.Key, key, 0);
     public static TerminalInputEvent FromWheel(int delta) => new(TerminalInputKind.Wheel, default, delta);
+    public static TerminalInputEvent FromPaste(string text, bool truncated = false) => new(TerminalInputKind.Paste, default, 0, text, truncated);
     public static TerminalInputEvent FromMouseDown() => new(TerminalInputKind.MouseDown, default, 0);
 }
 
@@ -59,6 +66,10 @@ public readonly struct TerminalInputEvent
 public sealed class TerminalInputParser
 {
     private readonly List<byte> _buf = new();
+    private readonly List<byte> _paste = new();
+    private bool _inPaste;
+    private bool _pasteTruncated;
+    public const int MaxPasteBytes = 1024 * 1024;
 
     /// <summary>Feed raw bytes and return any complete events decoded so far.</summary>
     public IReadOnlyList<TerminalInputEvent> Feed(byte[] data, int length)
@@ -80,7 +91,7 @@ public sealed class TerminalInputParser
     public IReadOnlyList<TerminalInputEvent> Flush()
     {
         var outEvents = new List<TerminalInputEvent>();
-        if (_buf.Count == 1 && _buf[0] == 0x1B)
+        if (!_inPaste && _buf.Count == 1 && _buf[0] == 0x1B)
         {
             _buf.Clear();
             outEvents.Add(Esc());
@@ -106,6 +117,7 @@ public sealed class TerminalInputParser
     /// </summary>
     private int TryConsume(List<TerminalInputEvent> outEvents)
     {
+        if (_inPaste) return TryConsumePaste(outEvents);
         byte b = _buf[0];
 
         if (b == 0x1B) return TryConsumeEscape(outEvents);
@@ -147,6 +159,11 @@ public sealed class TerminalInputParser
     {
         if (_buf.Count < 2) return 0; // could be lone ESC or start of a sequence
 
+        if (_buf.Count >= 6 && _buf.Take(6).SequenceEqual(new byte[] { 27, 91, 50, 48, 48, 126 }))
+        {
+            _inPaste = true;
+            return 6;
+        }
         byte second = _buf[1];
         if (second == (byte)'[') return TryConsumeCsi(outEvents);
         if (second == (byte)'O') return TryConsumeSs3(outEvents);
@@ -156,6 +173,33 @@ public sealed class TerminalInputParser
         // used by the CLI.)
         outEvents.Add(Esc());
         return 1;
+    }
+
+    private void AppendPaste(int count)
+    {
+        var take = Math.Min(count, MaxPasteBytes - _paste.Count);
+        _paste.AddRange(_buf.Take(take));
+        _pasteTruncated |= take != count;
+    }
+
+    private int TryConsumePaste(List<TerminalInputEvent> events)
+    {
+        byte[] end = { 27, 91, 50, 48, 49, 126 };
+        for (int i = 0; i + end.Length <= _buf.Count; i++)
+        {
+            bool matches = true;
+            for (int j = 0; j < end.Length; j++)
+                if (_buf[i + j] != end[j]) { matches = false; break; }
+            if (!matches) continue;
+            AppendPaste(i);
+            events.Add(TerminalInputEvent.FromPaste(Encoding.UTF8.GetString(_paste.ToArray()), _pasteTruncated));
+            _paste.Clear();
+            _inPaste = _pasteTruncated = false;
+            return i + end.Length;
+        }
+        var consumed = Math.Max(0, _buf.Count - (end.Length - 1));
+        AppendPaste(consumed);
+        return consumed;
     }
 
     // CSI: ESC '[' ... final-byte(0x40-0x7E)

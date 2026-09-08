@@ -38,7 +38,8 @@ public sealed class HeadlessToolHost : IAsyncDisposable
         IReadOnlyList<HeadlessTool> tools,
         IToolRegistry registry,
         ILoggerFactory? loggerFactory = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        HeadlessRunConfig? config = null)
     {
         var host = new HeadlessToolHost(registry, loggerFactory);
         var logger = loggerFactory?.CreateLogger<HeadlessToolHost>();
@@ -61,7 +62,8 @@ public sealed class HeadlessToolHost : IAsyncDisposable
                     }
                 case "mcp":
                     {
-                        if (string.IsNullOrEmpty(tool.Endpoint))
+                        var endpoint = ResolveEndpoint(tool, config);
+                        if (string.IsNullOrEmpty(endpoint))
                         {
                             // Schema enforces endpoint on mcp transport; defensive guard
                             // surfaces a clearer message than a NRE deeper in.
@@ -69,13 +71,13 @@ public sealed class HeadlessToolHost : IAsyncDisposable
                                 $"MCP tool '{tool.Name}' has no endpoint; schema validation should have rejected this.");
                         }
 
-                        if (!mcpSessionsByEndpoint.TryGetValue(tool.Endpoint, out var session))
+                        if (!mcpSessionsByEndpoint.TryGetValue(endpoint, out var session))
                         {
-                            var client = await ConnectMcpAsync(tool.Endpoint, loggerFactory, ct);
+                            var client = await ConnectMcpAsync(endpoint, loggerFactory, ct);
                             host._mcpClients.Add(client);
                             var remoteTools = await client.ListToolsAsync(ct);
                             session = (client, remoteTools);
-                            mcpSessionsByEndpoint[tool.Endpoint] = session;
+                            mcpSessionsByEndpoint[endpoint] = session;
                         }
 
                         var remote = session.RemoteTools.FirstOrDefault(t =>
@@ -87,7 +89,7 @@ public sealed class HeadlessToolHost : IAsyncDisposable
                             // here so the operator sees the mismatch instead of the LLM
                             // silently never calling the tool.
                             throw new InvalidOperationException(
-                                $"MCP endpoint {tool.Endpoint} does not advertise a tool named '{tool.Name}'. "
+                                $"MCP endpoint {endpoint} does not advertise a tool named '{tool.Name}'. "
                                     + $"Available: [{string.Join(", ", session.RemoteTools.Select(t => t.Name))}]");
                         }
 
@@ -108,6 +110,24 @@ public sealed class HeadlessToolHost : IAsyncDisposable
             tools.Count, mcpSessionsByEndpoint.Count);
 
         return host;
+    }
+
+    internal static string? ResolveMcpGateway(HeadlessRunConfig? config)
+    {
+        var gateway = config?.McpGateway;
+        if (gateway == "$ANDY_MCP_URL") gateway = Environment.GetEnvironmentVariable("ANDY_MCP_URL");
+        return gateway;
+    }
+
+    internal static string ResolveEndpoint(HeadlessTool tool, HeadlessRunConfig? config)
+    {
+        var gateway = ResolveMcpGateway(config);
+        var endpoint = !string.IsNullOrWhiteSpace(tool.Endpoint) ? tool.Endpoint
+            : !string.IsNullOrWhiteSpace(gateway) ? gateway.TrimEnd('/') + "/" + Uri.EscapeDataString(tool.Name) : null;
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri) ||
+            (uri.Scheme != "http" && uri.Scheme != "https") || !string.IsNullOrEmpty(uri.UserInfo))
+            throw new InvalidOperationException("MCP requires an HTTP(S) endpoint or a resolved mcp_gateway without user information.");
+        return uri.AbsoluteUri;
     }
 
     private static async Task<McpClient> ConnectMcpAsync(

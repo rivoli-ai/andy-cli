@@ -84,7 +84,7 @@ public class ShellHighlighterTests
 
         Assert.Equal(Theme.Current.SyntaxType, spans.First(s => s.Text == "sudo").Foreground);
         Assert.Equal(Theme.Current.SyntaxType, spans.First(s => s.Text == "dotnet").Foreground);
-        Assert.Null(spans.First(s => s.Text == "build").Foreground);
+        Assert.Equal(Theme.Current.SyntaxKeyword, spans.First(s => s.Text == "build").Foreground);
     }
 
     [Fact]
@@ -103,6 +103,30 @@ public class ShellHighlighterTests
         var line = ShellHighlighter.Highlight("curl https://example.com/page#section");
 
         Assert.DoesNotContain(line.Spans, s => s.Foreground == Theme.Current.SyntaxComment);
+    }
+
+    [Theory]
+    [InlineData("FOO=1 dotnet test", "dotnet")]
+    [InlineData("env FOO=\"hello world\" dotnet test", "dotnet")]
+    [InlineData("echo hi # comment\ngit status", "git")]
+    [InlineData("> result.txt dotnet test", "dotnet")]
+    [InlineData("echo hello\\ world | git status", "git")]
+    public void ExecutablePositionSurvivesShellSyntax(string command, string executable)
+    {
+        var line = ShellHighlighter.Highlight(command);
+        Assert.Equal(command, line.Text);
+        Assert.Equal(Theme.Current.SyntaxType, line.Spans.First(s => s.Text == executable).Foreground);
+    }
+
+    [Fact]
+    public void OptionEqualsValueHasSeparateStyles()
+    {
+        var line = ShellHighlighter.Highlight("dotnet test --configuration=Release -- --literal");
+        Assert.Equal(Theme.Current.SyntaxKeyword, line.Spans.First(s => s.Text == "test").Foreground);
+        Assert.Equal(Theme.Current.SyntaxKeyword, line.Spans.First(s => s.Text == "--configuration").Foreground);
+        Assert.Equal(Theme.Current.SyntaxString, line.Spans.First(s => s.Text == "Release").Foreground);
+        Assert.Null(line.Spans.First(s => s.Text == "--literal").Foreground);
+        Assert.Equal("dotnet test --configuration=Release -- --literal", line.Text);
     }
 
     [Fact]

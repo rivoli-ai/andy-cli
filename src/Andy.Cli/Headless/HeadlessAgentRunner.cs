@@ -600,7 +600,7 @@ public static class HeadlessAgentRunner
         var registry = services.GetRequiredService<IToolRegistry>();
         try
         {
-            return await HeadlessToolHost.BuildAsync(config.Tools, registry, loggerFactory, ct);
+            return await HeadlessToolHost.BuildAsync(config.Tools, registry, loggerFactory, ct, config: config);
         }
         catch (Exception ex)
         {

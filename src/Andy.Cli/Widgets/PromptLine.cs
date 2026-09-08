@@ -1,5 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using Andy.Cli.Editor;
 using Andy.Cli.Themes;
 using DL = Andy.Tui.DisplayList;
 using L = Andy.Tui.Layout;
@@ -34,7 +37,90 @@ namespace Andy.Cli.Widgets
         private PromptMode _mode = PromptMode.Normal;
         private bool _shellModeAvailable = true;
         private bool _focused;
-        private readonly List<string> _history = new();
+        private readonly List<ComposerDocument> _history = new();
+        private ComposerDocument _document = ComposerDocument.Empty;
+        private readonly List<(ComposerDocument Document, int Cursor)> _undo = new();
+        private readonly Stack<(ComposerDocument Document, int Cursor)> _redo = new();
+        private static long _pasteId;
+
+        /// <summary>Large paste threshold: 10 KiB UTF-8 or 500 lines.</summary>
+        public const int LargePasteBytes = 10 * 1024;
+        public const int LargePasteLines = 500;
+        /// <summary>Reject oversized or incomplete pastes without changing the composer.</summary>
+        public const int MaxPasteBytes = 1024 * 1024;
+
+        public ComposerDocument GetDocument() => _document;
+
+        public void SetDocument(ComposerDocument document)
+        {
+            RememberEdit();
+            Adopt(document, document.ToPromptText().Length);
+        }
+
+        private void Adopt(ComposerDocument document, int cursor)
+        {
+            _document = document;
+            _text = document.ToPromptText();
+            _cursor = document.SnapCursor(cursor, true);
+        }
+
+        private void RememberEdit()
+        {
+            _undo.Add((_document, _cursor));
+            if (_undo.Count > 100) _undo.RemoveAt(0);
+            _redo.Clear();
+        }
+
+        public bool InsertPaste(string text, bool truncated, out string? error)
+        {
+            error = null;
+            if (truncated || Encoding.UTF8.GetByteCount(text) > MaxPasteBytes)
+            {
+                error = "Paste exceeds 1 MiB; nothing inserted. Use a file attachment.";
+                return false;
+            }
+            if (text.Contains('\0'))
+            {
+                error = "Paste contains binary NUL data; nothing inserted.";
+                return false;
+            }
+            // An explicit paste event is complete; its next Enter is a submit, even if
+            // preceding typing had armed the legacy key-by-key paste heuristic.
+            _inPasteMode = false;
+            _lastKeyTime = DateTime.MinValue;
+            if (text.Length == 0) return true;
+            int lines = ComposerDocument.NormalizeNewlines(text).Count(c => c == '\n') + 1;
+            if (_mode == PromptMode.Shell || (Encoding.UTF8.GetByteCount(text) < LargePasteBytes && lines < LargePasteLines))
+            {
+                InsertText(text);
+                return true;
+            }
+            long id = System.Threading.Interlocked.Increment(ref _pasteId);
+            var part = new ComposerAttachmentPart($"[Pasted text #{id}: {lines} lines, {text.Length} chars]",
+                "paste", Guid.NewGuid().ToString("N"), text);
+            RememberEdit();
+            var document = _document.Replace(_cursor, 0, new ComposerDocument(new[] { part }), out int cursor);
+            Adopt(document, cursor);
+            return true;
+        }
+
+        public bool UndoEdit()
+        {
+            if (_undo.Count == 0) return false;
+            _redo.Push((_document, _cursor));
+            var previous = _undo[^1];
+            _undo.RemoveAt(_undo.Count - 1);
+            Adopt(previous.Document, previous.Cursor);
+            return true;
+        }
+
+        public bool RedoEdit()
+        {
+            if (!_redo.TryPop(out var next)) return false;
+            _undo.Add((_document, _cursor));
+            Adopt(next.Document, next.Cursor);
+            return true;
+        }
         private int _historyIndex = -1; // -1 = current editing
         private Func<string, string?>? _suggest;
         private bool _showCaret = true;
@@ -79,8 +165,7 @@ namespace Andy.Cli.Widgets
         /// <summary>Set the prompt text and move cursor to end.</summary>
         public void SetText(string text)
         {
-            _text = text ?? string.Empty;
-            _cursor = _text.Length;
+            SetDocument(ComposerDocument.FromText(text));
         }
         /// <summary>
         /// Replace <paramref name="length"/> characters starting at <paramref name="start"/> with
@@ -94,8 +179,9 @@ namespace Andy.Cli.Widgets
             replacement ??= string.Empty;
             start = Math.Clamp(start, 0, _text.Length);
             length = Math.Clamp(length, 0, _text.Length - start);
-            _text = _text.Remove(start, length).Insert(start, replacement);
-            _cursor = Math.Clamp(newCursor ?? (start + replacement.Length), 0, _text.Length);
+            RememberEdit();
+            var document = _document.Replace(start, length, ComposerDocument.FromText(replacement), out int cursor);
+            Adopt(document, newCursor ?? cursor);
         }
 
         /// <summary>What submitting the current line will do. See <see cref="PromptMode"/>.</summary>
@@ -158,6 +244,24 @@ namespace Andy.Cli.Widgets
         /// <summary>Handle a key press. Ctrl+Enter inserts newline. Returns submitted line on Enter (no Ctrl); otherwise null.</summary>
         public string? OnKey(ConsoleKeyInfo k)
         {
+            if ((k.Modifiers & ConsoleModifiers.Control) != 0 && k.Key == ConsoleKey.Z)
+            {
+                if ((k.Modifiers & ConsoleModifiers.Shift) != 0) RedoEdit(); else UndoEdit();
+                return null;
+            }
+            if ((k.Modifiers & ConsoleModifiers.Control) != 0 && k.Key == ConsoleKey.Y)
+            {
+                RedoEdit();
+                return null;
+            }
+            int before = _cursor;
+            var submitted = OnKeyCore(k);
+            _cursor = _document.SnapCursor(_cursor, _cursor >= before);
+            return submitted;
+        }
+
+        private string? OnKeyCore(ConsoleKeyInfo k)
+        {
             var now = DateTime.UtcNow;
             var timeSinceLastKey = (now - _lastKeyTime).TotalMilliseconds;
 
@@ -211,7 +315,7 @@ namespace Andy.Cli.Widgets
             // Ctrl+Enter inserts newline
             if (k.Key == ConsoleKey.Enter && (k.Modifiers & ConsoleModifiers.Control) != 0)
             {
-                _text = _text.Insert(_cursor, "\n"); _cursor++; return null;
+                ReplaceRange(_cursor, 0, "\n"); return null;
             }
 
             // Enter submits ONLY if not pasting
@@ -221,15 +325,14 @@ namespace Andy.Cli.Widgets
                 if (isPasting)
                 {
                     // Insert newline when pasting
-                    _text = _text.Insert(_cursor, "\n");
-                    _cursor++;
+                    ReplaceRange(_cursor, 0, "\n");
                     return null;
                 }
                 else
                 {
                     // Submit when user presses Enter
-                    var s = _text; if (!string.IsNullOrWhiteSpace(s)) { _history.Add(s); }
-                    _historyIndex = -1; _text = string.Empty; _cursor = 0; return s;
+                    var s = _text; if (!string.IsNullOrWhiteSpace(s)) { _history.Add(_document); }
+                    _historyIndex = -1; Adopt(ComposerDocument.Empty, 0); _undo.Clear(); _redo.Clear(); return s;
                 }
             }
 
@@ -271,7 +374,7 @@ namespace Andy.Cli.Widgets
                     int lengthToRemove = endOfLine - _cursor;
                     if (lengthToRemove > 0)
                     {
-                        _text = _text.Remove(_cursor, lengthToRemove);
+                        ReplaceRange(_cursor, lengthToRemove, "");
                     }
                 }
                 return null;
@@ -293,8 +396,7 @@ namespace Andy.Cli.Widgets
                     int lengthToRemove = _cursor - startOfLine;
                     if (lengthToRemove > 0)
                     {
-                        _text = _text.Remove(startOfLine, lengthToRemove);
-                        _cursor = startOfLine;
+                        ReplaceRange(startOfLine, lengthToRemove, "");
                     }
                 }
                 return null;
@@ -377,12 +479,11 @@ namespace Andy.Cli.Widgets
 
                 if (_cursor > 0)
                 {
-                    _text = _text.Remove(_cursor - 1, 1);
-                    _cursor--;
+                    ReplaceRange(_cursor - 1, 1, "");
                 }
                 return null;
             }
-            if (k.Key == ConsoleKey.Delete) { if (_cursor < _text.Length) { _text = _text.Remove(_cursor, 1); } return null; }
+            if (k.Key == ConsoleKey.Delete) { if (_cursor < _text.Length) { ReplaceRange(_cursor, 1, ""); } return null; }
 
             // Insert regular characters (including pasted newlines)
             if (!char.IsControl(k.KeyChar) || k.KeyChar == '\n' || k.KeyChar == '\r')
@@ -393,8 +494,7 @@ namespace Andy.Cli.Widgets
                 if (ch == '\r')
                 {
                     // Always insert newline for \r
-                    _text = _text.Insert(_cursor, "\n");
-                    _cursor++;
+                    ReplaceRange(_cursor, 0, "\n");
                     return null;
                 }
                 else if (ch == '\n')
@@ -409,8 +509,7 @@ namespace Andy.Cli.Widgets
                     else
                     {
                         // Standalone \n, insert it
-                        _text = _text.Insert(_cursor, "\n");
-                        _cursor++;
+                        ReplaceRange(_cursor, 0, "\n");
                         return null;
                     }
                 }
@@ -419,8 +518,7 @@ namespace Andy.Cli.Widgets
                 // but preserve printable characters and tabs
                 if (ch >= 32 || ch == '\t')
                 {
-                    _text = _text.Insert(_cursor, ch.ToString());
-                    _cursor++;
+                    ReplaceRange(_cursor, 0, ch.ToString());
                 }
                 return null;
             }
@@ -435,8 +533,7 @@ namespace Andy.Cli.Widgets
             // Normalize line endings
             text = text.Replace("\r\n", "\n").Replace('\r', '\n');
 
-            _text = _text.Insert(_cursor, text);
-            _cursor += text.Length;
+            ReplaceRange(_cursor, 0, text);
         }
 
         private void NavigateHistory(int delta)
@@ -444,8 +541,8 @@ namespace Andy.Cli.Widgets
             if (_history.Count == 0) return;
             if (_historyIndex == -1) _historyIndex = _history.Count; // virtual current row
             _historyIndex = Math.Max(0, Math.Min(_history.Count, _historyIndex + delta));
-            if (_historyIndex >= 0 && _historyIndex < _history.Count) { _text = _history[_historyIndex]; _cursor = _text.Length; }
-            else { _historyIndex = -1; _text = string.Empty; _cursor = 0; }
+            if (_historyIndex >= 0 && _historyIndex < _history.Count) { SetDocument(_history[_historyIndex]); }
+            else { _historyIndex = -1; SetDocument(ComposerDocument.Empty); }
         }
 
         private void MoveCursorVertically(int direction)

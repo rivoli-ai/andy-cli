@@ -7,20 +7,8 @@ using Microsoft.Extensions.Logging;
 
 namespace Andy.Cli.Headless.Tools;
 
-// Adapter exposing a HeadlessTool with transport=mcp as an Andy.Tools ITool.
-//
-// The adapter holds a reference to a long-lived McpClient owned by the
-// factory; one client is shared by every adapter targeting the same
-// endpoint. ExecuteAsync delegates to McpClient.CallToolAsync, mapping
-// the LLM's `arguments` parameter (a JSON-serializable object pass-through)
-// straight to the protocol's Arguments field.
-//
-// The remote tool's `inputSchema` is intentionally NOT reflected into
-// ToolMetadata.Parameters yet — the LLM is steered by the agent's
-// instructions plus the tool's name+description, and the factory looks
-// up the matching MCP Tool to populate Description from the server. A
-// follow-on can map JSON Schema → ToolParameter for stronger LLM
-// argument shaping.
+// Shared interactive/headless adapter. The host owns the client; each adapter
+// maps remote input properties and forwards calls through the normal tool registry.
 public sealed class McpRemoteTool : ITool
 {
     private readonly string _source;
@@ -80,6 +68,7 @@ public sealed class McpRemoteTool : ITool
         ToolExecutionContext context)
     {
         var ct = context.CancellationToken;
+        ct.ThrowIfCancellationRequested();
         object? rawArgs = parameters;
         if (_usesArgumentEnvelope)
         {
@@ -95,28 +84,39 @@ public sealed class McpRemoteTool : ITool
         {
             result = await _client.CallToolAsync(_remoteTool.Name, rawArgs, ct);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             return ToolResult.Failure(
                 $"MCP call to {_remoteTool.Name} failed: {ex.GetType().Name}: {ex.Message}");
         }
 
-        // CallToolResult.IsError carries the protocol-level "tool reported failure"
-        // signal; transport errors throw and are caught above.
+        return MapResult(result);
+    }
+
+    internal static ToolResult MapResult(CallToolResult result)
+    {
+        // Keep the complete protocol result for consumers of non-text content,
+        // including metadata and extension fields on errors.
+        var metadata = new Dictionary<string, object?> { ["mcp_result"] = result };
         var text = ExtractText(result);
         if (result.IsError == true)
         {
-            return ToolResult.Failure(text);
+            return ToolResult.Failure(text, metadata);
         }
-        return ToolResult.Success(text);
+        return ToolResult.Success(
+            result.StructuredContent is { } structured ? structured.Clone() : text,
+            metadata);
     }
 
     public Task DisposeAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
     // The MCP spec lets a tool return mixed content blocks (text, images,
-    // resource refs). Headless agents only consume the textual portion
-    // for now; non-text content is summarised by type so the LLM at
-    // least knows it was elided.
+    // resource refs). Text fallback summarizes non-text blocks; the complete
+    // result remains available in ToolResult.Metadata["mcp_result"].
     private static string ExtractText(CallToolResult result)
     {
         if (result.Content.Count == 0) return string.Empty;

@@ -458,3 +458,38 @@ redirections and compound commands remain supported (PR #93).
 ESC cancels the active agent turn; queued messages continue with fresh cancellation
 tokens. Idle ESC still opens exit confirmation. Modal dismissal takes precedence
 (PR #94). Canceled turns are not recorded as completed undo transactions.
+
+### Gateway and JSON tool input - 2026-09-08
+
+Headless tools support MCP gateway routing and bounded JSON stdin input with
+concurrent pipe draining. See [configuration](docs/MCP_GATEWAY_AND_JSON_TOOLS.md).
+### Thinking blocks - 2026-09-08
+
+Explicit provider thinking is rendered separately, with F4 visibility control and
+original transcript preservation. See [thinking blocks](docs/THINKING_BLOCKS.md).
+### 2026-09-08: Local image attachments
+
+The composer accepts dropped or pasted local image paths, shows a removable attachment indicator, and preserves attachments in queued messages. Vision-capable providers receive structured image parts; other providers receive a file reference. See [image attachment support and limits](docs/IMAGE_ATTACHMENTS.md).
+
+### 2026-09-08: Long-response wrapping and scrolling
+
+Rich Markdown now wraps at word boundaries after parsing, preserving inline styles and hanging list indentation. Measurement and scrolling share the same cached row layout, including content beyond 8,192 display rows. Oversized words hard-wrap; language-aware hyphenation and advanced multilingual line breaking remain follow-up work.
+
+### 2026-09-08: Queued input steers active tool loops
+
+Queued messages now reach the next model request after a complete tool-call round. Recalling a queued message removes it until resubmission, and canceled preparation preserves pending input. See [queue timing and editing](docs/QUEUED_MESSAGES.md).
+
+### 2026-09-08: Atomic large pasted text
+
+Large bracketed pastes now appear as compact items while retaining their exact text for delivery. Edit around multiple items, delete an item in one action, undo with Ctrl+Z, and inspect it with F5. History, queue recall, and the external editor preserve retained payloads. See [large paste behavior](docs/LARGE_PASTES.md).
+
+### 2026-09-08: Command display colors
+
+Tool command headers now distinguish environment assignments, common command-family subcommands, options and inline values. Colors remain consistent across wrapped lines and update when the theme changes. Shell text is preserved unchanged for copying and execution.
+
+### 2026-09-08: MCP runtime compatibility and tool results
+
+Updated MCP integration preserves structured tool output and complete protocol results
+through the tool registry, with cancellation propagated to the remote server.
+Packaged builds preserve MCP protocol metadata and verify real server discovery. See the
+[MCP integration update](docs/mcp-configuration.md#integration-update---2026-09-08).

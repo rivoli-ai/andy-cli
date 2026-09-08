@@ -30,9 +30,9 @@
       },
       "Andy.Engine": {
         "type": "Direct",
-        "requested": "[2026.9.8-rc.102, )",
-        "resolved": "2026.9.8-rc.102",
-        "contentHash": "UenWSyq/6WZtgkHnlGvChpAoXbbmoj8STQMQRkCrOnyg4ltVmOcL9UhDnL3p/tFzyq2Ywjuts03vG6CEmbc4TQ==",
+        "requested": "[2026.9.8-rc.104, )",
+        "resolved": "2026.9.8-rc.104",
+        "contentHash": "JKrzlpcq5YwOv8zSVhNjl+1o+88fuHhLS4VIEvYC30LSong6kmx+RlbiaZ0WCgxidWAhyDn998c1mYUgYiW38g==",
         "dependencies": {
           "Andy.Configuration": "2026.5.16-rc.8",
           "Andy.Context": "2026.5.16-rc.6",
@@ -61,9 +61,12 @@
       },
       "Andy.MCP": {
         "type": "Direct",
-        "requested": "[2026.5.16-rc.31, )",
-        "resolved": "2026.5.16-rc.31",
-        "contentHash": "kEd2iRU4xTAUU2oJTQ2j60d296S+sOA9hEQ2hXSP3Rsyk2cRaiJNa19//P6bIkC3iD+EMRwefNU9GWvJHnOl9w=="
+        "requested": "[2026.9.8-rc.167, )",
+        "resolved": "2026.9.8-rc.167",
+        "contentHash": "bI5Mcawa/onZy2Xcm4yLIBChWKpdYyf4jRGQ3D9SQpoiWQf2ODhHu576xW6x9Byq8EMFTGUejNojMdTlq3k73g==",
+        "dependencies": {
+          "JsonSchema.Net": "9.3.0"
+        }
       },
       "Andy.Model": {
         "type": "Direct",

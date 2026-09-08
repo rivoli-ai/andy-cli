@@ -15,6 +15,7 @@ namespace Andy.Cli.Services;
 public class SimpleAssistantService : IDisposable
 {
     private readonly SimpleAgent _agent;
+    private readonly ILlmProvider _attachmentProvider;
     private readonly EnginePlanConnection? _planConnection;
     private readonly FeedView _feed;
     private readonly TokenCounter? _tokenCounter;
@@ -113,6 +114,7 @@ public class SimpleAssistantService : IDisposable
     /// </summary>
     private void OnIntermediateAssistantText(string text)
     {
+        text = ThinkingContent.WithoutBlocks(text);
         if (!ShouldRenderIntermediateText(text, _lastIntermediateText))
             return;
 
@@ -155,6 +157,7 @@ public class SimpleAssistantService : IDisposable
         Andy.Cli.Modes.AgentModeState? modeState = null)
     {
         _feed = feed;
+        _attachmentProvider = llmProvider;
         _tokenCounter = tokenCounter;
         _modeState = modeState;
         // Take an ILoggerFactory so each collaborator gets a correctly-typed logger. Previously a
@@ -211,9 +214,27 @@ public class SimpleAssistantService : IDisposable
         // wrapper also surfaces the model's intermediate narration text (the "I'll first read the
         // file..." narration the model emits alongside tool calls) into the feed as the turn
         // progresses, since SimpleAgent itself is non-streaming and only returns the final answer.
+        ThinkingBlockItem? thinkingItem = null;
         var usageTrackingProvider = new UsageTrackingLlmProvider(
             llmProvider, OnLlmUsage, OnIntermediateAssistantText,
-            loggerFactory?.CreateLogger<UsageTrackingLlmProvider>());
+            loggerFactory?.CreateLogger<UsageTrackingLlmProvider>(),
+            onThinkingStart: () =>
+            {
+                thinkingItem = new ThinkingBlockItem();
+                _feed.AddItem(thinkingItem);
+                InstrumentationHub.Instance.Publish(new ThinkingEvent { Phase = "start" });
+            },
+            onThinkingText: text =>
+            {
+                thinkingItem?.AppendContent(text);
+                InstrumentationHub.Instance.Publish(new ThinkingEvent { Phase = "content", Content = text });
+            },
+            onThinkingEnd: () =>
+            {
+                thinkingItem?.Complete();
+                thinkingItem = null;
+                InstrumentationHub.Instance.Publish(new ThinkingEvent { Phase = "end" });
+            });
 
         // Create the SimpleAgent
         _agent = new SimpleAgent(
@@ -314,6 +335,10 @@ public class SimpleAssistantService : IDisposable
     /// <summary>The latest structured provider failure, cleared at the start of each request.</summary>
     public Andy.Llm.Errors.LlmProviderError? LastProviderError { get; private set; }
 
+    internal Task<IReadOnlyList<Andy.Model.Model.MessagePart>> PreparePendingPartsAsync(
+        IReadOnlyList<Andy.Model.Model.MessagePart> parts, Andy.Cli.Domain.ImageAttachment? image, CancellationToken ct) =>
+        image is null ? Task.FromResult(parts) : ImageAttachmentProcessor.AppendAsync(_attachmentProvider, parts, image, ct);
+
     /// <summary>
     /// Process a user message
     /// </summary>
@@ -327,11 +352,20 @@ public class SimpleAssistantService : IDisposable
         string userMessage,
         bool enableStreaming = false, // Ignored for now - streaming not yet implemented
         CancellationToken cancellationToken = default,
-        IReadOnlyList<Andy.Model.Model.MessagePart>? structuredParts = null)
+        IReadOnlyList<Andy.Model.Model.MessagePart>? structuredParts = null,
+        Andy.Cli.Domain.ImageAttachment? imageAttachment = null,
+        Func<CancellationToken, Task<IReadOnlyList<IReadOnlyList<Andy.Model.Model.MessagePart>>>>? pendingInputProvider = null)
     {
+        _agent.PendingInputProvider = pendingInputProvider is null ? null : async ct =>
+            (await pendingInputProvider(ct)).Select(PrependModeDirective).ToArray();
         LastProviderError = null;
         try
         {
+            if (imageAttachment != null)
+                structuredParts = await ImageAttachmentProcessor.AppendAsync(_attachmentProvider,
+                    structuredParts ?? new Andy.Model.Model.MessagePart[] { new Andy.Model.Model.TextPart(userMessage) },
+                    imageAttachment, cancellationToken);
+
             // Create new content pipeline for this request
             var processor = new MarkdownContentProcessor();
             var sanitizer = new TextContentSanitizer();
@@ -664,7 +698,7 @@ public class SimpleAssistantService : IDisposable
             if (!result.Success && result.ProviderError is { } providerError)
                 _feed.AddItem(new ErrorTextItem(ProviderErrorFormatter.Format(providerError)));
             else
-                pipeline.AddRawContent(SelectResponseContent(result.Response, result.Success, result.StopReason));
+                pipeline.AddRawContent(ThinkingContent.WithoutBlocks(SelectResponseContent(result.Response, result.Success, result.StopReason)));
 
             // Context line disabled to avoid rendering issues
             // pipeline.AddSystemMessage("", SystemMessageType.Context, priority: 1999);

@@ -59,6 +59,7 @@ public sealed class RawTerminalInput : IDisposable, Andy.Cli.Editor.ISuspendable
         _savedStty = savedStty;
         _mouse = new MouseReporting(Console.Write);
         if (enableMouse) _mouse.Set(true);
+        Console.Write("\u001b[?2004h");
 
         AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
         Console.CancelKeyPress += OnCancelKeyPress;
@@ -101,6 +102,7 @@ public sealed class RawTerminalInput : IDisposable, Andy.Cli.Editor.ISuspendable
             try { thread.Join(500); } catch { /* ignore */ }
 
             _mouse.Set(false);
+            Console.Write("\u001b[?2004l");
             try { RunStty(_savedStty, out _); } catch { /* ignore */ }
             return new SuspendScope(this);
         }
@@ -121,6 +123,7 @@ public sealed class RawTerminalInput : IDisposable, Andy.Cli.Editor.ISuspendable
             _stop = false;
             _thread = StartReadLoop();
             _mouse.Set(_mouseBeforeSuspend);
+            Console.Write("\u001b[?2004h");
         }
     }
 
@@ -270,6 +273,7 @@ public sealed class RawTerminalInput : IDisposable, Andy.Cli.Editor.ISuspendable
         // Always disable mouse reporting on the way out if it was ever enabled,
         // so the terminal is left with native click-drag selection restored.
         SetMouseReporting(false);
+        Console.Write("\u001b[?2004l");
         try { RunStty(_savedStty, out _); } catch { /* ignore */ }
     }
 
