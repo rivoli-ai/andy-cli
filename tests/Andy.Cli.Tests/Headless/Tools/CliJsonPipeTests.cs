@@ -8,7 +8,9 @@ public class CliJsonPipeTests
 {
     private static CliSubprocessTool Tool(string script) => new(new HeadlessTool
     {
-        Name = "json.test", Transport = "cli", InputMode = "json",
+        Name = "json.test",
+        Transport = "cli",
+        InputMode = "json",
         Command = ["/bin/sh", "-c", script]
     });
 

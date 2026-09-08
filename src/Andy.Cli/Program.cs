@@ -314,6 +314,16 @@ class Program
             var tokenCounter = new TokenCounter();
             var contextStatusBar = new ContextStatusBar();
             var prompt = new PromptLine();
+            var attachmentIndicator = new AttachmentIndicator();
+            var lastComposerEdit = DateTime.UtcNow;
+            bool TryAttachDroppedPath(string text)
+            {
+                if (prompt.Mode != PromptMode.Normal || !ImageDropPath.TryParse(text, out var path)) return false;
+                if (!Andy.Cli.Domain.ImageAttachment.TryCreate(path, out var image, out _)) return false;
+                attachmentIndicator.Show(image!);
+                toast.Show("Image attached", 90);
+                return true;
+            }
             bool isProcessingMessage = false; // Track if we're processing a message
             prompt.SetBorder(true);
             prompt.SetShowCaret(true);
@@ -1605,11 +1615,12 @@ class Program
                 return confirmExit;
             }
 
-            void StartMessagePump(string firstMessage)
+            void StartMessagePump(string firstMessage, Andy.Cli.Domain.ImageAttachment? firstImage = null)
             {
                 _ = Task.Run(async () =>
                 {
                     string currentMessage = firstMessage;
+                    var currentImage = firstImage;
                     long? currentQueuedId = null;
 
                     while (true)
@@ -1644,7 +1655,8 @@ class Program
                                 resolvedPrompt.ComposedText,
                                 enableStreaming: false,
                                 cancellationToken: turnCancellation.Token,
-                                structuredParts: resolvedPrompt.Parts);
+                                structuredParts: resolvedPrompt.Parts,
+                                imageAttachment: currentImage);
                             turnCancellation.Token.ThrowIfCancellationRequested();
                             undoManager?.CompleteTurn(undoTurn);
 
@@ -1693,6 +1705,7 @@ class Program
                         if (next == null) break;
 
                         currentMessage = next.Text;
+                        currentImage = next.Image;
                         currentQueuedId = next.Id;
                         if (queuedDisplays.TryGetValue(next.Id, out var queuedDisplay))
                         {
@@ -2092,6 +2105,14 @@ class Program
                         }
                     }
 
+                    if (k.Key == ConsoleKey.Backspace && prompt.Text.Length == 0 && attachmentIndicator.Visible)
+                    {
+                        attachmentIndicator.Clear();
+                        return;
+                    }
+                    if (k.Key == ConsoleKey.Enter && prompt.Text.Length == 0 && attachmentIndicator.Visible)
+                        prompt.SetText("Describe this image.");
+
                     // Avoid mapping regular alphanumeric keys to actions
                     var textBeforeKey = prompt.Text;
                     // Snapshot the composer BEFORE PromptLine consumes the key: an Enter that
@@ -2109,6 +2130,7 @@ class Program
                     // it is about to handle was typed as a shell command or a normal prompt.
                     var submittedInShellMode = prompt.Mode == Andy.Cli.Widgets.PromptMode.Shell;
                     var submitted = prompt.OnKey(k);
+                    if (prompt.Text != textBeforeKey) lastComposerEdit = DateTime.UtcNow;
                     fileMentionMenu.Update(prompt.Text, prompt.CursorPosition);
                     // If the keystroke edited the prompt text (typing, paste, backspace,
                     // delete, etc.), snap the feed back to the bottom where the prompt
@@ -2163,7 +2185,7 @@ class Program
                             {
                                 promptHistory.Add(cmd);
                                 int queuedMessageNumber = promptHistory.Count;
-                                var queued = pendingMessages.Enqueue(cmd, queuedMessageNumber);
+                                var queued = pendingMessages.Enqueue(cmd, queuedMessageNumber, attachmentIndicator.Take());
                                 pendingByHistoryIndex[queuedMessageNumber - 1] = queued.Id;
                                 queuedDisplays[queued.Id] =
                                     feed.AddQueuedUserMessage(cmd, queuedMessageNumber);
@@ -2592,7 +2614,7 @@ class Program
                             {
                                 isProcessingMessage = true;
                             }
-                            StartMessagePump(cmd);
+                            StartMessagePump(cmd, attachmentIndicator.Take());
                         }
                         // No fallback - if aiService is null, the user needs to configure API keys
                         // The initialization error message above already informed them
@@ -2629,7 +2651,14 @@ class Program
                     // (3 lines per notch); keys flow through the normal handler.
                     while (rawInput.TryDequeue(out var ev))
                     {
-                        if (ev.Kind == TerminalInputKind.Wheel)
+                        if (ev.Kind == TerminalInputKind.Paste)
+                        {
+                            if (inlineApproval.IsActive || mcpPlanOptIn.IsOpen || permissionsManager.IsOpen || commandPalette.IsOpen) continue;
+                            if (ev.PasteTruncated) toast.Show("Paste exceeded 1 MiB and was truncated", 150);
+                            if (!TryAttachDroppedPath(ev.PasteText ?? "")) prompt.InsertText(ev.PasteText ?? "");
+                            lastComposerEdit = DateTime.UtcNow;
+                        }
+                        else if (ev.Kind == TerminalInputKind.Wheel)
                         {
                             int page = Math.Max(1, viewport.Height - 5);
                             feed.ScrollLines(ev.WheelDelta * 3, page);
@@ -2828,8 +2857,12 @@ class Program
 
                     // Position prompt and help from the bottom up (no gaps)
                     // Layout from bottom: status line(1) + help + prompt
-                    int promptY = Math.Max(3, viewport.Height - bottomReserved - helpH - mentionH - promptH);
-                    int helpY = promptY + promptH;
+                    if (prompt.Mode == PromptMode.Normal && DateTime.UtcNow - lastComposerEdit > TimeSpan.FromMilliseconds(200)
+                        && !inlineApproval.IsActive && !mcpPlanOptIn.IsOpen && !permissionsManager.IsOpen && !commandPalette.IsOpen
+                        && TryAttachDroppedPath(prompt.Text)) prompt.SetText("");
+                    int attachmentH = attachmentIndicator.Visible && !inlineApproval.IsActive ? 1 : 0;
+                    int promptY = Math.Max(3, viewport.Height - bottomReserved - helpH - mentionH - promptH - attachmentH);
+                    int helpY = promptY + promptH + attachmentH;
 
                     // Feed fills the space from header to prompt
                     int outputH = Math.Max(1, promptY - 3);
@@ -2846,6 +2879,9 @@ class Program
                     {
                         prompt.Render(new L.Rect(2, promptY, Math.Max(1, viewport.Width - 4), promptH), baseDl, wb);
                     }
+
+                    if (attachmentH > 0)
+                        attachmentIndicator.Render(2, promptY + promptH, Math.Max(1, viewport.Width - 4), wb);
 
                     // Render inline command help below the prompt (if visible)
                     if (helpH > 0)

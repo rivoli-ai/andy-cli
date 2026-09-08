@@ -467,3 +467,6 @@ concurrent pipe draining. See [configuration](docs/MCP_GATEWAY_AND_JSON_TOOLS.md
 
 Explicit provider thinking is rendered separately, with F4 visibility control and
 original transcript preservation. See [thinking blocks](docs/THINKING_BLOCKS.md).
+### 2026-09-08: Local image attachments
+
+The composer accepts dropped or pasted local image paths, shows a removable attachment indicator, and preserves attachments in queued messages. Vision-capable providers receive structured image parts; other providers receive a file reference. See [image attachment support and limits](docs/IMAGE_ATTACHMENTS.md).

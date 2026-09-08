@@ -10,8 +10,11 @@ public class McpGatewayValidationTests
     [InlineData("https://example.test/mcp", true)]
     public void GatewayMustResolveToHttp(string? gateway, bool valid)
     {
-        var config = new HeadlessRunConfig { McpGateway = gateway,
-            Tools = [new HeadlessTool { Name = "tool", Transport = "mcp" }] };
+        var config = new HeadlessRunConfig
+        {
+            McpGateway = gateway,
+            Tools = [new HeadlessTool { Name = "tool", Transport = "mcp" }]
+        };
         Assert.Equal(valid, HeadlessConfigValidator.Validate(config) == null);
     }
 }

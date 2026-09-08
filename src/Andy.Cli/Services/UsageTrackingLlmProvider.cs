@@ -1,3 +1,4 @@
+using Andy.Engine;
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
@@ -16,7 +17,7 @@ namespace Andy.Cli.Services
     /// model is still working. Behaviour is otherwise identical to the inner provider: every call
     /// is delegated and the original response/chunk is returned unchanged.
     /// </summary>
-    public sealed class UsageTrackingLlmProvider : ILlmProvider
+    public sealed class UsageTrackingLlmProvider : IVisionCapableLlmProvider
     {
         private readonly ILlmProvider _inner;
         private readonly Action<LlmUsage> _onUsage;
@@ -60,6 +61,8 @@ namespace Andy.Cli.Services
         }
 
         public string Name => _inner.Name;
+        public ValueTask<bool> SupportsImageInputAsync(CancellationToken cancellationToken = default) =>
+            _inner is IVisionCapableLlmProvider vision ? vision.SupportsImageInputAsync(cancellationToken) : ValueTask.FromResult(false);
 
         public Task<bool> IsAvailableAsync(CancellationToken cancellationToken = default)
             => _inner.IsAvailableAsync(cancellationToken);

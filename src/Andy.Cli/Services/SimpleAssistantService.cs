@@ -15,6 +15,7 @@ namespace Andy.Cli.Services;
 public class SimpleAssistantService : IDisposable
 {
     private readonly SimpleAgent _agent;
+    private readonly ILlmProvider _attachmentProvider;
     private readonly EnginePlanConnection? _planConnection;
     private readonly FeedView _feed;
     private readonly TokenCounter? _tokenCounter;
@@ -156,6 +157,7 @@ public class SimpleAssistantService : IDisposable
         Andy.Cli.Modes.AgentModeState? modeState = null)
     {
         _feed = feed;
+        _attachmentProvider = llmProvider;
         _tokenCounter = tokenCounter;
         _modeState = modeState;
         // Take an ILoggerFactory so each collaborator gets a correctly-typed logger. Previously a
@@ -346,11 +348,17 @@ public class SimpleAssistantService : IDisposable
         string userMessage,
         bool enableStreaming = false, // Ignored for now - streaming not yet implemented
         CancellationToken cancellationToken = default,
-        IReadOnlyList<Andy.Model.Model.MessagePart>? structuredParts = null)
+        IReadOnlyList<Andy.Model.Model.MessagePart>? structuredParts = null,
+        Andy.Cli.Domain.ImageAttachment? imageAttachment = null)
     {
         LastProviderError = null;
         try
         {
+            if (imageAttachment != null)
+                structuredParts = await ImageAttachmentProcessor.AppendAsync(_attachmentProvider,
+                    structuredParts ?? new Andy.Model.Model.MessagePart[] { new Andy.Model.Model.TextPart(userMessage) },
+                    imageAttachment, cancellationToken);
+
             // Create new content pipeline for this request
             var processor = new MarkdownContentProcessor();
             var sanitizer = new TextContentSanitizer();
