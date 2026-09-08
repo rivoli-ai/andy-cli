@@ -18,6 +18,8 @@ namespace Andy.Cli.ACP;
 public interface ISessionAgent : IDisposable
 {
     bool StreamsResponses => false;
+    TranscriptSnapshot? ExportTranscript() => null;
+    void RestoreTranscript(TranscriptSnapshot snapshot) => throw new NotSupportedException("Session agent does not support restoration.");
     Task<SimpleAgentResult> ProcessMessageAsync(
         string userMessage,
         IResponseStreamer streamer,
@@ -28,6 +30,7 @@ public interface ISessionAgent : IDisposable
 public interface ISessionAgentFactory
 {
     ISessionAgent Create(string systemPrompt, string provider, string model);
+    ISessionAgent Create(string systemPrompt, string provider, string model, string cwd) => Create(systemPrompt, provider, model);
 }
 
 /// <summary>Adapts the engine's <see cref="SimpleAgent"/> to <see cref="ISessionAgent"/>.</summary>
@@ -66,6 +69,9 @@ internal sealed class SimpleAgentSessionAgent : ISessionAgent
             _sink.Detach(streamer);
         }
     }
+
+    public TranscriptSnapshot ExportTranscript() => _agent.ExportTranscript();
+    public void RestoreTranscript(TranscriptSnapshot snapshot) => _agent.RestoreTranscript(snapshot);
 
     public void Dispose()
     {
@@ -117,6 +123,9 @@ internal sealed class SimpleAgentSessionAgentFactory : ISessionAgentFactory
     }
 
     public ISessionAgent Create(string systemPrompt, string provider, string model)
+        => Create(systemPrompt, provider, model, Environment.CurrentDirectory);
+
+    public ISessionAgent Create(string systemPrompt, string provider, string model, string cwd)
     {
         var lease = _providerFactory?.Invoke(provider, model) ?? (_llmProvider, null);
         var sink = new AcpSessionUpdateSink(_loggerFactory?.CreateLogger<AcpSessionUpdateSink>());
@@ -128,6 +137,7 @@ internal sealed class SimpleAgentSessionAgentFactory : ISessionAgentFactory
             observingExecutor,
             systemPrompt,
             maxTurns: _maxTurns,
+            workingDirectory: cwd,
             logger: AndyAgentProvider.CreateAgentLogger(_loggerFactory));
 
         return new SimpleAgentSessionAgent(agent, sink, lease.Item2);

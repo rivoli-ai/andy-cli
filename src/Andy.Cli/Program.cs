@@ -3233,6 +3233,7 @@ class Program
             // Create the Andy agent provider. Passing the logger factory lets it
             // build a proper typed logger for each engine agent, and the provider
             // is disposed on shutdown so all retained sessions are cleaned up.
+            using var acpTransport = new Andy.Acp.Core.Transport.StdioTransport();
             using var agentProvider = new Andy.Cli.ACP.AndyAgentProvider(
                 llmProvider,
                 toolRegistry,
@@ -3242,7 +3243,9 @@ class Program
                 defaultModel: currentModel,
                 agentFactory: sessionAgentFactory,
                 defaultProvider: currentProvider,
-                modelSelections: modelSelections);
+                modelSelections: modelSelections,
+                sessionStore: new Andy.Cli.ACP.AcpSessionStore(),
+                historyReplay: new Andy.Cli.ACP.AcpHistoryReplay(acpTransport));
 
             logger.LogInformation("Andy agent provider initialized");
 
@@ -3262,7 +3265,7 @@ class Program
                 serverInfo: serverInfo,
                 loggerFactory: loggerFactory);
 
-            await acpServer.RunAsync();
+            await acpServer.RunAsync(acpTransport);
         }
         catch (Exception ex)
         {

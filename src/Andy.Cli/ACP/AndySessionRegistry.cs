@@ -19,6 +19,8 @@ public sealed class AcpSessionEntry : IDisposable
     private readonly object _gate = new();
     private CancellationTokenSource? _activeCts;
     private bool _modelAnnounced;
+    private bool _closing;
+    private TaskCompletionSource? _promptFinished;
 
     public string SessionId { get; }
 
@@ -28,6 +30,7 @@ public sealed class AcpSessionEntry : IDisposable
     /// </summary>
     public ISessionAgent? Agent { get; private set; }
 
+    public string Cwd { get; }
     public DateTime CreatedAt { get; }
     public DateTime LastAccessedAt { get; private set; }
     public int MessageCount { get; private set; }
@@ -66,7 +69,10 @@ public sealed class AcpSessionEntry : IDisposable
         string mode,
         string model,
         string provider = "andy-cli",
-        string? systemPrompt = null)
+        string? systemPrompt = null,
+        string? cwd = null,
+        DateTime? createdAt = null,
+        int messageCount = 0)
     {
         SessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
         Agent = agent;
@@ -74,7 +80,9 @@ public sealed class AcpSessionEntry : IDisposable
         Model = model;
         Provider = provider;
         SystemPrompt = systemPrompt ?? string.Empty;
-        CreatedAt = DateTime.UtcNow;
+        Cwd = Path.GetFullPath(cwd ?? Environment.CurrentDirectory);
+        CreatedAt = createdAt ?? DateTime.UtcNow;
+        MessageCount = messageCount;
         LastAccessedAt = CreatedAt;
         AccessSequence = Interlocked.Increment(ref _accessCounter);
     }
@@ -128,7 +136,7 @@ public sealed class AcpSessionEntry : IDisposable
     {
         lock (_gate)
         {
-            if (IsDisposed)
+            if (IsDisposed || _closing)
             {
                 throw new ObjectDisposedException(nameof(AcpSessionEntry));
             }
@@ -139,6 +147,7 @@ public sealed class AcpSessionEntry : IDisposable
                     $"A prompt is already in progress for session '{SessionId}'.");
             }
 
+            _promptFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             _activeCts = CancellationTokenSource.CreateLinkedTokenSource(external);
             Touch();
             return _activeCts.Token;
@@ -152,6 +161,17 @@ public sealed class AcpSessionEntry : IDisposable
         {
             _activeCts?.Dispose();
             _activeCts = null;
+            _promptFinished?.TrySetResult();
+        }
+    }
+
+    public Task BeginClose()
+    {
+        lock (_gate)
+        {
+            _closing = true;
+            _activeCts?.Cancel();
+            return _promptFinished?.Task ?? Task.CompletedTask;
         }
     }
 
@@ -167,7 +187,7 @@ public sealed class AcpSessionEntry : IDisposable
         ISessionAgent? previous;
         lock (_gate)
         {
-            if (IsDisposed || _activeCts != null)
+            if (IsDisposed || _closing || _activeCts != null)
             {
                 return false;
             }

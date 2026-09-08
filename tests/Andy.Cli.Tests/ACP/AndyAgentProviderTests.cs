@@ -204,11 +204,11 @@ public class AndyAgentProviderTests
         Assert.Equal("openai::gpt-4o", Assert.Single(options).CurrentValueId);
 
         var loadedFirst = await provider.LoadSessionAsync(
-            new LoadSessionParams { SessionId = first.SessionId, Cwd = "/tmp" },
+            new LoadSessionParams { SessionId = first.SessionId, Cwd = Environment.CurrentDirectory },
             new Mock<IResponseStreamer>().Object,
             CancellationToken.None);
         var loadedSecond = await provider.LoadSessionAsync(
-            new LoadSessionParams { SessionId = second.SessionId, Cwd = "/tmp" },
+            new LoadSessionParams { SessionId = second.SessionId, Cwd = Environment.CurrentDirectory },
             new Mock<IResponseStreamer>().Object,
             CancellationToken.None);
 
@@ -270,7 +270,7 @@ public class AndyAgentProviderTests
     /// <summary>Adapter for the conformant LoadSessionAsync(LoadSessionParams, IResponseStreamer, ct) signature.</summary>
     private Task<SessionMetadata?> LoadAsync(string sessionId) =>
         _provider.LoadSessionAsync(
-            new LoadSessionParams { SessionId = sessionId, Cwd = "/tmp" },
+            new LoadSessionParams { SessionId = sessionId, Cwd = Environment.CurrentDirectory },
             new Mock<IResponseStreamer>().Object,
             CancellationToken.None);
 
@@ -663,7 +663,7 @@ public class AndyAgentProviderTests
         provider.Dispose();
 
         // After disposal the session is gone and the agent has been disposed.
-        var loaded = await provider.LoadSessionAsync(new LoadSessionParams { SessionId = session.SessionId, Cwd = "/tmp" }, new Mock<IResponseStreamer>().Object, CancellationToken.None);
+        var loaded = await provider.LoadSessionAsync(new LoadSessionParams { SessionId = session.SessionId, Cwd = Environment.CurrentDirectory }, new Mock<IResponseStreamer>().Object, CancellationToken.None);
         Assert.Null(loaded);
         Assert.True(agent.IsDisposed);
     }
@@ -688,7 +688,7 @@ public class AndyAgentProviderTests
 
         // The oldest (least-recently-used) session must have been evicted and its
         // agent disposed.
-        var loadedFirst = await provider.LoadSessionAsync(new LoadSessionParams { SessionId = first.SessionId, Cwd = "/tmp" }, new Mock<IResponseStreamer>().Object, CancellationToken.None);
+        var loadedFirst = await provider.LoadSessionAsync(new LoadSessionParams { SessionId = first.SessionId, Cwd = Environment.CurrentDirectory }, new Mock<IResponseStreamer>().Object, CancellationToken.None);
         Assert.Null(loadedFirst);
         Assert.True(created[0].IsDisposed);
 
@@ -708,8 +708,8 @@ public class AndyAgentProviderTests
 
         await provider.ProcessPromptAsync(s1.SessionId, new PromptMessage { Text = "a" }, streamer.Object, CancellationToken.None);
 
-        var loaded1 = await provider.LoadSessionAsync(new LoadSessionParams { SessionId = s1.SessionId, Cwd = "/tmp" }, new Mock<IResponseStreamer>().Object, CancellationToken.None);
-        var loaded2 = await provider.LoadSessionAsync(new LoadSessionParams { SessionId = s2.SessionId, Cwd = "/tmp" }, new Mock<IResponseStreamer>().Object, CancellationToken.None);
+        var loaded1 = await provider.LoadSessionAsync(new LoadSessionParams { SessionId = s1.SessionId, Cwd = Environment.CurrentDirectory }, new Mock<IResponseStreamer>().Object, CancellationToken.None);
+        var loaded2 = await provider.LoadSessionAsync(new LoadSessionParams { SessionId = s2.SessionId, Cwd = Environment.CurrentDirectory }, new Mock<IResponseStreamer>().Object, CancellationToken.None);
 
         // s1 processed a message; s2 did not. State is per-session.
         Assert.NotNull(loaded1);

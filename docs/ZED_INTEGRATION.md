@@ -200,3 +200,20 @@ replacements up to 8,000 characters provide native diff content (without a befor
 Appends, partial edits, oversized files and failures retain bounded text results.
 Command output is native text content; terminal references require client-created
 terminals and are not invented for local executor processes.
+
+### Durable ACP sessions (2026-09-07)
+
+The stable v1 server stores redacted, atomic snapshots in `~/.andy/acp-sessions/`
+after each completed prompt. Empty sessions are stored too. Snapshots retain provider,
+model, mode and absolute working directory, and survive process restarts and LRU eviction.
+`session/load` restores engine context and replays user, assistant and correlated tool
+updates in order. `session/resume` restores without replay. Loading into a different cwd
+is rejected; tools use the recorded session cwd. Model changes preserve conversation context.
+
+`session/list` supports cwd filtering and pages of 50 with an opaque next cursor.
+A cursor removed since the preceding page is reported as expired. `session/close` cancels
+and waits for active work, saves history and releases resources; `session/delete` removes
+the stored session and rejects an active prompt. Corrupt or oversized snapshots produce
+an explicit load error and are omitted from listings. Files are capped at 16 MiB; failed
+writes preserve the previous snapshot. History replay uses stable v1 wire variants and
+must be adapted before enabling ACP v2 alpha.

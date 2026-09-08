@@ -424,3 +424,8 @@ See [`LICENSE`](LICENSE) for details.
 
 ACP now streams real model text, falls back to one chunk for non-streaming providers,
 and reports correlated cancellation/failure outcomes with bounded native file content (#204).
+
+### 2026-09-07: Durable ACP sessions
+
+ACP sessions now survive restarts with redacted history, original model and workspace,
+ordered load replay, and list/resume/close/delete lifecycle support (#206).

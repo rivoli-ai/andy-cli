@@ -18,8 +18,10 @@ namespace Andy.Cli.ACP;
 /// lifecycle, bounded retention, and cancellation that reaches the running
 /// engine operation.
 /// </summary>
-public class AndyAgentProvider : IAgentProvider, ISessionConfigProvider, IDisposable
+public class AndyAgentProvider : IAgentProvider, ISessionConfigProvider, ISessionCatalogProvider, IDisposable
 {
+    private readonly AcpSessionStore? _store;
+    private readonly IAcpHistoryReplay? _replay;
     private readonly IToolRegistry _toolRegistry;
     private readonly ILogger<AndyAgentProvider>? _logger;
     private readonly ISessionAgentFactory _agentFactory;
@@ -40,12 +42,16 @@ public class AndyAgentProvider : IAgentProvider, ISessionConfigProvider, IDispos
         string? defaultModel = null,
         ISessionAgentFactory? agentFactory = null,
         string? defaultProvider = null,
-        IReadOnlyList<AcpModelSelection>? modelSelections = null)
+        IReadOnlyList<AcpModelSelection>? modelSelections = null,
+        AcpSessionStore? sessionStore = null,
+        IAcpHistoryReplay? historyReplay = null)
     {
         if (llmProvider == null) throw new ArgumentNullException(nameof(llmProvider));
         _toolRegistry = toolRegistry ?? throw new ArgumentNullException(nameof(toolRegistry));
         if (toolExecutor == null) throw new ArgumentNullException(nameof(toolExecutor));
         _logger = logger;
+        _store = sessionStore;
+        _replay = historyReplay;
         _defaultModel = string.IsNullOrWhiteSpace(defaultModel) ? "andy-cli" : defaultModel!;
         _defaultProvider = string.IsNullOrWhiteSpace(defaultProvider) ? "andy-cli" : defaultProvider!;
         _agentFactory = agentFactory
@@ -80,8 +86,8 @@ public class AndyAgentProvider : IAgentProvider, ISessionConfigProvider, IDispos
     public AgentCapabilities GetCapabilities()
     {
         // Advertise only operations that are actually implemented.
-        // - LoadSession: supported for sessions still retained in-memory;
-        //   unknown ids are rejected (see LoadSessionAsync).
+        // - LoadSession: restores stored engine snapshots and replays history
+        //   in the production v1 transport; unknown ids are rejected.
         // - EmbeddedContext: honored by folding context items into the prompt.
         // - Audio/Image prompts: not implemented.
         return new AgentCapabilities
@@ -99,6 +105,11 @@ public class AndyAgentProvider : IAgentProvider, ISessionConfigProvider, IDispos
             ? $"session-{Guid.NewGuid():N}"
             : parameters!.SessionId;
 
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!Andy.Cli.Services.Sessions.SessionStore.IsValidSessionId(sessionId))
+            throw new ArgumentException("Invalid ACP session id.");
+        if (_store?.Load(sessionId) != null) throw new InvalidOperationException("Session already exists; use session/load.");
+        var cwd = Path.GetFullPath(parameters?.Cwd ?? Environment.CurrentDirectory);
         var mode = string.IsNullOrWhiteSpace(parameters?.Mode) ? "assistant" : parameters!.Mode;
         var model = string.IsNullOrWhiteSpace(parameters?.Model) ? _defaultModel : parameters!.Model;
 
@@ -110,7 +121,7 @@ public class AndyAgentProvider : IAgentProvider, ISessionConfigProvider, IDispos
 
         // Create a new engine agent for this session.
         var selection = ResolveInitialSelection(model);
-        var agent = _agentFactory.Create(systemPrompt, selection.ProviderId, selection.ModelId);
+        var agent = _agentFactory.Create(systemPrompt, selection.ProviderId, selection.ModelId, cwd);
 
         var entry = new AcpSessionEntry(
             sessionId,
@@ -118,7 +129,8 @@ public class AndyAgentProvider : IAgentProvider, ISessionConfigProvider, IDispos
             mode,
             selection.ModelId,
             selection.ProviderId,
-            systemPrompt);
+            systemPrompt, cwd);
+        Persist(entry);
         _sessions.Add(entry);
 
         _logger?.LogInformation(
@@ -142,42 +154,128 @@ public class AndyAgentProvider : IAgentProvider, ISessionConfigProvider, IDispos
         });
     }
 
-    public Task<SessionMetadata?> LoadSessionAsync(
-        LoadSessionParams parameters,
-        IResponseStreamer streamer,
-        CancellationToken cancellationToken)
+    public async Task<SessionMetadata?> LoadSessionAsync(LoadSessionParams parameters,
+        IResponseStreamer streamer, CancellationToken cancellationToken)
     {
-        var sessionId = parameters.SessionId;
+        var entry = RestoreEntry(parameters, cancellationToken);
+        if (entry == null) return null;
+        var token = entry.BeginPrompt(cancellationToken);
+        try
+        {
+            if (_replay != null && entry.Agent?.ExportTranscript() is { } snapshot)
+                await _replay.ReplayAsync(entry.SessionId, snapshot, streamer, token).ConfigureAwait(false);
+            return MetadataFor(entry);
+        }
+        finally { entry.EndPrompt(); }
+    }
 
-        // Session state lives in-memory only; a session that is no longer
-        // retained (evicted, disposed, or from a previous process) cannot be
-        // resumed. Reject unknown ids rather than fabricating an empty session.
-        // History replay: the conversation lives inside the engine agent, which
-        // exposes no transcript API, so no session/update replay is emitted here;
-        // the client resumes with metadata only.
+    public Task<SessionMetadata?> ResumeSessionAsync(LoadSessionParams parameters, CancellationToken cancellationToken)
+    {
+        var entry = RestoreEntry(parameters, cancellationToken);
+        return Task.FromResult(entry == null ? null : MetadataFor(entry));
+    }
+
+    private AcpSessionEntry? RestoreEntry(LoadSessionParams parameters, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        if (!_sessions.TryGet(parameters.SessionId, out var entry))
+        {
+            var record = _store?.Load(parameters.SessionId);
+            if (record == null) return null;
+            if (!string.IsNullOrEmpty(parameters.Cwd) && Path.GetFullPath(parameters.Cwd) != record.Cwd)
+                throw new InvalidOperationException("Session belongs to a different working directory.");
+            var prompt = _systemPrompt + $"\n\nThe user's working directory is: {record.Cwd}";
+            var agent = _agentFactory.Create(prompt, record.Provider, record.Model, record.Cwd);
+            try
+            {
+                agent.RestoreTranscript(record.Snapshot);
+                entry = new AcpSessionEntry(record.SessionId, agent, record.Mode, record.Model, record.Provider,
+                    prompt, record.Cwd, record.CreatedAt, record.Snapshot.Turns.Count);
+                _sessions.Add(entry);
+            }
+            catch { agent.Dispose(); throw; }
+        }
+        if (entry.HasActivePrompt) throw new InvalidOperationException("Session has an active prompt.");
+        if (!string.IsNullOrEmpty(parameters.Cwd) && Path.GetFullPath(parameters.Cwd) != entry.Cwd)
+            throw new InvalidOperationException("Session belongs to a different working directory.");
+        return entry;
+    }
+
+    private SessionMetadata MetadataFor(AcpSessionEntry entry) => new()
+    {
+        SessionId = entry.SessionId,
+        CreatedAt = entry.CreatedAt,
+        LastAccessedAt = entry.LastAccessedAt,
+        MessageCount = entry.MessageCount,
+        Mode = entry.Mode,
+        Model = entry.Model,
+        ConfigOptions = BuildConfigOptions(entry),
+        Metadata = new Dictionary<string, object>
+        {
+            ["provider"] = entry.Provider,
+            ["cwd"] = entry.Cwd,
+            ["tools_count"] = _toolRegistry.GetTools().Count()
+        }
+    };
+
+    private void Persist(AcpSessionEntry entry)
+    {
+        if (_store == null || entry.Agent?.ExportTranscript() is not { } snapshot) return;
+        _store.Save(new AcpStoredSession
+        {
+            SessionId = entry.SessionId,
+            Cwd = entry.Cwd,
+            Provider = entry.Provider,
+            Model = entry.Model,
+            Mode = entry.Mode,
+            CreatedAt = entry.CreatedAt,
+            UpdatedAt = DateTime.UtcNow,
+            Snapshot = snapshot
+        });
+    }
+
+    public Task<SessionListResult> ListSessionsAsync(string? cwd, string? cursor, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var records = (_store?.List() ?? []).Where(r => cwd == null || r.Cwd == Path.GetFullPath(cwd)).ToArray();
+        var start = 0;
+        if (cursor != null)
+        {
+            start = Array.FindIndex(records, r => r.SessionId == cursor) + 1;
+            if (start == 0) throw new ArgumentException("Invalid or expired session cursor.", nameof(cursor));
+        }
+        var page = records.Skip(start).Take(50).ToArray();
+        return Task.FromResult(new SessionListResult
+        {
+            Sessions = page.Select(r => new SessionCatalogEntry
+            {
+                SessionId = r.SessionId,
+                Cwd = r.Cwd,
+                UpdatedAt = r.UpdatedAt,
+                Title = r.Snapshot.Turns.FirstOrDefault()?.User.Content[..Math.Min(100, r.Snapshot.Turns.FirstOrDefault()?.User.Content.Length ?? 0)]
+            }).ToList(),
+            NextCursor = start + page.Length < records.Length ? page.Last().SessionId : null
+        });
+    }
+
+    public Task<bool> DeleteSessionAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_sessions.TryGet(sessionId, out var entry) && entry.HasActivePrompt)
+            throw new InvalidOperationException("Close the active session before deleting it.");
+        var deleted = _store?.Delete(sessionId) ?? false;
+        return Task.FromResult(_sessions.Remove(sessionId) || deleted);
+    }
+
+    public async Task CloseSessionAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
         if (_sessions.TryGet(sessionId, out var entry))
         {
-            _logger?.LogInformation("Loaded existing ACP session: {SessionId}", sessionId);
-
-            return Task.FromResult<SessionMetadata?>(new SessionMetadata
-            {
-                SessionId = sessionId,
-                CreatedAt = entry.CreatedAt,
-                LastAccessedAt = entry.LastAccessedAt,
-                MessageCount = entry.MessageCount,
-                Mode = entry.Mode,
-                Model = entry.Model,
-                ConfigOptions = BuildConfigOptions(entry),
-                Metadata = new Dictionary<string, object>
-                {
-                    ["provider"] = entry.Provider,
-                    ["tools_count"] = _toolRegistry.GetTools().Count()
-                }
-            });
+            await entry.BeginClose().WaitAsync(cancellationToken).ConfigureAwait(false);
+            Persist(entry);
+            _sessions.Remove(sessionId);
         }
-
-        _logger?.LogWarning("Cannot load unknown ACP session: {SessionId}", sessionId);
-        return Task.FromResult<SessionMetadata?>(null);
     }
 
     public async Task<AgentResponse> ProcessPromptAsync(
@@ -266,6 +364,7 @@ public class AndyAgentProvider : IAgentProvider, ISessionConfigProvider, IDispos
             var result = await agent.ProcessMessageAsync(effectivePrompt, streamer, linkedToken);
 
             entry.IncrementMessageCount();
+            Persist(entry);
 
             if (!agent.StreamsResponses && result.Success && !string.IsNullOrEmpty(result.Response))
             {
@@ -396,8 +495,13 @@ public class AndyAgentProvider : IAgentProvider, ISessionConfigProvider, IDispos
         var replacement = _agentFactory.Create(
             entry.SystemPrompt,
             selection.ProviderId,
-            selection.ModelId);
+            selection.ModelId, entry.Cwd);
 
+        try
+        {
+            if (entry.Agent?.ExportTranscript() is { } snapshot) replacement.RestoreTranscript(snapshot);
+        }
+        catch { replacement.Dispose(); throw; }
         if (!entry.TryReplaceAgent(replacement, selection.ProviderId, selection.ModelId))
         {
             replacement.Dispose();
@@ -405,8 +509,9 @@ public class AndyAgentProvider : IAgentProvider, ISessionConfigProvider, IDispos
                 "The session model cannot be changed while a prompt is running.");
         }
 
+        Persist(entry);
         _logger?.LogInformation(
-            "Changed ACP session {SessionId} model to {Provider}/{Model}; conversation context reset",
+            "Changed ACP session {SessionId} model to {Provider}/{Model}; conversation context preserved",
             sessionId,
             selection.ProviderId,
             selection.ModelId);
