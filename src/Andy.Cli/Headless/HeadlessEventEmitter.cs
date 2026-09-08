@@ -183,6 +183,14 @@ public sealed class HeadlessEventEmitter : IDisposable
         });
     }
 
+    internal void EmitBuildVerification(int attempt, IReadOnlyList<VerificationCommandResult> results)
+        => Write(HeadlessEventKind.BuildVerification, new JsonObject
+        {
+            ["attempt"] = attempt,
+            ["passed"] = results.All(r => r.Passed),
+            ["commands"] = JsonSerializer.SerializeToNode(results, s_jsonOptions)
+        });
+
     public void EmitOutputWritten(string path, long bytes)
         => Write(HeadlessEventKind.OutputWritten, new JsonObject { ["path"] = path, ["bytes"] = bytes });
 
@@ -314,6 +322,7 @@ public enum HeadlessEventKind
     ToolCallFinished,
     ToolUsageAudit,
     RequiredActionVerification,
+    BuildVerification,
     AgentProgress,
     OutputWritten,
     Error,

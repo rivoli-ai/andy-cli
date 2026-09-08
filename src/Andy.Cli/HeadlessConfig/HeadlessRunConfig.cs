@@ -49,6 +49,7 @@ public sealed record HeadlessRunConfig
     // the model's final prose.
     public IReadOnlyList<HeadlessRequiredAction> RequiredActions { get; init; } = [];
 
+    public HeadlessVerification? Verification { get; init; }
     public HeadlessLimits Limits { get; init; } = new();
 }
 
@@ -141,4 +142,11 @@ public sealed record HeadlessLimits
     public int? MaxOutputTokens { get; init; }
     public int? ContinuationWindowIterations { get; init; }
     public int? EngineTimeoutSeconds { get; init; }
+}
+
+public sealed record HeadlessVerification
+{
+    public IReadOnlyList<string> Commands { get; init; } = [];
+    public int MaxAttempts { get; init; } = 2;
+    public int TimeoutSeconds { get; init; } = 120;
 }

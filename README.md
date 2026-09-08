@@ -435,3 +435,9 @@ ordered load replay, and list/resume/close/delete lifecycle support (#206).
 TUI, headless and ACP load bounded root-to-cwd AGENTS.md guidance with source
 attribution. Use `skills instructions` to inspect scope and skipped-file diagnostics.
 See [authoring and limits](docs/REPOSITORY_INSTRUCTIONS.md) (#212).
+
+### 2026-09-07: Headless build/test verification
+
+Changed .NET code is verified before headless success, with bounded same-run
+correction. Explicit commands support other workflows. See
+[verification configuration and limits](docs/HEADLESS_VERIFICATION.md) (#156).

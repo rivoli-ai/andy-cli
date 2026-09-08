@@ -29,8 +29,7 @@
         "agent_progress",
         "output_written",
         "error",
-        "finished"
-      ]
+        "finished", "build_verification"]
     },
     "data": {
       "type": "object",
@@ -38,6 +37,30 @@
     }
   },
   "$defs": {
+    "build_verification": {
+      "type": "object",
+      "required": [
+        "attempt",
+        "passed",
+        "commands"
+      ],
+      "properties": {
+        "attempt": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    },
     "started": {
       "type": "object",
       "required": ["run_id", "agent_slug", "model_provider", "model_id", "tool_count"],

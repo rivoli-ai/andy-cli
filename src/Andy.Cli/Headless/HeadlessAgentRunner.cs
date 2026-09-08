@@ -335,6 +335,8 @@ public static class HeadlessAgentRunner
         using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
 
+        var verification = new BuildVerification(workingDirectory ?? Environment.CurrentDirectory, config.Verification);
+        var verificationClock = Stopwatch.StartNew();
         SimpleAgentResult? result = null;
         try
         {
@@ -348,6 +350,60 @@ public static class HeadlessAgentRunner
                     emitter.EmitLlmChunk(string.Empty, delta.Turn - 1, "narration");
             }, linkedCts.Token);
             iterations = result?.TurnCount ?? 0;
+            TranscriptSnapshot? correctionSnapshot = null;
+            for (var attempt = 1; result is { Success: true } && !linkedCts.IsCancellationRequested && verification.Commands().Count > 0; attempt++)
+            {
+                var checks = await verification.RunAsync(toolExecutor, linkedCts.Token);
+                emitter.EmitBuildVerification(attempt, checks);
+                if (checks.All(check => check.Passed)) break;
+                emitter.EmitLlmChunk(string.Empty, Math.Max(0, iterations - 1), "narration");
+                if (attempt >= verification.MaxAttempts)
+                {
+                    result = result with { Success = false, StopReason = "build_verification_failed" };
+                    break;
+                }
+                var remaining = (config.Limits.MaxIterations > 0 ? config.Limits.MaxIterations : 10) - iterations;
+                if (remaining <= 0)
+                {
+                    result = result with { Success = false, StopReason = MaxTurnsExceededStopReason };
+                    break;
+                }
+                using var correction = new SimpleAgent(new HeadlessStreamingProvider(llmProvider), toolHost.Registry, toolExecutor, systemPrompt,
+                    maxTurns: remaining, workingDirectory: workingDirectory, maxOutputTokens: budget.MaxOutputTokens,
+                    logger: loggerFactory.CreateLogger<SimpleAgent>());
+                correctionSnapshot ??= agent.ExportTranscript();
+                correction.RestoreTranscript(correctionSnapshot);
+                var offset = iterations;
+                using var correctionDeadline = CancellationTokenSource.CreateLinkedTokenSource(linkedCts.Token);
+                if (budget.ContinuationPolicy?.MaxElapsedTime is { } ceiling)
+                {
+                    var timeLeft = ceiling - verificationClock.Elapsed;
+                    if (timeLeft <= TimeSpan.Zero)
+                    {
+                        result = result with { Success = false, StopReason = "continuation_time_exceeded" };
+                        break;
+                    }
+                    correctionDeadline.CancelAfter(timeLeft);
+                }
+                try
+                {
+                    result = await correction.ProcessMessageAsync(BuildVerification.Feedback(checks), delta =>
+                    {
+                        if (linkedCts.IsCancellationRequested) return;
+                        if (delta.Kind == AgentResponseDeltaKind.Text)
+                            emitter.EmitLlmChunk(delta.Text ?? string.Empty, offset + delta.Turn - 1, "delta");
+                        else if (delta.Kind == AgentResponseDeltaKind.Discarded)
+                            emitter.EmitLlmChunk(string.Empty, offset + delta.Turn - 1, "narration");
+                    }, correctionDeadline.Token);
+                }
+                catch (OperationCanceledException) when (!linkedCts.IsCancellationRequested && correctionDeadline.IsCancellationRequested)
+                {
+                    result = result with { Success = false, StopReason = "continuation_time_exceeded" };
+                    break;
+                }
+                iterations += result.TurnCount;
+                correctionSnapshot = correction.ExportTranscript();
+            }
         }
         catch (OperationCanceledException)
         {
@@ -385,7 +441,7 @@ public static class HeadlessAgentRunner
         // partial output is produced.
         if (linkedCts.IsCancellationRequested)
         {
-            iterations = result?.TurnCount ?? agent.GetHistory().Count / 2;
+            iterations = Math.Max(iterations, result?.TurnCount ?? agent.GetHistory().Count / 2);
             if (timeoutCts.IsCancellationRequested && !ct.IsCancellationRequested)
             {
                 emitter.EmitError(
@@ -428,7 +484,7 @@ public static class HeadlessAgentRunner
         }
 
         var output = result.Response ?? string.Empty;
-        emitter.EmitLlmChunk(string.Empty, Math.Max(0, result.TurnCount - 1), "final");
+        emitter.EmitLlmChunk(string.Empty, Math.Max(0, iterations - 1), "final");
 
         // #219: a plausible model response is not evidence that a required action
         // happened. Verify actual terminal tool outcomes before format validation
