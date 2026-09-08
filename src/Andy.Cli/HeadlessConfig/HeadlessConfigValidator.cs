@@ -58,6 +58,12 @@ public static class HeadlessConfigValidator
                 + "limits.timeout_seconds so the agent can finalize before CLI cleanup.";
         }
 
+        foreach (var tool in config.Tools.Where(t => t.Transport == "mcp"))
+        {
+            try { Andy.Cli.Headless.HeadlessToolHost.ResolveEndpoint(tool, config); }
+            catch (InvalidOperationException) { return "MCP tools require an HTTP(S) endpoint or a resolved mcp_gateway."; }
+        }
+
         var apiKeyRef = config.Model.ApiKeyRef;
         if (!string.IsNullOrEmpty(apiKeyRef)
             && !TryParseEnvRef(apiKeyRef, out _, out var apiErr))

@@ -12,6 +12,7 @@ namespace Andy.Cli.HeadlessConfig;
 
 public sealed record HeadlessRunConfig
 {
+    public string? McpGateway { get; init; }
     public int SchemaVersion { get; init; }
     public Guid RunId { get; init; }
     public HeadlessAgent Agent { get; init; } = new();
@@ -99,6 +100,7 @@ public sealed record HeadlessTool
     public string Transport { get; init; } = string.Empty;
     public string? Endpoint { get; init; }
     public string? Binary { get; init; }
+    public string? InputMode { get; init; }
     public IReadOnlyList<string>? Command { get; init; }
 }
 

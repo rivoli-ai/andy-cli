@@ -458,3 +458,8 @@ redirections and compound commands remain supported (PR #93).
 ESC cancels the active agent turn; queued messages continue with fresh cancellation
 tokens. Idle ESC still opens exit confirmation. Modal dismissal takes precedence
 (PR #94). Canceled turns are not recorded as completed undo transactions.
+
+### Gateway and JSON tool input - 2026-09-08
+
+Headless tools support MCP gateway routing and bounded JSON stdin input with
+concurrent pipe draining. See [configuration](docs/MCP_GATEWAY_AND_JSON_TOOLS.md).
