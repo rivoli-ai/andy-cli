@@ -4,9 +4,9 @@
     "net10.0": {
       "Andy.Llm": {
         "type": "Direct",
-        "requested": "[2026.7.21-rc.76, )",
-        "resolved": "2026.7.21-rc.76",
-        "contentHash": "uQWiPMkL4smlpEewcwJhayWzwoyivAYThJ4MX6JjbcYX1YIBchRMxW2v/4+qgY1r0tVJP9irtanepW1Bj/4A4A==",
+        "requested": "[2026.9.8-rc.85, )",
+        "resolved": "2026.9.8-rc.85",
+        "contentHash": "8yIAT9O1beRDNs5kwhotHOztiUd47ZOWU8Hb/Hdfoz069jJUG6ga+3ZvSqZDqhwVGPvUtR+cOfWNYU4prbpGBQ==",
         "dependencies": {
           "Andy.Configuration": "2026.5.16-rc.8",
           "Andy.Model": "2026.6.20-rc.10",
@@ -186,12 +186,12 @@
       },
       "Andy.Engine": {
         "type": "Transitive",
-        "resolved": "2026.7.31-rc.98",
-        "contentHash": "1X+ZtcfHE+C3agipQeEKE+o0KXSkhCkYMjbRW1uKr3nRZWOLNIQQDjp4+MN2t6KyaXmcO4c8U67nZ9LXX5nHbQ==",
+        "resolved": "2026.9.8-rc.102",
+        "contentHash": "UenWSyq/6WZtgkHnlGvChpAoXbbmoj8STQMQRkCrOnyg4ltVmOcL9UhDnL3p/tFzyq2Ywjuts03vG6CEmbc4TQ==",
         "dependencies": {
           "Andy.Configuration": "2026.5.16-rc.8",
           "Andy.Context": "2026.5.16-rc.6",
-          "Andy.Llm": "2026.7.21-rc.76",
+          "Andy.Llm": "2026.9.8-rc.85",
           "Andy.Model": "2026.7.21-rc.13",
           "Andy.Tools": "2026.7.21-rc.86",
           "Andy.Tools.Pdf": "2026.7.21-rc.86",
@@ -1260,8 +1260,8 @@
         "dependencies": {
           "Andy.Acp.Core": "[2026.7.21.1, )",
           "Andy.CodeIndex.Infrastructure": "[2026.7.21-rc.11, )",
-          "Andy.Engine": "[2026.7.31-rc.98, )",
-          "Andy.Llm": "[2026.7.21-rc.76, )",
+          "Andy.Engine": "[2026.9.8-rc.102, )",
+          "Andy.Llm": "[2026.9.8-rc.85, )",
           "Andy.MCP": "[2026.5.16-rc.31, )",
           "Andy.Model": "[2026.7.21-rc.13, )",
           "Andy.Permissions": "[2026.7.27-rc.16, )",

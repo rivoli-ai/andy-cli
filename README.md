@@ -441,3 +441,9 @@ See [authoring and limits](docs/REPOSITORY_INSTRUCTIONS.md) (#212).
 Changed .NET code is verified before headless success, with bounded same-run
 correction. Explicit commands support other workflows. See
 [verification configuration and limits](docs/HEADLESS_VERIFICATION.md) (#156).
+
+## Provider error diagnostics - 2026-09-08
+
+Provider failures now display in the error color with structured provider, HTTP
+status, and retry information when available. Messages are redacted and rendered
+as plain text. See [provider error diagnostics](docs/PROVIDER_ERRORS.md).

@@ -311,6 +311,9 @@ public class SimpleAssistantService : IDisposable
         };
     }
 
+    /// <summary>The latest structured provider failure, cleared at the start of each request.</summary>
+    public Andy.Llm.Errors.LlmProviderError? LastProviderError { get; private set; }
+
     /// <summary>
     /// Process a user message
     /// </summary>
@@ -326,6 +329,7 @@ public class SimpleAssistantService : IDisposable
         CancellationToken cancellationToken = default,
         IReadOnlyList<Andy.Model.Model.MessagePart>? structuredParts = null)
     {
+        LastProviderError = null;
         try
         {
             // Create new content pipeline for this request
@@ -656,7 +660,11 @@ public class SimpleAssistantService : IDisposable
                 _logger?.LogWarning("Agent returned empty response. Success: {Success}, StopReason: {StopReason}",
                     result.Success, result.StopReason);
             }
-            pipeline.AddRawContent(SelectResponseContent(result.Response, result.Success, result.StopReason));
+            LastProviderError = result.ProviderError;
+            if (!result.Success && result.ProviderError is { } providerError)
+                _feed.AddItem(new ErrorTextItem(ProviderErrorFormatter.Format(providerError)));
+            else
+                pipeline.AddRawContent(SelectResponseContent(result.Response, result.Success, result.StopReason));
 
             // Context line disabled to avoid rendering issues
             // pipeline.AddSystemMessage("", SystemMessageType.Context, priority: 1999);
@@ -680,7 +688,13 @@ public class SimpleAssistantService : IDisposable
                 return $"[Reached the {MaxAgentTurns}-turn tool-call limit before completing this request.]";
             }
 
-            return result.Response ?? string.Empty;
+            return result.ProviderError is { } failure ? ProviderErrorFormatter.Format(failure) : result.Response ?? string.Empty;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            _liveStats.End();
+            _feed.ClearProcessingIndicator();
+            return "[Cancelled]";
         }
         catch (Exception ex)
         {
@@ -699,20 +713,12 @@ public class SimpleAssistantService : IDisposable
                 _logger?.LogError("Cerebras provider error - Stack: {Stack}", ex.StackTrace);
             }
 
-            _feed.AddMarkdownRich($"[ERROR] {ex.Message}");
-
-            // Show more details for provider-specific errors
-            if (_providerName.Contains("cerebras", StringComparison.OrdinalIgnoreCase))
-            {
-                _feed.AddMarkdownRich($"        Provider: {_providerName}");
-                _feed.AddMarkdownRich($"        Model: {_modelName}");
-                if (ex.InnerException != null)
-                {
-                    _feed.AddMarkdownRich($"        Details: {ex.InnerException.Message}");
-                }
-            }
-
-            return $"Error: {ex.Message}";
+            LastProviderError = (ex as Andy.Llm.Errors.LlmProviderException)?.Error;
+            var message = LastProviderError is { } failure
+                ? ProviderErrorFormatter.Format(failure)
+                : ProviderErrorFormatter.Plain("Error: " + ex.Message);
+            _feed.AddItem(new ErrorTextItem(message));
+            return message;
         }
     }
 
