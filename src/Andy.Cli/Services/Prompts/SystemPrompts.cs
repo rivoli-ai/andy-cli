@@ -27,7 +27,7 @@ public static class SystemPrompts
     /// <summary>
     /// Gets the default CLI prompt with environment context.
     /// </summary>
-    public static string GetDefaultCliPrompt()
+    public static string GetDefaultCliPrompt(string? workingDirectory = null, bool includeRepositoryInstructions = true)
     {
         return new SystemPromptBuilder()
             .WithCoreMandates()
@@ -35,10 +35,10 @@ public static class SystemPrompts
             .WithWorkflowGuidelines()
             .WithEnvironment(
                 platform: GetPlatformName(),
-                workingDirectory: Directory.GetCurrentDirectory(),
+                workingDirectory: workingDirectory ?? Directory.GetCurrentDirectory(),
                 currentDate: DateTime.Now,
                 timeZone: TimeZoneInfo.Local)
-            .Build();
+            .Build() + (includeRepositoryInstructions ? RepositoryInstructions.Resolve(workingDirectory ?? Directory.GetCurrentDirectory()).ToPrompt() : string.Empty);
     }
 
     /// <summary>
@@ -46,7 +46,7 @@ public static class SystemPrompts
     /// </summary>
     public static string GetPromptWithTools(
         IEnumerable<ToolInfo> tools,
-        string? customInstructions = null)
+        string? customInstructions = null, string? workingDirectory = null)
     {
         return new SystemPromptBuilder()
             .WithCoreMandates()
@@ -54,12 +54,12 @@ public static class SystemPrompts
             .WithWorkflowGuidelines()
             .WithEnvironment(
                 platform: GetPlatformName(),
-                workingDirectory: Directory.GetCurrentDirectory(),
+                workingDirectory: workingDirectory ?? Directory.GetCurrentDirectory(),
                 currentDate: DateTime.Now,
                 timeZone: TimeZoneInfo.Local)
             .WithAvailableTools(tools)
             .WithCustomInstructions(customInstructions)
-            .Build();
+            .Build() + RepositoryInstructions.Resolve(workingDirectory ?? Directory.GetCurrentDirectory()).ToPrompt();
     }
 
     /// <summary>

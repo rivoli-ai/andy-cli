@@ -279,6 +279,10 @@ public static class HeadlessAgentRunner
             ? modeSection
             : config.Agent.Instructions + "\n\n" + modeSection;
 
+        var repositoryInstructions = Andy.Cli.Services.Prompts.RepositoryInstructions.Resolve(workingDirectory ?? Environment.CurrentDirectory);
+        systemPrompt += repositoryInstructions.ToPrompt();
+        stderr.WriteLine(repositoryInstructions.Diagnostics());
+
         using var agent = new SimpleAgent(
             new HeadlessStreamingProvider(llmProvider),
             toolHost.Registry,

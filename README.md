@@ -429,3 +429,9 @@ and reports correlated cancellation/failure outcomes with bounded native file co
 
 ACP sessions now survive restarts with redacted history, original model and workspace,
 ordered load replay, and list/resume/close/delete lifecycle support (#206).
+
+### 2026-09-07: Scoped repository instructions
+
+TUI, headless and ACP load bounded root-to-cwd AGENTS.md guidance with source
+attribution. Use `skills instructions` to inspect scope and skipped-file diagnostics.
+See [authoring and limits](docs/REPOSITORY_INSTRUCTIONS.md) (#212).

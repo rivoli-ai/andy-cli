@@ -41,6 +41,7 @@ public class SkillsCommand : ICommand
         var sub = (args.Length > 0 ? args[0] : "list").ToLowerInvariant();
         return sub switch
         {
+            "instructions" => CommandResult.CreateSuccess(Andy.Cli.Services.Prompts.RepositoryInstructions.Resolve(_workspaceDirectory).Diagnostics()),
             "list" or "ls" => await ListSkillsAsync(cancellationToken),
             "info" or "show" => await ShowSkillAsync(args, cancellationToken),
             "enable" => await SetEnabledAsync(args, enabled: true, cancellationToken),
@@ -211,6 +212,7 @@ public class SkillsCommand : ICommand
         sb.AppendLine("  skills help             Show this help");
         sb.AppendLine();
         sb.AppendLine("Skills are directories containing a SKILL.md manifest (YAML frontmatter with");
+        sb.AppendLine("Use skills instructions to inspect scoped AGENTS.md sources and load diagnostics.");
         sb.AppendLine("name/description, then markdown instructions), discovered from:");
         foreach (var root in Roots())
             sb.AppendLine($"  {root}");

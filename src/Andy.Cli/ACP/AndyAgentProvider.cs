@@ -71,7 +71,7 @@ public class AndyAgentProvider : IAgentProvider, ISessionConfigProvider, ISessio
             StringComparer.Ordinal);
 
         // Build system prompt
-        _systemPrompt = Andy.Cli.Services.Prompts.SystemPrompts.GetDefaultCliPrompt();
+        _systemPrompt = Andy.Cli.Services.Prompts.SystemPrompts.GetDefaultCliPrompt(includeRepositoryInstructions: false);
     }
 
     /// <summary>
@@ -118,6 +118,8 @@ public class AndyAgentProvider : IAgentProvider, ISessionConfigProvider, ISessio
         var systemPrompt = string.IsNullOrWhiteSpace(parameters?.Cwd)
             ? _systemPrompt
             : _systemPrompt + $"\n\nThe user's working directory is: {parameters!.Cwd}";
+
+        systemPrompt += Andy.Cli.Services.Prompts.RepositoryInstructions.Resolve(parameters?.Cwd ?? Environment.CurrentDirectory).ToPrompt();
 
         // Create a new engine agent for this session.
         var selection = ResolveInitialSelection(model);
@@ -184,7 +186,8 @@ public class AndyAgentProvider : IAgentProvider, ISessionConfigProvider, ISessio
             if (record == null) return null;
             if (!string.IsNullOrEmpty(parameters.Cwd) && Path.GetFullPath(parameters.Cwd) != record.Cwd)
                 throw new InvalidOperationException("Session belongs to a different working directory.");
-            var prompt = _systemPrompt + $"\n\nThe user's working directory is: {record.Cwd}";
+            var prompt = _systemPrompt + $"\n\nThe user's working directory is: {record.Cwd}"
+                + Andy.Cli.Services.Prompts.RepositoryInstructions.Resolve(record.Cwd).ToPrompt();
             var agent = _agentFactory.Create(prompt, record.Provider, record.Model, record.Cwd);
             try
             {
