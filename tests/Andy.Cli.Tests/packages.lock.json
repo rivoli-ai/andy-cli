@@ -25,9 +25,9 @@
       },
       "Andy.Tools": {
         "type": "Direct",
-        "requested": "[2026.7.21-rc.86, )",
-        "resolved": "2026.7.21-rc.86",
-        "contentHash": "gbSPap8FkNpxhRSUnmnbyH8yRSfLqpO0HUcOUeHD00PIoOXvzXzSA95HqfxR6ZV6bRBw9xAJ1J2yJGNKlV6Ozg==",
+        "requested": "[2026.9.8-rc.98, )",
+        "resolved": "2026.9.8-rc.98",
+        "contentHash": "NqjuFuldjsXLJL4fOm7tl4OKwXhmXGgsFYfEYQ48w5/dc0QbM7Z11iFb1ahgc9DIFSCvXhBdnPjGt9YTP8wT8w==",
         "dependencies": {
           "Microsoft.Extensions.Caching.Memory": "8.0.1",
           "Microsoft.Extensions.Hosting": "8.0.0"
@@ -239,23 +239,23 @@
       },
       "Andy.Tools.Data": {
         "type": "Transitive",
-        "resolved": "2026.7.21-rc.86",
-        "contentHash": "lVv1iA6c+0fJXOx0e0uxwj6trXxwB4761O0EG/LzK3Dnri5rKNW5rTjm33pIDpQLyUeY77IXgLRzjfCcCbXWsg==",
+        "resolved": "2026.9.8-rc.98",
+        "contentHash": "0FN2WZrPTvJNfuK2UBHcbsUm1fgKgf++YRAYC1wwXa6MzxD+8t+/sAM1ApiEd2hJ2DIbG8GHvppGZ+3n1mQ6iw==",
         "dependencies": {
           "Andy.Data": "2026.6.15-rc.2",
           "Andy.Data.Abstractions": "2026.6.15-rc.2",
-          "Andy.Tools": "2026.7.21-rc.86",
+          "Andy.Tools": "2026.9.8-rc.98",
           "Microsoft.Extensions.DependencyInjection.Abstractions": "8.0.2",
           "Microsoft.Extensions.Logging.Abstractions": "8.0.2"
         }
       },
       "Andy.Tools.Pdf": {
         "type": "Transitive",
-        "resolved": "2026.7.21-rc.86",
-        "contentHash": "QSPfjXRPWrZqYL/5pZS1w/uhuk5fQc8/4AIjJizEizS0J9G0T+d7FlOjz4m9a9w0T+HazTJV3J7j3dvUR9gppA==",
+        "resolved": "2026.9.8-rc.98",
+        "contentHash": "JJE+hJHf6FSfMGrgZKTr+bNuBh1M3OELobUhJ2nBPVbJonpAJRiLx/rvz71kjqOLY/BK7n6UW1iP6l0TZLFh5A==",
         "dependencies": {
           "Andy.Doc.Pdf": "2026.7.21-rc.1",
-          "Andy.Tools": "2026.7.21-rc.86",
+          "Andy.Tools": "2026.9.8-rc.98",
           "Microsoft.Extensions.DependencyInjection.Abstractions": "8.0.2",
           "Microsoft.Extensions.Logging.Abstractions": "8.0.2"
         }
@@ -1268,9 +1268,9 @@
           "Andy.Model": "[2026.7.21-rc.13, )",
           "Andy.Permissions": "[2026.7.27-rc.16, )",
           "Andy.Skills.Tools": "[2026.7.21-rc.17, )",
-          "Andy.Tools": "[2026.7.21-rc.86, )",
-          "Andy.Tools.Data": "[2026.7.21-rc.86, )",
-          "Andy.Tools.Pdf": "[2026.7.21-rc.86, )",
+          "Andy.Tools": "[2026.9.8-rc.98, )",
+          "Andy.Tools.Data": "[2026.9.8-rc.98, )",
+          "Andy.Tools.Pdf": "[2026.9.8-rc.98, )",
           "Andy.Tui": "[2026.7.21-rc.162, )",
           "JsonRepairSharp": "[1.2.4, )",
           "JsonSchema.Net": "[9.3.0, )",

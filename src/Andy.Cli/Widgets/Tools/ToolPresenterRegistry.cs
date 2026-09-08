@@ -44,6 +44,7 @@ namespace Andy.Cli.Widgets.Tools
             new WriteFileToolPresenter(),
             new ReplaceTextToolPresenter(),
             new GitDiffToolPresenter(),
+            new GitWorktreeToolPresenter(),
             new TodoToolPresenter(),
             new WebToolPresenter(),
             new UtilityToolPresenter(),

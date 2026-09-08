@@ -53,6 +53,7 @@ public sealed class PlanModeToolPolicy
         "git_log",
         "git_show",
         "git_blame",
+        "git_worktree_list",
 
         // Code intelligence
         "code_index",
@@ -134,6 +135,9 @@ public sealed class PlanModeToolPolicy
             ["shell"] = "it runs shell commands, which can mutate anything",
             ["dataframe_export"] = "it writes datasets to disk",
             ["todo_management"] = "it writes the persisted todo list",
+            ["git_worktree_add"] = "it creates a worktree directory and can create a branch",
+            ["git_worktree_remove"] = "it deletes a worktree directory",
+            ["git_worktree_prune"] = "it deletes worktree registrations from the git directory",
         };
 
     /// <summary>

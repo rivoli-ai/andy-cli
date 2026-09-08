@@ -435,6 +435,8 @@ public static class CliPermissionServiceExtensions
         // every built-in tool mapping.
         var actionResolver = new DefaultToolActionResolver();
         actionResolver.Register("create_directory", ("path", ResourceKind.Path));
+        actionResolver.Register("git_worktree_add", ("path", ResourceKind.Path));
+        actionResolver.Register("git_worktree_remove", ("path", ResourceKind.Path));
         services.TryAddSingleton<IToolActionResolver>(actionResolver);
 
         services.AddAndyPermissions(options =>
@@ -531,7 +533,7 @@ public static class CliPermissionServiceExtensions
 
     private static IReadOnlyList<PermissionRule> AppendAskDefaults(IReadOnlyList<PermissionRule> builtin)
     {
-        string[] mutating = { "write_file", "delete_file", "move_file", "copy_file", "file_editor", "replace_text", "create_directory" };
+        string[] mutating = { "write_file", "delete_file", "move_file", "copy_file", "file_editor", "replace_text", "create_directory", "git_worktree_add", "git_worktree_remove", "git_worktree_prune" };
         var list = new List<PermissionRule>(builtin);
         foreach (var tool in mutating)
         {

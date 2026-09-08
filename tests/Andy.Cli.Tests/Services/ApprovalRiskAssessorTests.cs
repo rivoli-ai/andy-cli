@@ -100,6 +100,14 @@ public class ApprovalRiskAssessorTests
     public void Sensitive_ssh_path_is_high() =>
         Assert.Equal(ApprovalRisk.High, ApprovalRiskAssessor.Assess(Path("write_file", "/home/user/.ssh/config"), Root));
 
+    [Fact]
+    public void Worktree_remove_outside_root_is_high() =>
+        Assert.Equal(ApprovalRisk.High, ApprovalRiskAssessor.Assess(Path("git_worktree_remove", "/home/user/project-lanes/lane-1"), Root));
+
+    [Fact]
+    public void Worktree_remove_inside_root_is_normal() =>
+        Assert.Equal(ApprovalRisk.Normal, ApprovalRiskAssessor.Assess(Path("git_worktree_remove", "worktrees/lane-1"), Root));
+
     // --- AutoApprovalMode gating ---
 
     [Fact]

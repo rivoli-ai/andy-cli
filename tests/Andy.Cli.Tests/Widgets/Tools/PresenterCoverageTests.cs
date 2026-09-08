@@ -24,6 +24,10 @@ public class PresenterCoverageTests
     [InlineData("create_directory")]
     // Git
     [InlineData("git_diff")]
+    [InlineData("git_worktree_list")]
+    [InlineData("git_worktree_add")]
+    [InlineData("git_worktree_remove")]
+    [InlineData("git_worktree_prune")]
     // System
     [InlineData("execute_command")]
     [InlineData("process_info")]
