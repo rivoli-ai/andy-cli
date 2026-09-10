@@ -513,3 +513,12 @@ not change session IDs, permission identity, or coordination registration.
 - [x] Interactive, one-shot, headless and ACP naming controls.
 - [x] Portable session and fork history with fresh runtime observations on resume.
 - [x] Tests for naming, clearing, archive round trips, ACP isolation and headless tool execution.
+
+### Markdown table wrapping (2026-09-09)
+
+Wide table cells and headers now wrap without truncating their content. Columns
+stay aligned, row heights match scrolling, and resizing recalculates the layout.
+Very narrow views show labelled cells instead of an overflowing grid.
+
+- [x] Preserve long and multiline cell content in constrained widths (#98).
+- [x] Verify alignment, narrow layouts, scrolling slices, and resize reflow.
