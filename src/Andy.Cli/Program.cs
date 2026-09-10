@@ -322,6 +322,7 @@ class Program
 
             var toast = new Toast(); // Don't show initial toast as it interferes with prompt
             var tokenCounter = new TokenCounter();
+            var sessionUsage = new Andy.Cli.Services.Sessions.SessionUsageTracker();
             var contextStatusBar = new ContextStatusBar();
             var prompt = new PromptLine();
             var attachmentIndicator = new AttachmentIndicator();
@@ -665,7 +666,8 @@ class Program
                     extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, currentProvider),
                     systemPromptSuffix: ComposeSkillsPromptSection(),
                     modeState: agentModeState,
-                    identity: agentIdentity);
+                    identity: agentIdentity,
+                    sessionUsage: sessionUsage);
 
                 var providerUrl = ProviderUrlResolver.Resolve(currentProvider);
 
@@ -728,11 +730,8 @@ class Program
                     if (service == null) return;
                     var sessionProvider = modelCommand.GetCurrentProvider();
                     var sessionModel = modelCommand.GetCurrentModel();
-                    // Aggregate usage travels in the session envelope (issue #285) as an
-                    // optional field, so sessions written before it existed still load.
-                    var usage = Andy.Cli.Services.Sessions.SessionUsage
-                        .FromTokenCounts(tokenCounter.TotalInputTokens, tokenCounter.TotalOutputTokens)
-                        .WithEstimatedCost(sessionProvider, sessionModel);
+                    // Preserve restored usage and price each provider round-trip when recorded.
+                    var usage = sessionUsage.GetSnapshot();
                     sessionStore.Save(
                         sessionId,
                         service.ExportTranscript(),
@@ -844,6 +843,7 @@ class Program
                                 aiService.RestoreTranscript(record.Snapshot);
                                 if (agentName is not null) aiService.Identity.SetName(agentName);
                                 sessionId = targetId;
+                                sessionUsage.Restore(record.Summary.Usage);
                                 ReplaySessionIntoFeed(record.Snapshot, targetId);
                                 feed.AddMarkdownRich($"[session] Resumed session {targetId} ({record.Summary.TurnCount} turn{(record.Summary.TurnCount == 1 ? "" : "s")} restored)");
                                 var startupModeMessage = ApplySessionMode(record.Summary);
@@ -1042,10 +1042,12 @@ class Program
                     resumeLoggerFactory,
                     extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, resumeProvider),
                     modeState: agentModeState,
-                    identity: agentIdentity);
+                    identity: agentIdentity,
+                    sessionUsage: sessionUsage);
                 aiService.RestoreTranscript(record.Snapshot);
                 if (agentName is not null) aiService.Identity.SetName(agentName);
                 sessionId = targetId;
+                sessionUsage.Restore(record.Summary.Usage);
 
                 // Point the permission prompt at the resumed session and re-grant its recorded
                 // session-scoped approvals so they survive the switch.
@@ -1104,7 +1106,8 @@ class Program
                         extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, provider),
                         systemPromptSuffix: ComposeSkillsPromptSection(),
                         modeState: agentModeState,
-                    identity: agentIdentity);
+                    identity: agentIdentity,
+                    sessionUsage: sessionUsage);
                 }
                 else
                 {
@@ -1121,6 +1124,7 @@ class Program
                 // session's saved transcript stays resumable and the fresh conversation
                 // is persisted under its own id (issue #231).
                 sessionId = Andy.Cli.Services.Sessions.SessionStore.NewSessionId();
+                sessionUsage.Restore(null);
                 return Task.CompletedTask;
             });
 
@@ -1207,7 +1211,8 @@ class Program
                                         extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, newProvider),
                                         systemPromptSuffix: ComposeSkillsPromptSection(),
                                         modeState: agentModeState,
-                    identity: agentIdentity);
+                    identity: agentIdentity,
+                    sessionUsage: sessionUsage);
                                 }
 
                                 feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
@@ -1384,6 +1389,8 @@ class Program
                             aiService.ClearContext();
                         }
                         tokenCounter.Reset();
+                        sessionId = Andy.Cli.Services.Sessions.SessionStore.NewSessionId();
+                        sessionUsage.Restore(null);
                         feed.Clear();
                         feed.AddMarkdownRich("**Chat cleared!** Ready for a fresh conversation.");
                     }
@@ -2338,7 +2345,8 @@ class Program
                                                     extraBody: Andy.Cli.Configuration.ProviderExtraBody.Resolve(configuration, newProvider),
                                                     systemPromptSuffix: ComposeSkillsPromptSection(),
                                                     modeState: agentModeState,
-                    identity: agentIdentity);
+                    identity: agentIdentity,
+                    sessionUsage: sessionUsage);
                                             }
 
                                             feed.AddMarkdownRich($"*Note: Conversation context reset for {modelCommand.GetCurrentProvider()} model*");
@@ -2538,6 +2546,7 @@ class Program
                                     // the pre-clear transcript stays resumable instead of being
                                     // overwritten by the now-empty conversation (issue #231).
                                     sessionId = Andy.Cli.Services.Sessions.SessionStore.NewSessionId();
+                                    sessionUsage.Restore(null);
                                     feed.AddMarkdownRich("**Chat cleared!** Ready for a fresh conversation.");
                                     return;
                                 }

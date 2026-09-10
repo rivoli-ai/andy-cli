@@ -159,3 +159,20 @@ and `usage` are optional envelope fields, so:
 | `src/Andy.Cli/Services/Sessions/SessionForker.cs` | Full and point-in-time forks |
 | `src/Andy.Cli/Services/Sessions/SessionStatsFormatter.cs` | Stats aggregation and rendering |
 | `src/Andy.Cli/Commands/SessionCommand.cs` | The `/session` and `andy-cli session` surface |
+
+## Usage preservation verification (2026-09-09)
+
+Session usage is accumulated independently of the UI counter. Resuming seeds the
+accumulator from the saved session, so later saves retain earlier totals and
+any recorded cache/reasoning breakdown. Repeated saves do not count work again.
+Each new provider response is priced using the model that produced it; changing
+models cannot reprice earlier work. If any recorded work has unknown pricing,
+the session cost stays unknown. Restart and clear start a fresh accumulator.
+
+The current provider usage contract supplies input/output totals only. Detailed
+cache/reasoning fields in imported archives remain preserved, but new breakdowns
+cannot be inferred from those totals.
+
+- [x] Archive, fork, redaction, compatibility and platform metadata tests reviewed.
+- [x] Resumed usage survives new responses, UI counter resets and repeated saves.
+- [x] Session switches and mixed known/unknown model pricing have regression tests.

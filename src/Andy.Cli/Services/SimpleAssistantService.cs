@@ -90,6 +90,8 @@ public class SimpleAssistantService : IDisposable
     /// output accumulates across the turn's round-trips. Also feeds the cumulative session
     /// counter so the bottom status bar reflects real billed tokens.
     /// </summary>
+    private readonly Andy.Cli.Services.Sessions.SessionUsageTracker? _sessionUsage;
+
     private void OnLlmUsage(Andy.Model.Llm.LlmUsage usage)
     {
         _turnHadRealUsage = true;
@@ -98,6 +100,7 @@ public class SimpleAssistantService : IDisposable
         _liveStats.SetInputTokens(usage.PromptTokens);
         _liveStats.AddOutputTokens(usage.CompletionTokens);
         _tokenCounter?.AddTokens(usage.PromptTokens, usage.CompletionTokens);
+        _sessionUsage?.Record(usage, _providerName, _modelName);
     }
 
     // Tracks the last intermediate narration we rendered for the in-flight turn, so a model that
@@ -155,9 +158,11 @@ public class SimpleAssistantService : IDisposable
         IReadOnlyDictionary<string, object?>? extraBody = null,
         string? systemPromptSuffix = null,
         Andy.Cli.Modes.AgentModeState? modeState = null,
-        AgentIdentityState? identity = null)
+        AgentIdentityState? identity = null,
+        Andy.Cli.Services.Sessions.SessionUsageTracker? sessionUsage = null)
     {
         _feed = feed;
+        _sessionUsage = sessionUsage;
         _attachmentProvider = llmProvider;
         _tokenCounter = tokenCounter;
         _modeState = modeState;
