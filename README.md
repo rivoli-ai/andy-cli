@@ -483,6 +483,8 @@ Queued messages now reach the next model request after a complete tool-call roun
 
 Large bracketed pastes now appear as compact items while retaining their exact text for delivery. Edit around multiple items, delete an item in one action, undo with Ctrl+Z, and inspect it with F5. History, queue recall, and the external editor preserve retained payloads. See [large paste behavior](docs/LARGE_PASTES.md).
 
+Use `/editor` or Ctrl+X to edit the prompt with `VISUAL` or `EDITOR`. See the [external editor guide](docs/external-editor.md) for terminal recovery and direct Windows executable configuration.
+
 ### 2026-09-08: Command display colors
 
 Tool command headers now distinguish environment assignments, common command-family subcommands, options and inline values. Colors remain consistent across wrapped lines and update when the theme changes. Shell text is preserved unchanged for copying and execution.

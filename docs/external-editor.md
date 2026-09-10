@@ -48,7 +48,7 @@ Add the line to `~/.zshrc`, `~/.bashrc` or `~/.profile` to make it permanent. On
 PowerShell:
 
 ```powershell
-$env:VISUAL = 'code --wait'
+$env:VISUAL = 'nvim.exe'
 ```
 
 ### Terminal editors
@@ -188,3 +188,14 @@ the editor pipeline already handle them.
 | "could not be parsed: an opening double quote is never closed" | Unbalanced quoting in `VISUAL`/`EDITOR`. |
 | "The editor exited with code N" | The editor reported failure; Andy deliberately keeps your original prompt. |
 | "The editor was terminated by signal N" | The editor was killed; the prompt is kept. |
+
+## Cross-platform verification (2026-09-09)
+
+The deterministic fake editor is a .NET process on every platform. It exercises
+literal argument passing, paths containing spaces, Unicode, empty edits, failures,
+cleanup and terminal restoration. Windows editor tests now run in CI alongside
+the existing Linux suite and macOS packaged checks.
+
+On Windows, configure the editor executable (for example `nvim.exe`) directly.
+Batch launchers such as `code.cmd` are not executable editor processes; Andy does
+not insert a command shell around editor arguments.
