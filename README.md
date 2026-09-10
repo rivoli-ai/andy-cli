@@ -513,3 +513,10 @@ not change session IDs, permission identity, or coordination registration.
 - [x] Interactive, one-shot, headless and ACP naming controls.
 - [x] Portable session and fork history with fresh runtime observations on resume.
 - [x] Tests for naming, clearing, archive round trips, ACP isolation and headless tool execution.
+
+### Session usage preservation (2026-09-09)
+
+Saved-session usage now survives resume and UI counter resets. Repeated saves do
+not duplicate totals, imported cache/reasoning details are retained, and model
+switches preserve previously recorded costs. New sessions start fresh; unknown
+pricing remains explicitly unknown. See [session archives](docs/session-archives.md).
