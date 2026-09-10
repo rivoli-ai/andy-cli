@@ -26,6 +26,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../Andy.Cli.FakeEditor/Andy.Cli.FakeEditor.csproj" />
     <ProjectReference Include="..\..\src\Andy.Cli\Andy.Cli.csproj" />
     <ProjectReference Include="..\..\src\Andy.Cli.Headless.Contract\Andy.Cli.Headless.Contract.csproj" />
   </ItemGroup>

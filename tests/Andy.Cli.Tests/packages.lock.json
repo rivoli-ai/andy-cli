@@ -1278,6 +1278,9 @@
           "Microsoft.CodeAnalysis.CSharp.Workspaces": "[5.6.0, )"
         }
       },
+      "andy.cli.fakeeditor": {
+        "type": "Project"
+      },
       "andy.cli.headless.contract": {
         "type": "Project",
         "dependencies": {
