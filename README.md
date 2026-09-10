@@ -522,3 +522,10 @@ Very narrow views show labelled cells instead of an overflowing grid.
 
 - [x] Preserve long and multiline cell content in constrained widths (#98).
 - [x] Verify alignment, narrow layouts, scrolling slices, and resize reflow.
+
+### Session usage preservation (2026-09-09)
+
+Saved-session usage now survives resume and UI counter resets. Repeated saves do
+not duplicate totals, imported cache/reasoning details are retained, and model
+switches preserve previously recorded costs. New sessions start fresh; unknown
+pricing remains explicitly unknown. See [session archives](docs/session-archives.md).
