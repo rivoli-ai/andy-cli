@@ -1643,131 +1643,113 @@ namespace Andy.Cli.Widgets
 
         public TableItem(List<string> headers, List<string[]> rows, string? title = null)
         {
-            _headers = headers;
-            _rows = rows;
+            _headers = headers.ToList();
+            _rows = rows.Select(row => row.ToArray()).ToList();
             _title = title;
         }
 
-        // Layout: top border + header + header separator + N data rows + bottom border.
-        // This is exactly the number of rows RenderSlice draws, so the feed reserves no surplus
-        // (the old measure over-counted relative to the widget's actual output, leaving a phantom
-        // blank line around every table).
-        public int MeasureLineCount(int width)
+        private sealed record LayoutLine(string? Text, string[]? Cells, bool Header = false, bool Rule = false);
+
+        // Measurement and sliced rendering consume exactly the same wrapped layout.
+        public int MeasureLineCount(int width) => BuildLayout(width).Lines.Count;
+
+        private int _layoutWidth = -1;
+        private (int[] Widths, List<LayoutLine> Lines)? _layout;
+
+        private (int[] Widths, List<LayoutLine> Lines) BuildLayout(int width)
         {
-            if (_headers.Count == 0) return 0;
-            return _rows.Count + 4;
+            // Feed items own a snapshot of their cells. Rewrap only when resized, not on
+            // every scroll frame or for both the measure and render passes.
+            if (_layout is null || _layoutWidth != width)
+            {
+                _layout = CreateLayout(width);
+                _layoutWidth = width;
+            }
+            return _layout.Value;
         }
 
-        /// <summary>
-        /// Compute the inner (text) width of each column. Each column is sized to its widest cell
-        /// (header or data), then shrunk proportionally if the table would overflow the available
-        /// width. One space of padding is added inside every cell on each side.
-        /// </summary>
-        private int[] ComputeColumnWidths(int width)
+        private (int[] Widths, List<LayoutLine> Lines) CreateLayout(int width)
         {
+            var lines = new List<LayoutLine>();
             int cols = _headers.Count;
-            var content = new int[cols];
-            for (int i = 0; i < cols; i++)
+            if (cols == 0 || width <= 0) return (Array.Empty<int>(), lines);
+
+            // Below one character per padded column, switch to labelled cells. Keeping a
+            // horizontal grid here would draw outside the viewport even with empty cells.
+            if (width < cols * 4 + 1)
             {
-                int max = _headers[i]?.Length ?? 0;
-                foreach (var row in _rows)
-                    if (i < row.Length && row[i] != null)
-                        max = Math.Max(max, row[i].Length);
-                content[i] = Math.Max(1, max);
+                if (_rows.Count == 0)
+                    foreach (var header in _headers)
+                        foreach (var line in TextWrap.Wrap(header, width))
+                            lines.Add(new(line, null, Header: true));
+                for (int row = 0; row < _rows.Count; row++)
+                {
+                    if (row > 0) lines.Add(new(new string('-', width), null, Rule: true));
+                    for (int col = 0; col < cols; col++)
+                    {
+                        string value = col < _rows[row].Length ? _rows[row][col] : string.Empty;
+                        foreach (var line in TextWrap.Wrap(_headers[col] + ": " + value, width))
+                            lines.Add(new(line, null));
+                    }
+                }
+                return (Array.Empty<int>(), lines);
             }
 
-            // Total width when each cell is padded by one space on each side:
-            // sum(content + 2) inner widths, plus (cols + 1) vertical border glyphs.
-            const int pad = 2;
-            int borders = cols + 1;
-            int needed = content.Sum(c => c + pad) + borders;
-
-            if (needed <= width || width <= borders + (cols * pad))
+            var widths = new int[cols];
+            for (int col = 0; col < cols; col++)
             {
-                // Fits, or width too small to scale meaningfully: use content widths.
-                return content;
+                var cells = _rows.Select(row => col < row.Length ? row[col] : string.Empty)
+                    .Prepend(_headers[col]);
+                widths[col] = Math.Max(1, cells.SelectMany(cell =>
+                    (cell ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'))
+                    .Max(line => line.Length));
+            }
+            int budget = width - cols * 3 - 1;
+            int total = widths.Sum();
+            if (total > budget)
+            {
+                // Reserve one character per column, then share the remaining budget in
+                // proportion to demand. Rounding never allows the grid to exceed width.
+                int remaining = budget - cols;
+                int demand = total - cols;
+                widths = widths.Select(w => 1 + (int)((long)(w - 1) * remaining / demand)).ToArray();
+                for (int i = 0; widths.Sum() < budget; i = (i + 1) % cols) widths[i]++;
             }
 
-            // Overflow: shrink columns proportionally, keeping a sensible minimum.
-            int innerBudget = Math.Max(cols, width - borders - (cols * pad));
-            int totalContent = content.Sum();
-            var result = new int[cols];
-            for (int i = 0; i < cols; i++)
+            string Rule(char left, char middle, char right) => left +
+                string.Join(middle.ToString(), widths.Select(w => new string('─', w + 2))) + right;
+            void AddRow(string[] cells, bool header)
             {
-                double proportion = (double)content[i] / totalContent;
-                result[i] = Math.Max(3, (int)(innerBudget * proportion));
+                var wrapped = Enumerable.Range(0, cols)
+                    .Select(col => TextWrap.Wrap(col < cells.Length ? cells[col] : string.Empty, widths[col])).ToArray();
+                for (int line = 0; line < wrapped.Max(cell => cell.Count); line++)
+                    lines.Add(new(null, wrapped.Select(cell => line < cell.Count ? cell[line] : string.Empty).ToArray(), header));
             }
-            return result;
-        }
 
-        private static string Fit(string? text, int innerWidth)
-        {
-            text ??= string.Empty;
-            text = text.Replace("\n", " ").Replace("\r", " ");
-            if (text.Length > innerWidth)
-                return innerWidth <= 1 ? text.Substring(0, innerWidth) : text.Substring(0, innerWidth - 1) + "…";
-            return text.PadRight(innerWidth);
+            lines.Add(new(Rule('┌', '┬', '┐'), null, Rule: true));
+            AddRow(_headers.ToArray(), true);
+            lines.Add(new(Rule('├', '┼', '┤'), null, Rule: true));
+            foreach (var row in _rows) AddRow(row, false);
+            lines.Add(new(Rule('└', '┴', '┘'), null, Rule: true));
+            return (widths, lines);
         }
 
         public void RenderSlice(int x, int y, int width, int startLine, int maxLines, DL.DisplayList baseDl, DL.DisplayListBuilder b)
         {
             if (width <= 0 || maxLines <= 0) return;
-            int total = MeasureLineCount(width);
-            if (total == 0 || startLine >= total) return;
-            if (startLine < 0) startLine = 0;
-
+            var layout = BuildLayout(width);
+            startLine = Math.Max(0, startLine);
             var theme = Themes.Theme.Current;
-            var border = theme.Border;
-            var headerColor = theme.Heading;
-            var textColor = theme.Text;
-
-            int cols = _headers.Count;
-            var colInner = ComputeColumnWidths(width);
-
-            // Build the three horizontal rules once (top / header-separator / bottom).
-            string Rule(string left, string mid, string right)
+            int count = Math.Min(maxLines, layout.Lines.Count - startLine);
+            for (int offset = 0; offset < count; offset++)
             {
-                var sb = new System.Text.StringBuilder();
-                sb.Append(left);
-                for (int i = 0; i < cols; i++)
-                {
-                    sb.Append(new string('─', colInner[i] + 2)); // +2 for cell padding
-                    sb.Append(i == cols - 1 ? right : mid);
-                }
-                return sb.ToString();
-            }
-
-            string topRule = Rule("┌", "┬", "┐");
-            string midRule = Rule("├", "┼", "┤");
-            string botRule = Rule("└", "┴", "┘");
-
-            int end = Math.Min(total, startLine + maxLines);
-            for (int line = startLine; line < end; line++)
-            {
-                int row = y + (line - startLine);
-
-                if (line == 0)
-                {
-                    b.DrawText(new DL.TextRun(x, row, topRule, border, null, DL.CellAttrFlags.None));
-                }
-                else if (line == 1)
-                {
-                    DrawCellRow(b, x, row, colInner, _headers.ToArray(), border, headerColor, DL.CellAttrFlags.Bold);
-                }
-                else if (line == 2)
-                {
-                    b.DrawText(new DL.TextRun(x, row, midRule, border, null, DL.CellAttrFlags.None));
-                }
-                else if (line == total - 1)
-                {
-                    b.DrawText(new DL.TextRun(x, row, botRule, border, null, DL.CellAttrFlags.None));
-                }
+                var line = layout.Lines[startLine + offset];
+                var color = line.Rule ? theme.Border : line.Header ? theme.Heading : theme.Text;
+                var attrs = line.Header ? DL.CellAttrFlags.Bold : DL.CellAttrFlags.None;
+                if (line.Cells is { } cells)
+                    DrawCellRow(b, x, y + offset, layout.Widths, cells, theme.Border, color, attrs);
                 else
-                {
-                    int dataIdx = line - 3;
-                    var cells = dataIdx >= 0 && dataIdx < _rows.Count ? _rows[dataIdx] : Array.Empty<string>();
-                    DrawCellRow(b, x, row, colInner, cells, border, textColor, DL.CellAttrFlags.None);
-                }
+                    b.DrawText(new DL.TextRun(x, y + offset, line.Text ?? string.Empty, color, null, attrs));
             }
         }
 
@@ -1782,7 +1764,7 @@ namespace Andy.Cli.Widgets
             for (int i = 0; i < colInner.Length; i++)
             {
                 string cellText = i < cells.Length ? cells[i] : string.Empty;
-                string content = " " + Fit(cellText, colInner[i]) + " ";
+                string content = " " + cellText.PadRight(colInner[i]) + " ";
                 b.DrawText(new DL.TextRun(cx, row, content, textColor, null, attrs));
                 cx += content.Length;
                 b.DrawText(new DL.TextRun(cx, row, "│", borderColor, null, DL.CellAttrFlags.None));

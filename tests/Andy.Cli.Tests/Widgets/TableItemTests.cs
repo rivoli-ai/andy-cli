@@ -120,6 +120,76 @@ public class TableItemTests
         Assert.True(total >= 5);
     }
 
+    [Fact]
+    public void WideCellsWrapWithoutDroppingContentOrOverflowing()
+    {
+        const string value = "abcdefghijklmnopqrstuvwxyz0123456789";
+        var item = new TableItem(new() { "Heading" }, new() { new[] { value } });
+        var runs = RenderRuns(item, 12, out int measured);
+        Assert.True(measured > 5);
+        Assert.Equal(value, string.Concat(runs.Where(r => r.Y >= 3 && r.Y < measured - 1 && r.Content != "│")
+            .Select(r => r.Content.Trim())));
+        Assert.All(runs, r => Assert.InRange(r.X + r.Content.Length, 0, 12));
+        Assert.Equal(measured, runs.Select(r => r.Y).Distinct().Count());
+    }
+
+    [Fact]
+    public void HeadersAndMultilineCellsShareAlignedWrappedRows()
+    {
+        var item = new TableItem(new() { "Long heading", "B" }, new() { new[] { "first\nsecond", "x" } });
+        var runs = RenderRuns(item, 17, out int measured);
+        var separators = runs.Where(r => r.Content == "│").GroupBy(r => r.Y)
+            .Select(row => row.Select(r => r.X).ToArray()).ToArray();
+        Assert.All(separators, positions => Assert.Equal(separators[0], positions));
+        Assert.Contains(runs, r => r.Content.Contains("first"));
+        Assert.Contains(runs, r => r.Content.Contains("second"));
+        Assert.True(measured > 5);
+        Assert.All(runs, r => Assert.InRange(r.X + r.Content.Length, 0, 17));
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(4)]
+    [InlineData(10)]
+    public void ExtremelyNarrowTablesUseLabelledCellsWithinViewport(int width)
+    {
+        var item = new TableItem(new() { "A", "B", "C" }, new() { new[] { "one", "two", "three" } });
+        var runs = RenderRuns(item, width, out _);
+        var text = string.Concat(runs.Select(r => r.Content)).Replace(" ", "");
+        Assert.Equal("A:oneB:twoC:three", text);
+        Assert.All(runs, r => Assert.InRange(r.X + r.Content.Length, 0, width));
+    }
+
+    [Theory]
+    [InlineData(8)]
+    [InlineData(24)]
+    public void EveryWrappedSliceMatchesTheFullRendering(int width)
+    {
+        var item = MakeRealisticTable();
+        var full = RenderRuns(item, width, out int total);
+        for (int start = 0; start < total; start++)
+        {
+            var b = new DL.DisplayListBuilder();
+            item.RenderSlice(0, 50, width, start, 2, new DL.DisplayListBuilder().Build(), b);
+            var actual = b.Build().Ops.OfType<DL.TextRun>().Where(r => !string.IsNullOrEmpty(r.Content))
+                .Select(r => (r.X, Y: r.Y - 50 + start, r.Content));
+            var expected = full.Where(r => r.Y >= start && r.Y < start + 2).Select(r => (r.X, r.Y, r.Content));
+            Assert.Equal(expected, actual);
+        }
+    }
+
+    [Fact]
+    public void ResizingReflowsAndRestoresTheOriginalLayout()
+    {
+        var item = MakeRealisticTable();
+        var before = RenderRuns(item, 80, out int wideHeight).Select(r => (r.X, r.Y, r.Content)).ToArray();
+        RenderRuns(item, 24, out int narrowHeight);
+        Assert.True(narrowHeight > wideHeight);
+        var after = RenderRuns(item, 80, out int restoredHeight).Select(r => (r.X, r.Y, r.Content)).ToArray();
+        Assert.Equal(wideHeight, restoredHeight);
+        Assert.Equal(before, after);
+    }
+
     // --- Cell parsing: empty cells must be preserved so columns stay aligned ---
 
     [Fact]
